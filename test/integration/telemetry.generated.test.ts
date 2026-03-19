@@ -430,7 +430,8 @@ describe("telemetry", () => {
   });
 
   it("example contexts deduplicates by key value", () => {
-    const collector = new ExampleContextCollector("periodic_example", 10000, 0);
+    // Use a large rateLimitMs so deduplication works within the test
+    const collector = new ExampleContextCollector("periodic_example", 10000, 60000);
 
     collector.push({ user: { key: "user-123", name: "alice" } });
     collector.push({ user: { key: "user-123", name: "bob" } });
