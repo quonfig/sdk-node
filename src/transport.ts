@@ -12,15 +12,20 @@ export interface FetchResult {
  *
  * Supports ETag-based caching to avoid re-downloading unchanged configs.
  */
+export const DEFAULT_TELEMETRY_URL = "https://telemetry.quonfig.com";
+
 export class Transport {
   private baseUrl: string;
-  private telemetryBaseUrl: string | undefined;
+  private telemetryBaseUrl: string;
   private sdkKey: string;
   private etag: string = "";
 
   constructor(baseUrl: string, sdkKey: string, telemetryBaseUrl?: string) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.telemetryBaseUrl = telemetryBaseUrl ? telemetryBaseUrl.replace(/\/$/, "") : undefined;
+    // Priority: QUONFIG_TELEMETRY_URL env var > constructor option > default
+    const envUrl = process.env.QUONFIG_TELEMETRY_URL;
+    const url = envUrl || telemetryBaseUrl || DEFAULT_TELEMETRY_URL;
+    this.telemetryBaseUrl = url.replace(/\/$/, "");
     this.sdkKey = sdkKey;
   }
 
@@ -79,15 +84,9 @@ export class Transport {
   }
 
   /**
-   * Post telemetry data.
-   * No-ops if telemetryBaseUrl was not explicitly configured — telemetry must
-   * never fall back to the config delivery API (apiUrl).
+   * Post telemetry data to the telemetry endpoint.
    */
   async postTelemetry(data: any): Promise<void> {
-    if (!this.telemetryBaseUrl) {
-      return;
-    }
-
     const headers = this.getHeaders({
       "Content-Type": "application/json",
     });

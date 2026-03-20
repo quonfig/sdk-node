@@ -133,7 +133,7 @@ export type ContextUploadMode = "none" | "shapes_only" | "periodic_example";
 export interface QuonfigOptions {
   sdkKey: string;
   apiUrl?: string;
-  /** Base URL for the dedicated telemetry service. If not set, telemetry is disabled. */
+  /** Base URL for the dedicated telemetry service. Defaults to https://telemetry.quonfig.com. Overridden by QUONFIG_TELEMETRY_URL env var. */
   telemetryUrl?: string;
   enableSSE?: boolean;
   enablePolling?: boolean;
