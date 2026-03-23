@@ -1,6 +1,6 @@
 {
   "name": "@quonfig/node",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Quonfig SDK for Node.js - Feature Flags, Live Config, and Dynamic Log Levels",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -32,6 +32,17 @@
   ],
   "author": "Quonfig",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/quonfig/sdk-node.git"
+  },
+  "homepage": "https://github.com/quonfig/sdk-node#readme",
+  "bugs": {
+    "url": "https://github.com/quonfig/sdk-node/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=18"
   },
