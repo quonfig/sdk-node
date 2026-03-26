@@ -110,6 +110,25 @@ export interface ConfigEnvelope {
   meta: Meta;
 }
 
+export interface WorkspaceEnvironment {
+  id: string;
+  rules: Rule[];
+}
+
+export interface WorkspaceConfigDocument {
+  id?: string;
+  key: string;
+  type: ConfigTypeString;
+  valueType: ValueType;
+  sendToClientSdk?: boolean;
+  default?: RuleSet;
+  environments?: WorkspaceEnvironment[];
+}
+
+export type QuonfigDatadirEnvironments =
+  | Record<string, string>
+  | Array<string | { id?: string; name?: string }>;
+
 // ---- Context ----
 
 export type ContextValue = string | number | boolean | string[] | null | undefined;
@@ -145,6 +164,7 @@ export interface QuonfigOptions {
   collectLoggerCounts?: boolean;
   contextUploadMode?: ContextUploadMode;
   initTimeout?: number;
+  datadir?: string;
   datafile?: string | object;
 }
 

@@ -55,7 +55,8 @@ new Quonfig({
   initTimeout: 10000,            // Init timeout in ms (default: 10000)
   onNoDefault: "error",          // "error" | "warn" | "ignore" (default: "error")
   globalContext: { ... },        // Context applied to all evaluations
-  datafile: "./config.json",     // Load from file instead of API
+  datadir: "./workspace-data",   // Load local workspace directories instead of API
+  datafile: "./config.json",     // Legacy local envelope path
 });
 ```
 

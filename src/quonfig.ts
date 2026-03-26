@@ -22,6 +22,7 @@ import { SSEConnection } from "./sse";
 import { mergeContexts } from "./context";
 import { parseLevel, shouldLog } from "./logger";
 import { durationToMilliseconds } from "./duration";
+import { loadEnvelopeFromDatadir } from "./datadir";
 
 import { EvaluationSummaryCollector } from "./telemetry/evaluationSummaries";
 import { ContextShapeCollector } from "./telemetry/contextShapes";
@@ -120,6 +121,7 @@ export class Quonfig {
   private readonly onNoDefault: OnNoDefault;
   private readonly globalContext?: Contexts;
   private readonly initTimeout: number;
+  private readonly datadir?: string;
   private readonly datafile?: string | object;
 
   private store: ConfigStore;
@@ -149,6 +151,7 @@ export class Quonfig {
     this.onNoDefault = options.onNoDefault ?? "error";
     this.globalContext = options.globalContext;
     this.initTimeout = options.initTimeout ?? DEFAULT_INIT_TIMEOUT;
+    this.datadir = options.datadir;
     this.datafile = options.datafile;
     this.instanceHash = randomUUID();
 
@@ -168,14 +171,14 @@ export class Quonfig {
   }
 
   /**
-   * Initialize the SDK. Downloads configs from the API (or loads from datafile)
+   * Initialize the SDK. Downloads configs from the API (or loads from datadir/datafile)
    * and starts background update mechanisms (SSE/polling).
    *
    * Must be called before using any get* methods.
    */
   async init(): Promise<void> {
-    if (this.datafile) {
-      this.loadDatafile();
+    if (this.datadir || this.datafile) {
+      this.loadLocalData();
       this.initialized = true;
       return;
     }
@@ -434,20 +437,28 @@ export class Quonfig {
     }
   }
 
-  private loadDatafile(): void {
-    let data: ConfigEnvelope;
-
-    if (typeof this.datafile === "string") {
-      const raw = readFileSync(this.datafile, "utf-8");
-      data = JSON.parse(raw);
-    } else if (typeof this.datafile === "object") {
-      data = this.datafile as ConfigEnvelope;
-    } else {
-      throw new Error("Invalid datafile option");
-    }
+  private loadLocalData(): void {
+    const data = this.loadLocalEnvelope();
 
     this.store.update(data);
     this.environmentId = data.meta.environment;
+  }
+
+  private loadLocalEnvelope(): ConfigEnvelope {
+    if (this.datadir) {
+      return loadEnvelopeFromDatadir(this.datadir);
+    }
+
+    if (typeof this.datafile === "string") {
+      const raw = readFileSync(this.datafile, "utf-8");
+      return JSON.parse(raw);
+    }
+
+    if (typeof this.datafile === "object") {
+      return this.datafile as ConfigEnvelope;
+    }
+
+    throw new Error("Invalid local configuration: expected datadir or datafile");
   }
 
   private async fetchAndInstall(): Promise<void> {
