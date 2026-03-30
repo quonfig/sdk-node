@@ -29,7 +29,10 @@ import { ContextShapeCollector } from "./telemetry/contextShapes";
 import { ExampleContextCollector } from "./telemetry/exampleContexts";
 import { TelemetryReporter } from "./telemetry/reporter";
 
-const DEFAULT_API_URL = "https://api.quonfig.com";
+const DEFAULT_API_URLS = [
+  "https://primary.quonfig.com",
+  "https://secondary.quonfig.com",
+];
 const DEFAULT_POLL_INTERVAL = 60000;
 const DEFAULT_INIT_TIMEOUT = 10000;
 const DEFAULT_LOG_LEVEL: LogLevelNumber = 5; // warn
@@ -112,7 +115,7 @@ export class BoundQuonfig {
  */
 export class Quonfig {
   private readonly sdkKey: string;
-  private readonly apiUrl: string;
+  private readonly apiUrls: string[];
   private readonly telemetryUrl?: string;
   private readonly enableSSE: boolean;
   private readonly enablePolling: boolean;
@@ -142,7 +145,10 @@ export class Quonfig {
 
   constructor(options: QuonfigOptions) {
     this.sdkKey = options.sdkKey;
-    this.apiUrl = (options.apiUrl ?? DEFAULT_API_URL).replace(/\/$/, "");
+    this.apiUrls = options.apiUrls ?? (options.apiUrl ? [options.apiUrl] : DEFAULT_API_URLS);
+    if (this.apiUrls.length === 0) {
+      throw new Error("[quonfig] apiUrls must not be empty");
+    }
     this.telemetryUrl = options.telemetryUrl;
     this.enableSSE = options.enableSSE ?? true;
     this.enablePolling = options.enablePolling ?? false;
@@ -159,7 +165,7 @@ export class Quonfig {
     this.store = new ConfigStore();
     this.evaluator = new Evaluator(this.store);
     this.resolver = new Resolver(this.store, this.evaluator);
-    this.transport = new Transport(this.apiUrl, this.sdkKey, this.telemetryUrl);
+    this.transport = new Transport(this.apiUrls, this.sdkKey, this.telemetryUrl);
 
     // Initialize telemetry collectors
     const contextUploadMode: ContextUploadMode = options.contextUploadMode ?? "periodic_example";

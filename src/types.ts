@@ -151,7 +151,10 @@ export type ContextUploadMode = "none" | "shapes_only" | "periodic_example";
 
 export interface QuonfigOptions {
   sdkKey: string;
+  /** @deprecated Use apiUrls instead. If provided, used as a single-element URL list. */
   apiUrl?: string;
+  /** Ordered list of API base URLs to try. Defaults to ["https://primary.quonfig.com", "https://secondary.quonfig.com"]. */
+  apiUrls?: string[];
   /** Base URL for the dedicated telemetry service. Defaults to https://telemetry.quonfig.com. Overridden by QUONFIG_TELEMETRY_URL env var. */
   telemetryUrl?: string;
   enableSSE?: boolean;

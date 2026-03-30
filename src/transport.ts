@@ -11,17 +11,20 @@ export interface FetchResult {
  * HTTP transport for fetching configs from the Quonfig API.
  *
  * Supports ETag-based caching to avoid re-downloading unchanged configs.
+ * Accepts an ordered list of base URLs and tries each in turn (primary/secondary failover).
  */
 export const DEFAULT_TELEMETRY_URL = "https://telemetry.quonfig.com";
 
 export class Transport {
-  private baseUrl: string;
+  private baseUrls: string[];
+  private activeBaseUrl: string;
   private telemetryBaseUrl: string;
   private sdkKey: string;
   private etag: string = "";
 
-  constructor(baseUrl: string, sdkKey: string, telemetryBaseUrl?: string) {
-    this.baseUrl = baseUrl.replace(/\/$/, "");
+  constructor(baseUrls: string[], sdkKey: string, telemetryBaseUrl?: string) {
+    this.baseUrls = baseUrls.map((u) => u.replace(/\/$/, ""));
+    this.activeBaseUrl = this.baseUrls[0];
     // Priority: QUONFIG_TELEMETRY_URL env var > constructor option > default
     const envUrl = process.env.QUONFIG_TELEMETRY_URL;
     const url = envUrl || telemetryBaseUrl || DEFAULT_TELEMETRY_URL;
@@ -52,35 +55,48 @@ export class Transport {
   /**
    * Fetch configs from GET /api/v2/configs with ETag caching.
    *
+   * Tries each base URL in order. Returns the first successful result.
    * Returns `{ notChanged: true }` if the server responds with 304.
    */
   async fetchConfigs(): Promise<FetchResult> {
-    const headers = this.getHeaders();
-    if (this.etag) {
-      headers["If-None-Match"] = this.etag;
+    let lastError: Error | undefined;
+
+    for (const baseUrl of this.baseUrls) {
+      try {
+        const headers = this.getHeaders();
+        if (this.etag) {
+          headers["If-None-Match"] = this.etag;
+        }
+
+        const response = await fetch(`${baseUrl}/api/v2/configs`, {
+          method: "GET",
+          headers,
+        });
+
+        if (response.status === 304) {
+          this.activeBaseUrl = baseUrl;
+          return { notChanged: true };
+        }
+
+        if (!response.ok) {
+          const body = await response.text().catch(() => "");
+          throw new Error(`Unexpected status ${response.status} from ${baseUrl}: ${body}`);
+        }
+
+        const etag = response.headers.get("ETag");
+        if (etag) {
+          this.etag = etag;
+        }
+
+        this.activeBaseUrl = baseUrl;
+        const envelope = (await response.json()) as ConfigEnvelope;
+        return { envelope, notChanged: false };
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+      }
     }
 
-    const response = await fetch(`${this.baseUrl}/api/v2/configs`, {
-      method: "GET",
-      headers,
-    });
-
-    if (response.status === 304) {
-      return { notChanged: true };
-    }
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(`Unexpected status ${response.status}: ${body}`);
-    }
-
-    const etag = response.headers.get("ETag");
-    if (etag) {
-      this.etag = etag;
-    }
-
-    const envelope = (await response.json()) as ConfigEnvelope;
-    return { envelope, notChanged: false };
+    throw lastError ?? new Error("All API URLs failed");
   }
 
   /**
@@ -106,9 +122,10 @@ export class Transport {
 
   /**
    * Get the SSE URL for config streaming.
+   * Uses whichever base URL last succeeded for fetchConfigs.
    */
   getSSEUrl(): string {
-    return `${this.baseUrl}/api/v2/sse/config`;
+    return `${this.activeBaseUrl}/api/v2/sse/config`;
   }
 
   /**
