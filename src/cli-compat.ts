@@ -60,11 +60,33 @@ export class Client {
 
   async post(path: string, payload: unknown): Promise<Response> {
     const url = `${this.apiUrl}${path}`;
+    const isORPC = path.startsWith("/api/v1/");
     this.log("ApiClient", `POST ${url}`);
-    return fetch(url, {
+    // oRPC endpoints use a wire format: request wrapped as { json: <payload> }
+    const body = isORPC
+      ? JSON.stringify({ json: payload })
+      : JSON.stringify(payload);
+    const raw = await fetch(url, {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify(payload),
+      body,
+    });
+    if (!isORPC) return raw;
+    // Unwrap oRPC response envelope: { json: <result> } → <result>
+    const text = await raw.text();
+    let unwrapped = text;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && "json" in parsed) {
+        unwrapped = JSON.stringify(parsed.json);
+      }
+    } catch {
+      // not JSON, pass through
+    }
+    return new Response(unwrapped, {
+      status: raw.status,
+      statusText: raw.statusText,
+      headers: raw.headers,
     });
   }
 
@@ -77,6 +99,7 @@ export class Client {
       body: JSON.stringify(payload),
     });
   }
+
 }
 
 // ---- SDK Key Parsing ----
