@@ -78,7 +78,10 @@ export function shouldLog(args: {
     const resolvedLevel = getConfig(loggerNameWithPrefix);
 
     if (resolvedLevel !== undefined) {
-      return Number(resolvedLevel) <= desiredLevel;
+      const resolvedLevelNum = parseLevel(resolvedLevel as string | number);
+      if (resolvedLevelNum !== undefined) {
+        return resolvedLevelNum <= desiredLevel;
+      }
     }
 
     loggerNameWithPrefix = loggerNameWithPrefix.slice(

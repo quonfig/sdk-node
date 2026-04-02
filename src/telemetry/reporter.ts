@@ -81,7 +81,7 @@ export class TelemetryReporter {
     }
   }
 
-  private async sync(): Promise<void> {
+  async sync(): Promise<void> {
     const events: TelemetryEvent[] = [];
 
     // Drain evaluation summaries

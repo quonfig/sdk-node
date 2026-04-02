@@ -1,6 +1,6 @@
 {
   "name": "@quonfig/node",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Quonfig SDK for Node.js - Feature Flags, Live Config, and Dynamic Log Levels",
   "main": "dist/index.cjs",
   "module": "dist/index.js",

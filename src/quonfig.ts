@@ -94,6 +94,10 @@ export class BoundQuonfig {
     });
   }
 
+  async flush(): Promise<void> {
+    return this.client.flush();
+  }
+
   keys(): string[] {
     return this.client.keys();
   }
@@ -397,6 +401,23 @@ export class Quonfig {
    */
   inContext(contexts: Contexts): BoundQuonfig {
     return new BoundQuonfig(this, mergeContexts(this.globalContext, contexts));
+  }
+
+  /**
+   * Flush pending telemetry data immediately. Useful in serverless environments
+   * (Vercel, Lambda) where the process may be frozen before the background
+   * timer fires.
+   *
+   * ```typescript
+   * const value = quonfig.get("my-flag", contexts);
+   * await quonfig.flush();
+   * return NextResponse.json({ value });
+   * ```
+   */
+  async flush(): Promise<void> {
+    if (this.telemetryReporter) {
+      await this.telemetryReporter.sync();
+    }
   }
 
   /**

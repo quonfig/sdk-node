@@ -1,9 +1,10 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Quonfig } from "../src/quonfig";
+import { Transport } from "../src/transport";
 import type { ConfigEnvelope, WorkspaceConfigDocument } from "../src/types";
 
 const tempDirs: string[] = [];
@@ -12,6 +13,7 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
+  vi.restoreAllMocks();
 });
 
 describe("Quonfig datadir", () => {
@@ -257,6 +259,113 @@ describe("Quonfig datadir", () => {
     });
 
     await expect(quonfig.init()).rejects.toThrow("Datadir is missing environments.json");
+  });
+
+  it("parses string log levels from datadir configs", async () => {
+    const datadir = createDatadir({
+      environments: { "143": "Production" },
+      entries: {
+        "log-levels": [
+          configDoc({
+            key: "log-level.service.api",
+            type: "log_level",
+            valueType: "log_level",
+            defaultValue: "warn",
+            environments: [
+              {
+                id: "Production",
+                rules: [alwaysTrueRule("info")],
+              },
+            ],
+          }),
+        ],
+      },
+    });
+
+    const quonfig = new Quonfig({
+      sdkKey: "test-sdk-key",
+      datadir,
+    });
+
+    await quonfig.init();
+
+    expect(
+      quonfig.shouldLog({
+        loggerName: "service.api.child",
+        desiredLevel: "debug",
+      })
+    ).toBe(false);
+    expect(
+      quonfig.shouldLog({
+        loggerName: "service.api.child",
+        desiredLevel: "info",
+      })
+    ).toBe(true);
+  });
+
+  it("flush posts pending telemetry after evaluation", async () => {
+    const envelope: ConfigEnvelope = {
+      meta: {
+        version: "test-version",
+        environment: "Production",
+      },
+      configs: [
+        {
+          id: "cfg-1",
+          key: "welcome-message",
+          type: "config",
+          valueType: "string",
+          sendToClientSdk: false,
+          default: {
+            rules: [alwaysTrueRule("hello")],
+          },
+          environment: {
+            id: "Production",
+            rules: [alwaysTrueRule("hola")],
+          },
+        },
+      ],
+    };
+
+    const fetchSpy = vi
+      .spyOn(Transport.prototype, "fetchConfigs")
+      .mockResolvedValue({ envelope, notChanged: false });
+    const postTelemetrySpy = vi
+      .spyOn(Transport.prototype, "postTelemetry")
+      .mockResolvedValue(undefined);
+
+    const quonfig = new Quonfig({
+      sdkKey: "test-sdk-key",
+      enableSSE: false,
+      enablePolling: false,
+    });
+
+    await quonfig.init();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    expect(quonfig.getString("welcome-message")).toBe("hola");
+
+    await quonfig.flush();
+
+    expect(postTelemetrySpy).toHaveBeenCalledTimes(1);
+    expect(postTelemetrySpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceHash: expect.any(String),
+        events: [
+          expect.objectContaining({
+            summaries: expect.objectContaining({
+              summaries: expect.arrayContaining([
+                expect.objectContaining({
+                  key: "welcome-message",
+                }),
+              ]),
+            }),
+          }),
+        ],
+      })
+    );
+
+    quonfig.close();
   });
 });
 
