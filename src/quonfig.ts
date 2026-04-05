@@ -130,6 +130,7 @@ export class Quonfig {
   private readonly initTimeout: number;
   private readonly datadir?: string;
   private readonly datafile?: string | object;
+  private readonly requestedEnvironment: string;
 
   private store: ConfigStore;
   private evaluator: Evaluator;
@@ -163,6 +164,8 @@ export class Quonfig {
     this.initTimeout = options.initTimeout ?? DEFAULT_INIT_TIMEOUT;
     this.datadir = options.datadir;
     this.datafile = options.datafile;
+    // Environment: explicit option supersedes QUONFIG_ENVIRONMENT env var
+    this.requestedEnvironment = options.environment || process.env.QUONFIG_ENVIRONMENT || "";
     this.instanceHash = randomUUID();
 
     // Initialize core components
@@ -473,7 +476,7 @@ export class Quonfig {
 
   private loadLocalEnvelope(): ConfigEnvelope {
     if (this.datadir) {
-      return loadEnvelopeFromDatadir(this.datadir);
+      return loadEnvelopeFromDatadir(this.datadir, this.requestedEnvironment);
     }
 
     if (typeof this.datafile === "string") {

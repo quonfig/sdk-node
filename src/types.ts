@@ -169,6 +169,8 @@ export interface QuonfigOptions {
   initTimeout?: number;
   datadir?: string;
   datafile?: string | object;
+  /** Environment name to use in datadir mode. Supersedes the QUONFIG_ENVIRONMENT env var. */
+  environment?: string;
 }
 
 // ---- Evaluation Result ----

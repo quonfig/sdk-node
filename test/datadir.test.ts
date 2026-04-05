@@ -89,6 +89,7 @@ describe("Quonfig datadir", () => {
     const quonfig = new Quonfig({
       sdkKey: "test-sdk-key",
       datadir,
+      environment: "Production",
     });
 
     await quonfig.init();
@@ -136,6 +137,7 @@ describe("Quonfig datadir", () => {
     const quonfig = new Quonfig({
       sdkKey: "test-sdk-key",
       datadir,
+      environment: "env-143",
     });
 
     await quonfig.init();
@@ -158,9 +160,11 @@ describe("Quonfig datadir", () => {
       },
     });
 
+    // Empty environments list accepts any environment name
     const quonfig = new Quonfig({
       sdkKey: "test-sdk-key",
       datadir,
+      environment: "development",
     });
 
     await quonfig.init();
@@ -232,6 +236,7 @@ describe("Quonfig datadir", () => {
       sdkKey: "test-sdk-key",
       datadir,
       datafile,
+      environment: "Production",
     });
 
     await quonfig.init();
@@ -256,6 +261,7 @@ describe("Quonfig datadir", () => {
     const quonfig = new Quonfig({
       sdkKey: "test-sdk-key",
       datadir,
+      environment: "Production",
     });
 
     await expect(quonfig.init()).rejects.toThrow("Datadir is missing environments.json");
@@ -285,6 +291,7 @@ describe("Quonfig datadir", () => {
     const quonfig = new Quonfig({
       sdkKey: "test-sdk-key",
       datadir,
+      environment: "Production",
     });
 
     await quonfig.init();

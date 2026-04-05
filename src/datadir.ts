@@ -5,8 +5,8 @@ import type { ConfigEnvelope, ConfigResponse, QuonfigDatadirEnvironments, Worksp
 
 const CONFIG_SUBDIRS = ["configs", "feature-flags", "segments", "schemas", "log-levels"] as const;
 
-export function loadEnvelopeFromDatadir(datadir: string): ConfigEnvelope {
-  const environmentId = loadEnvironmentId(join(datadir, "environments.json"));
+export function loadEnvelopeFromDatadir(datadir: string, environment: string): ConfigEnvelope {
+  const environmentId = resolveEnvironment(join(datadir, "environments.json"), environment);
   const configs: ConfigResponse[] = [];
 
   for (const subdir of CONFIG_SUBDIRS) {
@@ -34,7 +34,13 @@ export function loadEnvelopeFromDatadir(datadir: string): ConfigEnvelope {
   };
 }
 
-function loadEnvironmentId(environmentsPath: string): string {
+function resolveEnvironment(environmentsPath: string, environment: string): string {
+  if (!environment) {
+    throw new Error(
+      "[quonfig] Environment required for datadir mode; set the `environment` option or QUONFIG_ENVIRONMENT env var"
+    );
+  }
+
   if (!existsSync(environmentsPath)) {
     throw new Error(`[quonfig] Datadir is missing environments.json: ${environmentsPath}`);
   }
@@ -47,11 +53,14 @@ function loadEnvironmentId(environmentsPath: string): string {
     isWrappedEnvironmentList(environments) ? environments.environments : environments
   );
 
-  if (candidates.length === 0) {
-    return "";
+  // If environments.json defines a non-empty list, validate that the requested environment is in it
+  if (candidates.length > 0 && !candidates.includes(environment)) {
+    throw new Error(
+      `[quonfig] Environment "${environment}" not found in workspace; available environments: ${candidates.join(", ")}`
+    );
   }
 
-  return candidates[0];
+  return environment;
 }
 
 function isWrappedEnvironmentList(
