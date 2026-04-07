@@ -125,9 +125,9 @@ export interface WorkspaceConfigDocument {
   environments?: WorkspaceEnvironment[];
 }
 
-export type QuonfigDatadirEnvironments =
-  | Record<string, string>
-  | Array<string | { id?: string; name?: string }>;
+export interface QuonfigDatadirEnvironments {
+  environments: string[];
+}
 
 // ---- Context ----
 

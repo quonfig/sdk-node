@@ -19,7 +19,7 @@ afterEach(() => {
 describe("Quonfig datadir", () => {
   it("loads configs from the workspace datadir layout", async () => {
     const datadir = createDatadir({
-      environments: { "143": "Production" },
+      environments: ["Production"],
       entries: {
         configs: [
           configDoc({
@@ -109,9 +109,9 @@ describe("Quonfig datadir", () => {
     expect(quonfig.keys().sort()).toEqual(["beta-users", "new-dashboard", "welcome-message"]);
   });
 
-  it("supports environments.json keyed by environment name", async () => {
+  it("supports quonfig.json with an environment list", async () => {
     const datadir = createDatadir({
-      environments: { Production: "env-143" },
+      environments: ["Production", "staging"],
       entries: {
         configs: [
           configDoc({
@@ -121,12 +121,12 @@ describe("Quonfig datadir", () => {
             defaultValue: "default",
             environments: [
               {
-                id: "env-143",
-                rules: [alwaysTrueRule("selected-by-value")],
+                id: "staging",
+                rules: [alwaysTrueRule("from-staging")],
               },
               {
                 id: "Production",
-                rules: [alwaysTrueRule("selected-by-key")],
+                rules: [alwaysTrueRule("from-production")],
               },
             ],
           }),
@@ -137,17 +137,17 @@ describe("Quonfig datadir", () => {
     const quonfig = new Quonfig({
       sdkKey: "test-sdk-key",
       datadir,
-      environment: "env-143",
+      environment: "staging",
     });
 
     await quonfig.init();
 
-    expect(quonfig.getString("environment-name-selection")).toBe("selected-by-value");
+    expect(quonfig.getString("environment-name-selection")).toBe("from-staging");
   });
 
-  it("supports wrapped environments.json with an empty environment list", async () => {
+  it("supports quonfig.json with an empty environment list (accepts any environment)", async () => {
     const datadir = createDatadir({
-      environments: { environments: [] },
+      environments: [],
       entries: {
         "feature-flags": [
           configDoc({
@@ -174,7 +174,7 @@ describe("Quonfig datadir", () => {
 
   it("prefers datadir over datafile when both are provided", async () => {
     const datadir = createDatadir({
-      environments: { "143": "Production" },
+      environments: ["Production"],
       entries: {
         configs: [
           configDoc({
@@ -244,7 +244,7 @@ describe("Quonfig datadir", () => {
     expect(quonfig.getString("source-priority")).toBe("from-datadir");
   });
 
-  it("fails when environments.json is missing", async () => {
+  it("fails when quonfig.json is missing", async () => {
     const datadir = createTempDir();
 
     mkdirSync(join(datadir, "configs"), { recursive: true });
@@ -264,12 +264,12 @@ describe("Quonfig datadir", () => {
       environment: "Production",
     });
 
-    await expect(quonfig.init()).rejects.toThrow("Datadir is missing environments.json");
+    await expect(quonfig.init()).rejects.toThrow("Datadir is missing quonfig.json");
   });
 
   it("parses string log levels from datadir configs", async () => {
     const datadir = createDatadir({
-      environments: { "143": "Production" },
+      environments: ["Production"],
       entries: {
         "log-levels": [
           configDoc({
@@ -377,12 +377,12 @@ describe("Quonfig datadir", () => {
 });
 
 function createDatadir(args: {
-  environments: Record<string, string> | { environments: Array<string | { id?: string; name?: string }> };
+  environments: string[];
   entries: Partial<Record<"configs" | "feature-flags" | "segments" | "schemas" | "log-levels", WorkspaceConfigDocument[]>>;
 }): string {
   const datadir = createTempDir();
 
-  writeJson(join(datadir, "environments.json"), args.environments);
+  writeJson(join(datadir, "quonfig.json"), { environments: args.environments });
 
   for (const [subdir, docs] of Object.entries(args.entries)) {
     mkdirSync(join(datadir, subdir), { recursive: true });
