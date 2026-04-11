@@ -131,6 +131,7 @@ export class Quonfig {
   private readonly datadir?: string;
   private readonly datafile?: string | object;
   private readonly requestedEnvironment: string;
+  private readonly onConfigUpdate?: () => void;
 
   private store: ConfigStore;
   private evaluator: Evaluator;
@@ -166,6 +167,7 @@ export class Quonfig {
     this.datafile = options.datafile;
     // Environment: explicit option supersedes QUONFIG_ENVIRONMENT env var
     this.requestedEnvironment = options.environment || process.env.QUONFIG_ENVIRONMENT || "";
+    this.onConfigUpdate = options.onConfigUpdate;
     this.instanceHash = randomUUID();
 
     // Initialize core components
@@ -472,6 +474,7 @@ export class Quonfig {
 
     this.store.update(data);
     this.environmentId = data.meta.environment;
+    this.onConfigUpdate?.();
   }
 
   private loadLocalEnvelope(): ConfigEnvelope {
@@ -501,6 +504,7 @@ export class Quonfig {
     if (result.envelope) {
       this.store.update(result.envelope);
       this.environmentId = result.envelope.meta.environment;
+      this.onConfigUpdate?.();
     }
   }
 
@@ -509,6 +513,7 @@ export class Quonfig {
     this.sseConnection.start((envelope: ConfigEnvelope) => {
       this.store.update(envelope);
       this.environmentId = envelope.meta.environment;
+      this.onConfigUpdate?.();
     });
   }
 

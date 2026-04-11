@@ -171,6 +171,8 @@ export interface QuonfigOptions {
   datafile?: string | object;
   /** Environment name to use in datadir mode. Supersedes the QUONFIG_ENVIRONMENT env var. */
   environment?: string;
+  /** Called whenever the config store is updated (SSE push, poll, or initial load). Use this to react to live config changes. */
+  onConfigUpdate?: () => void;
 }
 
 // ---- Evaluation Result ----
