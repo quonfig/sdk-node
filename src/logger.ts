@@ -58,12 +58,6 @@ export function parseLevel(level: string | number | undefined): LogLevelNumber |
   return undefined;
 }
 
-/**
- * Check if a log message at desiredLevel should be logged, given the logger hierarchy.
- *
- * Walks up the logger name hierarchy (e.g., "log-level.a.b.c" -> "log-level.a.b" -> "log-level.a")
- * looking for a matching config. If no config is found, uses defaultLevel.
- */
 export function shouldLog(args: {
   loggerName: string;
   desiredLevel: LogLevelNumber;
@@ -72,22 +66,12 @@ export function shouldLog(args: {
 }): boolean {
   const { loggerName, desiredLevel, defaultLevel, getConfig } = args;
 
-  let loggerNameWithPrefix = LOG_LEVEL_PREFIX + loggerName;
-
-  while (loggerNameWithPrefix.includes(".")) {
-    const resolvedLevel = getConfig(loggerNameWithPrefix);
-
-    if (resolvedLevel !== undefined) {
-      const resolvedLevelNum = parseLevel(resolvedLevel as string | number);
-      if (resolvedLevelNum !== undefined) {
-        return resolvedLevelNum <= desiredLevel;
-      }
+  const resolvedLevel = getConfig(LOG_LEVEL_PREFIX + loggerName);
+  if (resolvedLevel !== undefined) {
+    const resolvedLevelNum = parseLevel(resolvedLevel as string | number);
+    if (resolvedLevelNum !== undefined) {
+      return resolvedLevelNum <= desiredLevel;
     }
-
-    loggerNameWithPrefix = loggerNameWithPrefix.slice(
-      0,
-      loggerNameWithPrefix.lastIndexOf(".")
-    );
   }
 
   return defaultLevel <= desiredLevel;

@@ -48,7 +48,7 @@ quonfig.close();
 ```typescript
 new Quonfig({
   sdkKey: "your-sdk-key",       // Required
-  apiUrl: "https://api.quonfig.com", // API endpoint (default)
+  apiUrl: "https://primary.quonfig.com", // API endpoint (default)
   enableSSE: true,               // Real-time updates via SSE (default: true)
   enablePolling: false,          // Polling fallback (default: false)
   pollInterval: 60000,           // Polling interval in ms (default: 60000)
