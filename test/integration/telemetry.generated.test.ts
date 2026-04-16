@@ -57,7 +57,7 @@ describe("telemetry", () => {
     expect(counter.count).toBe(1);
     expect(counter.configRowIndex).toBe(0);
     expect(counter.conditionalValueIndex).toBe(0);
-    // NOTE: reason assertions skipped -- the Node SDK does not yet support reason in evaluation summaries
+    expect(counter.reason).toBe(1); // STATIC
   });
 
   it("reason is STATIC for feature flag with only ALWAYS_TRUE rules", () => {
@@ -81,7 +81,7 @@ describe("telemetry", () => {
     expect(counter.count).toBe(1);
     expect(counter.configRowIndex).toBe(0);
     expect(counter.conditionalValueIndex).toBe(0);
-    // NOTE: reason assertions skipped -- the Node SDK does not yet support reason in evaluation summaries
+    expect(counter.reason).toBe(1); // STATIC
   });
 
   it("reason is TARGETING_MATCH when config has targeting rules but evaluation falls through", () => {
@@ -105,7 +105,7 @@ describe("telemetry", () => {
     expect(counter.count).toBe(1);
     expect(counter.configRowIndex).toBe(0);
     expect(counter.conditionalValueIndex).toBe(1);
-    // NOTE: reason assertions skipped -- the Node SDK does not yet support reason in evaluation summaries
+    expect(counter.reason).toBe(2); // TARGETING_MATCH
   });
 
   it("reason is TARGETING_MATCH when a targeting rule matches", () => {
@@ -129,7 +129,7 @@ describe("telemetry", () => {
     expect(counter.count).toBe(1);
     expect(counter.configRowIndex).toBe(0);
     expect(counter.conditionalValueIndex).toBe(0);
-    // NOTE: reason assertions skipped -- the Node SDK does not yet support reason in evaluation summaries
+    expect(counter.reason).toBe(2); // TARGETING_MATCH
   });
 
   it("reason is SPLIT for weighted value evaluation", () => {
@@ -154,7 +154,7 @@ describe("telemetry", () => {
     expect(counter.configRowIndex).toBe(0);
     expect(counter.conditionalValueIndex).toBe(0);
     expect(counter.weightedValueIndex).toBe(2);
-    // NOTE: reason assertions skipped -- the Node SDK does not yet support reason in evaluation summaries
+    expect(counter.reason).toBe(3); // SPLIT
   });
 
   it("reason is TARGETING_MATCH for feature flag fallthrough with targeting rules", () => {
@@ -178,7 +178,7 @@ describe("telemetry", () => {
     expect(counter.count).toBe(1);
     expect(counter.configRowIndex).toBe(0);
     expect(counter.conditionalValueIndex).toBe(1);
-    // NOTE: reason assertions skipped -- the Node SDK does not yet support reason in evaluation summaries
+    expect(counter.reason).toBe(2); // TARGETING_MATCH
   });
 
   // ──────────────────────────────────────────────────

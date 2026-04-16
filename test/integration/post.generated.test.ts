@@ -98,7 +98,7 @@ describe("post", () => {
     expect(testKeySummary!.counters[0].count).toBe(1);
     expect(testKeySummary!.counters[0].configRowIndex).toBe(0);
     expect(testKeySummary!.counters[0].conditionalValueIndex).toBe(1);
-    // NOTE: reason assertions skipped -- the Node SDK does not yet support reason in evaluation summaries
+    expect(testKeySummary!.counters[0].reason).toBe(2); // TARGETING_MATCH
 
     // my-string-list-key: CONFIG, value ["a","b","c"], count 1
     const stringListSummary = summaries.find(

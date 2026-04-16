@@ -1,14 +1,8 @@
-import type { Evaluation, EvaluationSummary, TelemetryEvent } from "../types";
+import type { Evaluation, EvaluationSummary, EvaluationCounter, TelemetryEvent } from "../types";
 
-/**
- * Collects evaluation summaries for telemetry reporting.
- *
- * Each evaluation is aggregated by (configKey, configType) and
- * counted by (configId, ruleIndex, value, weightedValueIndex).
- */
 export class EvaluationSummaryCollector {
   private enabled: boolean;
-  private data: Map<string, Map<string, number>> = new Map();
+  private data: Map<string, Map<string, { count: number; reason: number }>> = new Map();
   private startAt: number | undefined;
   private maxDataSize: number;
 
@@ -30,7 +24,7 @@ export class EvaluationSummaryCollector {
     this.startAt = this.startAt ?? Date.now();
 
     const key = JSON.stringify([evaluation.configKey, evaluation.configType]);
-    const counter = JSON.stringify([
+    const counterKey = JSON.stringify([
       evaluation.configId,
       evaluation.ruleIndex,
       typeof evaluation.unwrappedValue,
@@ -44,13 +38,14 @@ export class EvaluationSummaryCollector {
       this.data.set(key, countersForKey);
     }
 
-    const currentCount = countersForKey.get(counter) ?? 0;
-    countersForKey.set(counter, currentCount + 1);
+    const existing = countersForKey.get(counterKey);
+    if (existing === undefined) {
+      countersForKey.set(counterKey, { count: 1, reason: evaluation.reason });
+    } else {
+      existing.count++;
+    }
   }
 
-  /**
-   * Drain collected summaries into a TelemetryEvent, or return undefined if empty.
-   */
   drain(): TelemetryEvent | undefined {
     if (this.data.size === 0) return undefined;
 
@@ -59,17 +54,18 @@ export class EvaluationSummaryCollector {
     this.data.forEach((rawCounters, keyJSON) => {
       const [configKey, configType] = JSON.parse(keyJSON);
 
-      const counters: any[] = [];
-      rawCounters.forEach((count, counterJSON) => {
+      const counters: EvaluationCounter[] = [];
+      rawCounters.forEach(({ count, reason }, counterJSON) => {
         const [configId, ruleIndex, valueType, value, weightedValueIndex] =
           JSON.parse(counterJSON);
 
-        const counter: any = {
+        const counter: EvaluationCounter = {
           configId,
           conditionalValueIndex: ruleIndex,
           configRowIndex: 0,
           selectedValue: { [valueType]: value },
           count,
+          reason,
         };
 
         if (weightedValueIndex !== undefined && weightedValueIndex >= 0) {
@@ -94,7 +90,6 @@ export class EvaluationSummaryCollector {
       },
     };
 
-    // Clear data after drain
     this.data.clear();
     this.startAt = undefined;
 

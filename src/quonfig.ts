@@ -18,6 +18,7 @@ import { ConfigStore } from "./store";
 import { Evaluator } from "./evaluator";
 import { Resolver } from "./resolver";
 import { Transport } from "./transport";
+import { computeReason } from "./reason";
 import { SSEConnection } from "./sse";
 import { mergeContexts } from "./context";
 import { parseLevel, shouldLog } from "./logger";
@@ -276,6 +277,7 @@ export class Quonfig {
       reportableValue: reportableValue,
       ruleIndex: match.ruleIndex,
       weightedValueIndex: match.weightedValueIndex >= 0 ? match.weightedValueIndex : undefined,
+      reason: computeReason(match, config),
     };
     this.evaluationSummaries.push(evaluation);
 

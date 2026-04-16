@@ -3,6 +3,7 @@ import * as path from "path";
 import { ConfigStore } from "../../src/store";
 import { Evaluator } from "../../src/evaluator";
 import { Resolver } from "../../src/resolver";
+import { computeReason } from "../../src/reason";
 import type { ConfigResponse, ConfigEnvelope, Contexts, Evaluation } from "../../src/types";
 import { EvaluationSummaryCollector } from "../../src/telemetry/evaluationSummaries";
 import { ContextShapeCollector } from "../../src/telemetry/contextShapes";
@@ -121,5 +122,6 @@ export function evaluateForTelemetry(
     reportableValue,
     ruleIndex: match.ruleIndex,
     weightedValueIndex: match.weightedValueIndex,
+    reason: computeReason(match, cfg),
   };
 }

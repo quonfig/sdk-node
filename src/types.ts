@@ -197,6 +197,7 @@ export interface EvaluationCounter {
   configRowIndex: number;
   selectedValue: any;
   count: number;
+  reason: number;
   weightedValueIndex?: number;
 }
 
@@ -250,6 +251,7 @@ export interface Evaluation {
   reportableValue?: GetValue;
   ruleIndex: number;
   weightedValueIndex?: number;
+  reason: number;
 }
 
 // ---- Enum-like constants for CLI compatibility ----
