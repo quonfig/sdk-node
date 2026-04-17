@@ -68,18 +68,19 @@ export class Transport {
           headers["If-None-Match"] = this.etag;
         }
 
-        // Cache-bust query prevents Next.js (and other) fetch wrappers from
-        // returning a cached response across polls. Next.js dev's HMR fetch
-        // cache keys by URL and ignores `cache: 'no-store'` / `next: { revalidate: 0 }`,
-        // which masks server-side flag changes until process restart.
-        const response = await fetch(
-          `${baseUrl}/api/v2/configs?_=${Date.now()}`,
-          {
-            method: "GET",
-            headers,
-            cache: "no-store",
-          } as RequestInit
-        );
+        // In Next.js dev mode the patched fetch deduplicates by URL across a
+        // request lifetime, which can cause stale config to be served even after
+        // a server-side change.  Gate the cache-bust param to development so
+        // production consumers don't defeat upstream HTTP / CDN caches.
+        const isDev = process.env.NODE_ENV === "development";
+        const configUrl = isDev
+          ? `${baseUrl}/api/v2/configs?_=${Date.now()}`
+          : `${baseUrl}/api/v2/configs`;
+        const fetchInit: RequestInit = { method: "GET", headers };
+        if (isDev) {
+          fetchInit.cache = "no-store";
+        }
+        const response = await fetch(configUrl, fetchInit);
 
         if (response.status === 304) {
           this.activeBaseUrl = baseUrl;
