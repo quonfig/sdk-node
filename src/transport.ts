@@ -68,10 +68,18 @@ export class Transport {
           headers["If-None-Match"] = this.etag;
         }
 
-        const response = await fetch(`${baseUrl}/api/v2/configs`, {
-          method: "GET",
-          headers,
-        });
+        // Cache-bust query prevents Next.js (and other) fetch wrappers from
+        // returning a cached response across polls. Next.js dev's HMR fetch
+        // cache keys by URL and ignores `cache: 'no-store'` / `next: { revalidate: 0 }`,
+        // which masks server-side flag changes until process restart.
+        const response = await fetch(
+          `${baseUrl}/api/v2/configs?_=${Date.now()}`,
+          {
+            method: "GET",
+            headers,
+            cache: "no-store",
+          } as RequestInit
+        );
 
         if (response.status === 304) {
           this.activeBaseUrl = baseUrl;
