@@ -3,6 +3,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { loadEnvelopeFromDatadir } from "../src/datadir";
 import { Quonfig } from "../src/quonfig";
 import { Transport } from "../src/transport";
 import type { ConfigEnvelope, WorkspaceConfigDocument } from "../src/types";
@@ -265,6 +266,45 @@ describe("Quonfig datadir", () => {
     });
 
     await expect(quonfig.init()).rejects.toThrow("Datadir is missing quonfig.json");
+  });
+
+  it("forces sendToClientSdk=true for feature_flag configs (field absent on disk)", () => {
+    const datadir = createTempDir();
+    writeJson(join(datadir, "quonfig.json"), { environments: ["Production"] });
+    mkdirSync(join(datadir, "feature-flags"), { recursive: true });
+    // Feature flag WITHOUT sendToClientSdk on disk — simulates the new on-disk shape.
+    writeJson(join(datadir, "feature-flags", "flag-a.json"), {
+      id: "flag-a",
+      key: "flag-a",
+      type: "feature_flag",
+      valueType: "bool",
+      default: { rules: [alwaysTrueRule(true)] },
+    });
+    // Feature flag WITH sendToClientSdk: false — must also be forced true.
+    writeJson(join(datadir, "feature-flags", "flag-b.json"), {
+      id: "flag-b",
+      key: "flag-b",
+      type: "feature_flag",
+      valueType: "bool",
+      sendToClientSdk: false,
+      default: { rules: [alwaysTrueRule(true)] },
+    });
+    // Non-flag (config) with sendToClientSdk absent — must stay false.
+    mkdirSync(join(datadir, "configs"), { recursive: true });
+    writeJson(join(datadir, "configs", "cfg-a.json"), {
+      id: "cfg-a",
+      key: "cfg-a",
+      type: "config",
+      valueType: "string",
+      default: { rules: [alwaysTrueRule("x")] },
+    });
+
+    const envelope = loadEnvelopeFromDatadir(datadir, "Production");
+    const byKey = Object.fromEntries(envelope.configs.map((c) => [c.key, c]));
+
+    expect(byKey["flag-a"].sendToClientSdk).toBe(true);
+    expect(byKey["flag-b"].sendToClientSdk).toBe(true);
+    expect(byKey["cfg-a"].sendToClientSdk).toBe(false);
   });
 
   it("parses string log levels from datadir configs", async () => {

@@ -65,8 +65,15 @@ function toConfigResponse(raw: WorkspaceConfigDocument, environmentId: string): 
     key: raw.key,
     type: raw.type,
     valueType: raw.valueType,
-    sendToClientSdk: raw.sendToClientSdk ?? false,
+    sendToClientSdk: effectiveSendToClientSdk(raw.type, raw.sendToClientSdk),
     default: raw.default ?? { rules: [] },
     environment,
   };
+}
+
+function effectiveSendToClientSdk(type: WorkspaceConfigDocument["type"], raw: boolean | undefined): boolean {
+  if (type === "feature_flag") {
+    return true;
+  }
+  return raw ?? false;
 }
