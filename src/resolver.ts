@@ -130,13 +130,8 @@ export class Resolver {
       case "string":
         return String(val.value ?? "");
       case "json":
-        if (typeof val.value === "string") {
-          try {
-            return JSON.parse(val.value);
-          } catch {
-            return val.value;
-          }
-        }
+        // `valueType: "json"` is stored as native JS (object/array/primitive).
+        // Stringified JSON is not supported on the wire; pass-through.
         return val.value;
       case "string_list":
         if (Array.isArray(val.value)) {

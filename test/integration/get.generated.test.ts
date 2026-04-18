@@ -251,6 +251,27 @@ describe("get", () => {
     expect(value).toEqual({ a: 1, b: "c" });
   });
 
+  it("get returns a native json object (not a stringified payload)", () => {
+    const cfg = store.get("test.json");
+    expect(cfg).toBeDefined();
+    const match = evaluator.evaluateConfig(cfg!, envID, {});
+    expect(match.isMatch).toBe(true);
+    const { resolved } = resolver.resolveValue(
+      match.value!,
+      cfg!.key,
+      cfg!.valueType,
+      envID,
+      {}
+    );
+    // Assert the unwrapped value is a native object, not a JSON string,
+    // and that it deep-equals the expected payload.
+    expect(typeof resolved.value).toBe("object");
+    expect(resolved.value).not.toBeNull();
+    expect(typeof resolved.value).not.toBe("string");
+    const value = resolver.unwrapValue(resolved);
+    expect(value).toEqual({ a: 1, b: "c" });
+  });
+
   it("list on left side test (1)", () => {
     const cfg = store.get("left.hand.list.test");
     expect(cfg).toBeDefined();
