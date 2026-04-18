@@ -105,8 +105,14 @@ export class BoundQuonfig {
     return this.client.keys();
   }
 
-  inContext(contexts: Contexts): BoundQuonfig {
-    return new BoundQuonfig(this.client, mergeContexts(this.boundContexts, contexts));
+  inContext(contexts: Contexts): BoundQuonfig;
+  inContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
+  inContext<T>(
+    contexts: Contexts,
+    fn?: (rf: BoundQuonfig) => T
+  ): BoundQuonfig | T {
+    const bound = new BoundQuonfig(this.client, mergeContexts(this.boundContexts, contexts));
+    return fn ? fn(bound) : bound;
   }
 }
 
@@ -425,9 +431,19 @@ export class Quonfig {
 
   /**
    * Create a BoundQuonfig with the given context baked in.
+   *
+   * With a callback, invokes `fn` with the BoundQuonfig and returns its result
+   * (including Promises), so callers can scope work to a context without
+   * leaking the bound client.
    */
-  inContext(contexts: Contexts): BoundQuonfig {
-    return new BoundQuonfig(this, mergeContexts(this.globalContext, contexts));
+  inContext(contexts: Contexts): BoundQuonfig;
+  inContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
+  inContext<T>(
+    contexts: Contexts,
+    fn?: (rf: BoundQuonfig) => T
+  ): BoundQuonfig | T {
+    const bound = new BoundQuonfig(this, mergeContexts(this.globalContext, contexts));
+    return fn ? fn(bound) : bound;
   }
 
   /**
