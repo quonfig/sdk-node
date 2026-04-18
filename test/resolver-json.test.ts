@@ -29,12 +29,15 @@ describe("Resolver unwrapValue json", () => {
     expect(resolver.unwrapValue({ type: "json", value: true })).toBe(true);
   });
 
-  it("does NOT parse stringified JSON — returns the raw string as-is", () => {
+  it("throws on stringified JSON — strict wire contract, matches sdk-go / sdk-python", () => {
     // Post-migration: stringified JSON is illegal wire format. The SDK
-    // no longer rescues it by calling JSON.parse. Callers get the string
-    // back untouched so the bug surfaces instead of being papered over.
+    // must reject it loudly rather than silently JSON.parse-ing or passing
+    // through — matches sdk-go (unmarshal reject) and sdk-python
+    // (QuonfigValueTypeError).
     const stringified = '{"a":1,"b":"c"}';
     const val: Value = { type: "json", value: stringified };
-    expect(resolver.unwrapValue(val)).toBe(stringified);
+    expect(() => resolver.unwrapValue(val)).toThrow(
+      /json value must be a native JSON type/
+    );
   });
 });

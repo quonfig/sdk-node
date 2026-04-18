@@ -130,8 +130,14 @@ export class Resolver {
       case "string":
         return String(val.value ?? "");
       case "json":
-        // `valueType: "json"` is stored as native JS (object/array/primitive).
-        // Stringified JSON is not supported on the wire; pass-through.
+        // `valueType: "json"` must carry native JS (object/array/number/
+        // boolean/null). Stringified JSON is illegal on the wire —
+        // reject loudly to match sdk-go and sdk-python.
+        if (typeof val.value === "string") {
+          throw new Error(
+            "json value must be a native JSON type (object/array/number/boolean/null); stringified JSON is no longer allowed"
+          );
+        }
         return val.value;
       case "string_list":
         if (Array.isArray(val.value)) {
