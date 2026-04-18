@@ -76,11 +76,11 @@ export class Transport {
         const configUrl = isDev
           ? `${baseUrl}/api/v2/configs?_=${Date.now()}`
           : `${baseUrl}/api/v2/configs`;
-        const fetchInit: RequestInit = { method: "GET", headers };
+        const fetchInit: RequestInit & { cache?: string } = { method: "GET", headers };
         if (isDev) {
           fetchInit.cache = "no-store";
         }
-        const response = await fetch(configUrl, fetchInit);
+        const response = await fetch(configUrl, fetchInit as RequestInit);
 
         if (response.status === 304) {
           this.activeBaseUrl = baseUrl;
