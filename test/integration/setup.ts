@@ -21,6 +21,14 @@ const DATA_DIR = path.resolve(
   "../../../integration-test-data/data/integration-tests"
 );
 
+if (!fs.existsSync(DATA_DIR)) {
+  throw new Error(
+    `[integration tests] fixtures not found at ${DATA_DIR} — ` +
+      `this directory is required. Ensure the integration-test-data repo ` +
+      `(and its nested data/integration-tests submodule) is populated.`
+  );
+}
+
 const ENV_ID = "Production";
 
 /**
