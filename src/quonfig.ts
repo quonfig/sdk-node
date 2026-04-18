@@ -11,12 +11,14 @@ import type {
   LogLevelNumber,
   OnNoDefault,
   QuonfigOptions,
+  RawMatch,
   Value,
 } from "./types";
 
 import { ConfigStore } from "./store";
 import { Evaluator } from "./evaluator";
 import { Resolver } from "./resolver";
+import { ConfigDependencyResolver } from "./rawMatch";
 import { Transport } from "./transport";
 import { computeReason } from "./reason";
 import { SSEConnection } from "./sse";
@@ -137,6 +139,7 @@ export class Quonfig {
   private store: ConfigStore;
   private evaluator: Evaluator;
   private resolver: Resolver;
+  private dependencyResolver: ConfigDependencyResolver;
   private transport: Transport;
   private sseConnection?: SSEConnection;
   private pollTimer?: ReturnType<typeof setTimeout>;
@@ -175,6 +178,7 @@ export class Quonfig {
     this.store = new ConfigStore();
     this.evaluator = new Evaluator(this.store);
     this.resolver = new Resolver(this.store, this.evaluator);
+    this.dependencyResolver = new ConfigDependencyResolver(this.store, this.evaluator);
     this.transport = new Transport(this.apiUrls, this.sdkKey, this.telemetryUrl);
 
     // Initialize telemetry collectors
@@ -393,6 +397,22 @@ export class Quonfig {
   keys(): string[] {
     this.requireInitialized();
     return this.store.keys();
+  }
+
+  /**
+   * Server-safe raw match: returns the matched Value + a dependency tree
+   * (decryptWith / providedBy) WITHOUT reading process.env and WITHOUT
+   * calling decrypt(). For use on servers that ship config to customer SDKs;
+   * customer SDKs resolve the dependencies in their own runtime.
+   */
+  getRawMatch(key: string, contexts?: Contexts): RawMatch | undefined {
+    this.requireInitialized();
+    const mergedContexts = mergeContexts(this.globalContext, contexts);
+    return this.dependencyResolver.resolveWithDependencies(
+      key,
+      this.environmentId,
+      mergedContexts
+    );
   }
 
   /**

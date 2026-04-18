@@ -255,6 +255,38 @@ export interface Evaluation {
   reason: number;
 }
 
+// ---- Raw Match (server-side dependency resolution) ----
+
+export interface RawEvaluationMetadata {
+  configRowIndex: number;
+  conditionalValueIndex: number;
+  weightedValueIndex?: number;
+  type: ConfigTypeString;
+  id: string;
+  valueType: ValueType;
+}
+
+export type RawDependencyType = "decryptWith" | "providedBy";
+
+export interface RawDependency {
+  dependencyType: RawDependencyType;
+  source: string;
+  config?: RawConfigWithDependencies;
+}
+
+export interface RawConfigWithDependencies {
+  key: string;
+  type: ValueType;
+  value: any;
+  confidential?: boolean;
+  metadata: RawEvaluationMetadata;
+  dependencies?: RawDependency[];
+}
+
+export interface RawMatch {
+  config: RawConfigWithDependencies;
+}
+
 // ---- Enum-like constants for CLI compatibility ----
 
 // Runtime object for ConfigType enum access (e.g., ConfigType.FeatureFlag)

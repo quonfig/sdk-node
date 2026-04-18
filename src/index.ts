@@ -30,6 +30,11 @@ export type {
   SchemaData,
   EvalMatch,
   Evaluation,
+  RawMatch,
+  RawConfigWithDependencies,
+  RawDependency,
+  RawDependencyType,
+  RawEvaluationMetadata,
   NodeServerConfigurationRaw,
   NodeServerConfigurationAccessor,
   TypedNodeServerConfigurationRaw,
@@ -69,6 +74,7 @@ export { parseLevel, wordLevelToNumber, shouldLog, LOG_LEVEL_PREFIX } from "./lo
 export { Evaluator } from "./evaluator";
 export { ConfigStore } from "./store";
 export { Resolver } from "./resolver";
+export { ConfigDependencyResolver } from "./rawMatch";
 export { Transport } from "./transport";
 export { WeightedValueResolver } from "./weighted";
 
