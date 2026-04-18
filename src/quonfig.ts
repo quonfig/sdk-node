@@ -151,7 +151,7 @@ export class Quonfig {
   private exampleContexts: ExampleContextCollector;
 
   constructor(options: QuonfigOptions) {
-    this.sdkKey = options.sdkKey;
+    this.sdkKey = options.sdkKey ?? process.env.QUONFIG_BACKEND_SDK_KEY ?? "";
     this.apiUrls = options.apiUrls ?? (options.apiUrl ? [options.apiUrl] : DEFAULT_API_URLS);
     if (this.apiUrls.length === 0) {
       throw new Error("[quonfig] apiUrls must not be empty");

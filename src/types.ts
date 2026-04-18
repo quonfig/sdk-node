@@ -150,7 +150,8 @@ export type ContextUploadMode = "none" | "shapes_only" | "periodic_example";
 // ---- Options ----
 
 export interface QuonfigOptions {
-  sdkKey: string;
+  /** SDK key for authentication. Falls back to the `QUONFIG_BACKEND_SDK_KEY` env var when omitted. */
+  sdkKey?: string;
   /** @deprecated Use apiUrls instead. If provided, used as a single-element URL list. */
   apiUrl?: string;
   /** Ordered list of API base URLs to try. Defaults to ["https://primary.quonfig.com", "https://secondary.quonfig.com"]. */
