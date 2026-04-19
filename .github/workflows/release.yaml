@@ -3,8 +3,12 @@ on:
   push:
     branches: [main]
 jobs:
+  test:
+    uses: ./.github/workflows/test.yaml
+
   check-version:
     runs-on: ubuntu-latest
+    needs: test
     outputs:
       version-changed: ${{ steps.check.outputs.changed }}
       current-version: ${{ steps.check.outputs.current-version }}
