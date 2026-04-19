@@ -1,0 +1,43 @@
+name: Test
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sdk-node
+        uses: actions/checkout@v4
+        with:
+          path: sdk-node
+
+      - name: Checkout integration-test-data
+        uses: actions/checkout@v4
+        with:
+          repository: quonfig/integration-test-data
+          path: integration-test-data
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: sdk-node/package-lock.json
+
+      - name: Install
+        working-directory: sdk-node
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: sdk-node
+        run: npm run lint
+
+      - name: Build
+        working-directory: sdk-node
+        run: npm run build
+
+      - name: Test
+        working-directory: sdk-node
+        run: npm test
