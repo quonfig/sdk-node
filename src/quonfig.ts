@@ -83,7 +83,7 @@ export class BoundQuonfig {
   }
 
   shouldLog(args: {
-    loggerName: string;
+    configKey: string;
     desiredLevel: string;
     defaultLevel?: string;
     contexts?: Contexts;
@@ -367,7 +367,7 @@ export class Quonfig {
    * Check if a log message should be logged at the given level.
    */
   shouldLog(args: {
-    loggerName: string;
+    configKey: string;
     desiredLevel: string;
     defaultLevel?: string;
     contexts?: Contexts;
@@ -381,7 +381,7 @@ export class Quonfig {
     const defaultLevelNum = parseLevel(args.defaultLevel) ?? DEFAULT_LOG_LEVEL;
 
     return shouldLog({
-      loggerName: args.loggerName,
+      configKey: args.configKey,
       desiredLevel: desiredLevelNum,
       defaultLevel: defaultLevelNum,
       getConfig: (logKey: string) => {

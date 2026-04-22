@@ -338,13 +338,13 @@ describe("Quonfig datadir", () => {
 
     expect(
       quonfig.shouldLog({
-        loggerName: "service.api",
+        configKey: "log-level.service.api",
         desiredLevel: "debug",
       })
     ).toBe(false);
     expect(
       quonfig.shouldLog({
-        loggerName: "service.api",
+        configKey: "log-level.service.api",
         desiredLevel: "info",
       })
     ).toBe(true);

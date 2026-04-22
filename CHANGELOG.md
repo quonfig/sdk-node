@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.13 - 2026-04-22
+
+- BREAKING: `shouldLog({loggerName})` renamed to `shouldLog({configKey})`. Callers must now pass the full stored key (e.g. `log-level.my-app`) instead of the bare logger name — the SDK no longer auto-prefixes `log-level.`. This matches what users see in the Quonfig UI and aligns with sdk-ruby's API.
+
+  Migration:
+  ```ts
+  // Before
+  quonfig.shouldLog({ loggerName: "my-app", desiredLevel: "info" });
+  // After
+  quonfig.shouldLog({ configKey: "log-level.my-app", desiredLevel: "info" });
+  ```
+
+- Removed the exported `LOG_LEVEL_PREFIX` constant (no longer needed).
+
 ## 0.0.9 - 2026-04-18
 
 - Added `quonfig.getRawMatch()` plus `RawMatch`, `RawConfigWithDependencies`, `RawDependency`, `RawDependencyType`, and `RawEvaluationMetadata` types. Lets callers inspect the matched config row (including `decryptWith` / `providedBy` dependency chain) without resolving `ENV_VAR` or decrypting ciphertext on the caller's host.

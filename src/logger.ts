@@ -1,7 +1,5 @@
 import type { Contexts, GetValue, LogLevelName, LogLevelNumber } from "./types";
 
-export const LOG_LEVEL_PREFIX = "log-level.";
-
 const VALID_LOG_LEVEL_NAMES: readonly LogLevelName[] = [
   "trace",
   "debug",
@@ -59,14 +57,14 @@ export function parseLevel(level: string | number | undefined): LogLevelNumber |
 }
 
 export function shouldLog(args: {
-  loggerName: string;
+  configKey: string;
   desiredLevel: LogLevelNumber;
   defaultLevel: LogLevelNumber;
   getConfig: (key: string) => GetValue;
 }): boolean {
-  const { loggerName, desiredLevel, defaultLevel, getConfig } = args;
+  const { configKey, desiredLevel, defaultLevel, getConfig } = args;
 
-  const resolvedLevel = getConfig(LOG_LEVEL_PREFIX + loggerName);
+  const resolvedLevel = getConfig(configKey);
   if (resolvedLevel !== undefined) {
     const resolvedLevelNum = parseLevel(resolvedLevel as string | number);
     if (resolvedLevelNum !== undefined) {

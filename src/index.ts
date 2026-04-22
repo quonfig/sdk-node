@@ -68,7 +68,7 @@ export type { SemanticVersion } from "./semver";
 export { hashZeroToOne } from "./hashing";
 
 // Logger utilities
-export { parseLevel, wordLevelToNumber, shouldLog, LOG_LEVEL_PREFIX } from "./logger";
+export { parseLevel, wordLevelToNumber, shouldLog } from "./logger";
 
 // Evaluator (for advanced usage / testing)
 export { Evaluator } from "./evaluator";
