@@ -15,16 +15,43 @@ export interface FetchResult {
  */
 export const DEFAULT_TELEMETRY_URL = "https://telemetry.quonfig.com";
 
+/**
+ * Derive the SSE stream base URL for an apiUrl by prepending `stream.` to the hostname.
+ *
+ * Examples:
+ *   https://primary.quonfig.com       -> https://stream.primary.quonfig.com
+ *   http://localhost:8080             -> http://stream.localhost:8080
+ *   https://api.example.com/some/path -> https://stream.api.example.com/some/path
+ *
+ * Port, scheme, and path are preserved. Trailing slashes are stripped to match
+ * the normalization applied to apiUrls.
+ */
+export function deriveStreamUrl(apiUrl: string): string {
+  const url = new URL(apiUrl);
+  url.hostname = `stream.${url.hostname}`;
+  return url.toString().replace(/\/$/, "");
+}
+
 export class Transport {
   private baseUrls: string[];
+  private streamUrls: string[];
   private activeBaseUrl: string;
+  private activeStreamUrl: string;
   private telemetryBaseUrl: string;
   private sdkKey: string;
   private etag: string = "";
+  /**
+   * Test-only override. When set, `getSSEUrl()` returns this value verbatim
+   * instead of deriving it from apiUrls. Used to let tests point SSE at a
+   * mock server without intercepting DNS. NOT part of the public API.
+   */
+  private __testStreamUrlOverride?: string;
 
   constructor(baseUrls: string[], sdkKey: string, telemetryBaseUrl?: string) {
     this.baseUrls = baseUrls.map((u) => u.replace(/\/$/, ""));
+    this.streamUrls = this.baseUrls.map((u) => deriveStreamUrl(u));
     this.activeBaseUrl = this.baseUrls[0];
+    this.activeStreamUrl = this.streamUrls[0];
     // Priority: QUONFIG_TELEMETRY_URL env var > constructor option > default
     const envUrl = process.env.QUONFIG_TELEMETRY_URL;
     const url = envUrl || telemetryBaseUrl || DEFAULT_TELEMETRY_URL;
@@ -61,7 +88,8 @@ export class Transport {
   async fetchConfigs(): Promise<FetchResult> {
     let lastError: Error | undefined;
 
-    for (const baseUrl of this.baseUrls) {
+    for (let i = 0; i < this.baseUrls.length; i++) {
+      const baseUrl = this.baseUrls[i];
       try {
         const headers = this.getHeaders();
         if (this.etag) {
@@ -84,6 +112,7 @@ export class Transport {
 
         if (response.status === 304) {
           this.activeBaseUrl = baseUrl;
+          this.activeStreamUrl = this.streamUrls[i];
           return { notChanged: true };
         }
 
@@ -98,6 +127,7 @@ export class Transport {
         }
 
         this.activeBaseUrl = baseUrl;
+        this.activeStreamUrl = this.streamUrls[i];
         const envelope = (await response.json()) as ConfigEnvelope;
         return { envelope, notChanged: false };
       } catch (err) {
@@ -131,10 +161,19 @@ export class Transport {
 
   /**
    * Get the SSE URL for config streaming.
-   * Uses whichever base URL last succeeded for fetchConfigs.
+   *
+   * Uses the `stream.<hostname>` URL derived from whichever apiUrl last
+   * succeeded for fetchConfigs. The SSE path (`/api/v2/sse/config`) is
+   * unchanged; only the hostname differs from the HTTP endpoints.
+   *
+   * When `__testStreamUrlOverride` is set, returns it verbatim — used by
+   * tests to point SSE at a mock server without DNS trickery.
    */
   getSSEUrl(): string {
-    return `${this.activeBaseUrl}/api/v2/sse/config`;
+    if (this.__testStreamUrlOverride !== undefined) {
+      return this.__testStreamUrlOverride;
+    }
+    return `${this.activeStreamUrl}/api/v2/sse/config`;
   }
 
   /**

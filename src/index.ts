@@ -75,7 +75,7 @@ export { Evaluator } from "./evaluator";
 export { ConfigStore } from "./store";
 export { Resolver } from "./resolver";
 export { ConfigDependencyResolver } from "./rawMatch";
-export { Transport } from "./transport";
+export { Transport, deriveStreamUrl } from "./transport";
 export { WeightedValueResolver } from "./weighted";
 
 // Operators (for advanced usage / testing)
