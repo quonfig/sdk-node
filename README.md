@@ -60,6 +60,60 @@ new Quonfig({
 });
 ```
 
+## Dynamic log levels with Winston
+
+`winston` is an optional peer dependency. Install it alongside `@quonfig/node`, then compose the format:
+
+```typescript
+import winston from "winston";
+import { Quonfig } from "@quonfig/node";
+import { createWinstonFormat } from "@quonfig/node/winston";
+
+const quonfig = new Quonfig({
+  sdkKey: process.env.QUONFIG_BACKEND_SDK_KEY!,
+  loggerKey: "log-level.my-app",
+});
+await quonfig.init();
+
+const logger = winston.createLogger({
+  level: "silly", // let Winston emit everything; Quonfig decides.
+  format: winston.format.combine(
+    createWinstonFormat(quonfig, "myapp.services.auth"),
+    winston.format.json()
+  ),
+  transports: [new winston.transports.Console()],
+});
+
+logger.info("live-controlled");  // emits iff shouldLog says so.
+```
+
+The `loggerPath` (second arg) is forwarded to `quonfig.shouldLog` verbatim — no normalization — so rules can key on whatever identifier shape you actually log (`"com.app.Auth"`, `"MyApp::Services::Auth"`, etc.).
+
+## Dynamic log levels with Pino
+
+`pino` is an optional peer dependency. Install it alongside `@quonfig/node`, then wire the hook:
+
+```typescript
+import pino from "pino";
+import { Quonfig } from "@quonfig/node";
+import { createPinoHooks } from "@quonfig/node/pino";
+
+const quonfig = new Quonfig({
+  sdkKey: process.env.QUONFIG_BACKEND_SDK_KEY!,
+  loggerKey: "log-level.my-app",
+});
+await quonfig.init();
+
+const logger = pino({
+  level: "trace", // let Pino emit everything; Quonfig decides.
+  hooks: createPinoHooks(quonfig, "myapp.services.auth"),
+});
+
+logger.debug("live-controlled");
+```
+
+Both adapters also ship convenience constructors — `createWinstonLogger` and `createPinoLogger` — that return a ready-to-use logger with the Quonfig gate already attached.
+
 ## License
 
 MIT

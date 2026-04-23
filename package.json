@@ -1,6 +1,6 @@
 {
   "name": "@quonfig/node",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "description": "Quonfig SDK for Node.js - Feature Flags, Live Config, and Dynamic Log Levels",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -11,6 +11,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./winston": {
+      "types": "./dist/integrations/winston.d.ts",
+      "import": "./dist/integrations/winston.js",
+      "require": "./dist/integrations/winston.cjs"
+    },
+    "./pino": {
+      "types": "./dist/integrations/pino.d.ts",
+      "import": "./dist/integrations/pino.js",
+      "require": "./dist/integrations/pino.cjs"
     }
   },
   "files": [
@@ -50,13 +60,27 @@
     "eventsource": "^2.0.2",
     "murmurhash": "^2.0.1"
   },
+  "peerDependencies": {
+    "pino": ">=7.0.0",
+    "winston": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "pino": {
+      "optional": true
+    },
+    "winston": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/eventsource": "^1.1.15",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.11.0",
     "js-yaml": "^4.1.1",
+    "pino": "9.14.0",
     "tsup": "^8.0.0",
     "typescript": "^5.3.0",
-    "vitest": "^1.0.0"
+    "vitest": "^1.0.0",
+    "winston": "3.19.0"
   }
 }

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.0.15 - 2026-04-22
+
+- Added Winston and Pino ecosystem adapters for drop-in dynamic log levels. Both adapters route every emitted record through `quonfig.shouldLog({ loggerPath, desiredLevel, contexts })` — there is no up-front "set the logger's level" phase, so per-logger rules update live as Quonfig config changes without touching the logger instance.
+
+  ```ts
+  // Winston
+  import winston from "winston";
+  import { createWinstonFormat } from "@quonfig/node/winston";
+  const logger = winston.createLogger({
+    level: "silly",
+    format: winston.format.combine(
+      createWinstonFormat(quonfig, "myapp.services.auth"),
+      winston.format.json()
+    ),
+    transports: [new winston.transports.Console()],
+  });
+
+  // Pino
+  import pino from "pino";
+  import { createPinoHooks } from "@quonfig/node/pino";
+  const logger = pino({
+    level: "trace",
+    hooks: createPinoHooks(quonfig, "myapp.services.auth"),
+  });
+  ```
+
+- Exposed four public functions: `createWinstonFormat`, `createWinstonLogger`, `createPinoHooks`, `createPinoLogger`. Formats / hooks are the recommended path; the `*Logger` factories are convenience constructors for greenfield use.
+- `winston` and `pino` are declared as **optional peer dependencies** — the main `@quonfig/node` install stays lean, and subpath entries throw a clear error if the matching peer is missing.
+- Added subpath exports: `@quonfig/node/winston` and `@quonfig/node/pino`. The main entry point is unchanged.
+- `loggerPath` is passed through to `shouldLog` verbatim, preserving the no-normalization guarantee from v0.0.14 across the ecosystem adapters.
+
 ## 0.0.14 - 2026-04-22
 
 - Added a `loggerKey` option to the `Quonfig` constructor and a new `shouldLog({loggerPath, desiredLevel, defaultLevel?, contexts?})` overload on both `Quonfig` and `BoundQuonfig`. When `loggerKey` is set (e.g. `"log-level.app-quonfig"`), callers can evaluate per-logger log rules by passing a logical `loggerPath`; the SDK injects it under `contexts["quonfig-sdk-logging"] = { key: loggerPath }` and evaluates the configured `loggerKey`. Because the injected context uses the `key` property, logger paths are auto-captured by the existing example-context telemetry and surface in the dashboard with no extra wiring.
