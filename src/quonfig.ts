@@ -14,6 +14,7 @@ import type {
   RawMatch,
   Value,
 } from "./types";
+import { QUONFIG_SDK_LOGGING_CONTEXT_NAME } from "./types";
 
 import { ConfigStore } from "./store";
 import { Evaluator } from "./evaluator";
@@ -87,9 +88,22 @@ export class BoundQuonfig {
     desiredLevel: string;
     defaultLevel?: string;
     contexts?: Contexts;
+  }): boolean;
+  shouldLog(args: {
+    loggerPath: string;
+    desiredLevel: string;
+    defaultLevel?: string;
+    contexts?: Contexts;
+  }): boolean;
+  shouldLog(args: {
+    configKey?: string;
+    loggerPath?: string;
+    desiredLevel: string;
+    defaultLevel?: string;
+    contexts?: Contexts;
   }): boolean {
     return this.client.shouldLog({
-      ...args,
+      ...(args as any),
       contexts: mergeContexts(this.boundContexts, args.contexts),
     });
   }
@@ -138,6 +152,7 @@ export class Quonfig {
   private readonly datafile?: string | object;
   private readonly requestedEnvironment: string;
   private readonly onConfigUpdate?: () => void;
+  private readonly loggerKey?: string;
 
   private store: ConfigStore;
   private evaluator: Evaluator;
@@ -175,6 +190,7 @@ export class Quonfig {
     // Environment: explicit option supersedes QUONFIG_ENVIRONMENT env var
     this.requestedEnvironment = options.environment || process.env.QUONFIG_ENVIRONMENT || "";
     this.onConfigUpdate = options.onConfigUpdate;
+    this.loggerKey = options.loggerKey;
     this.instanceHash = randomUUID();
 
     // Initialize core components
@@ -365,9 +381,33 @@ export class Quonfig {
 
   /**
    * Check if a log message should be logged at the given level.
+   *
+   * Two shapes are supported:
+   *
+   * 1. `{configKey, ...}` — primitive shape. Evaluates the named config
+   *    as a log level. The caller is responsible for any per-logger routing.
+   *
+   * 2. `{loggerPath, ...}` — convenience shape. Requires `loggerKey` on
+   *    the Quonfig constructor. The SDK evaluates `loggerKey` with
+   *    `contexts["quonfig-sdk-logging"] = { key: loggerPath }` merged in,
+   *    letting a single config drive per-logger rules. `loggerPath` is
+   *    passed through without normalization.
    */
   shouldLog(args: {
     configKey: string;
+    desiredLevel: string;
+    defaultLevel?: string;
+    contexts?: Contexts;
+  }): boolean;
+  shouldLog(args: {
+    loggerPath: string;
+    desiredLevel: string;
+    defaultLevel?: string;
+    contexts?: Contexts;
+  }): boolean;
+  shouldLog(args: {
+    configKey?: string;
+    loggerPath?: string;
     desiredLevel: string;
     defaultLevel?: string;
     contexts?: Contexts;
@@ -380,13 +420,44 @@ export class Quonfig {
 
     const defaultLevelNum = parseLevel(args.defaultLevel) ?? DEFAULT_LOG_LEVEL;
 
+    let resolvedConfigKey: string;
+    let resolvedContexts: Contexts | undefined = args.contexts;
+
+    if (args.loggerPath !== undefined) {
+      if (args.configKey !== undefined) {
+        throw new Error(
+          "[quonfig] shouldLog: pass either `configKey` or `loggerPath`, not both."
+        );
+      }
+      if (!this.loggerKey) {
+        throw new Error(
+          "[quonfig] shouldLog({loggerPath}) requires the `loggerKey` option on the Quonfig constructor. " +
+            "Pass `loggerKey: \"log-level.<your-app>\"` or use the `configKey` form instead."
+        );
+      }
+      resolvedConfigKey = this.loggerKey;
+      // Inject the logger path under the quonfig-sdk-logging context with a
+      // `key` property. The existing example-context telemetry (see
+      // src/telemetry/exampleContexts.ts) auto-captures contexts that have a
+      // `key`, so logger paths show up in the dashboard for free.
+      resolvedContexts = mergeContexts(args.contexts, {
+        [QUONFIG_SDK_LOGGING_CONTEXT_NAME]: { key: args.loggerPath },
+      });
+    } else if (args.configKey !== undefined) {
+      resolvedConfigKey = args.configKey;
+    } else {
+      throw new Error(
+        "[quonfig] shouldLog requires either `configKey` or `loggerPath`."
+      );
+    }
+
     return shouldLog({
-      configKey: args.configKey,
+      configKey: resolvedConfigKey,
       desiredLevel: desiredLevelNum,
       defaultLevel: defaultLevelNum,
       getConfig: (logKey: string) => {
         try {
-          return this.get(logKey, args.contexts, undefined);
+          return this.get(logKey, resolvedContexts, undefined);
         } catch {
           return undefined;
         }

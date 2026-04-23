@@ -172,7 +172,23 @@ export interface QuonfigOptions {
   environment?: string;
   /** Called whenever the config store is updated (SSE push, poll, or initial load). Use this to react to live config changes. */
   onConfigUpdate?: () => void;
+  /**
+   * Config key used by the `shouldLog({loggerPath, ...})` convenience overload.
+   *
+   * When set (e.g. `"log-level.app-quonfig"`), callers can invoke
+   * `shouldLog({loggerPath: "com.myapp.Auth", desiredLevel: "DEBUG"})` and
+   * the SDK will evaluate the named config with the logger path injected
+   * as `contexts["quonfig-sdk-logging"] = { key: loggerPath }`. Using the
+   * `key` property means logger paths are auto-captured by the existing
+   * example-context telemetry and flow to the dashboard for free.
+   *
+   * Callers retain the escape hatch of passing `configKey` directly.
+   */
+  loggerKey?: string;
 }
+
+/** Context name under which the logger-path convenience injects the logger path. */
+export const QUONFIG_SDK_LOGGING_CONTEXT_NAME = "quonfig-sdk-logging";
 
 // ---- Evaluation Result ----
 

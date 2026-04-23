@@ -42,7 +42,7 @@ export type {
 } from "./types";
 
 // Enum-like runtime constants (e.g., ConfigType.FeatureFlag, ProvidedSource.EnvVar)
-export { ConfigType, ProvidedSource } from "./types";
+export { ConfigType, ProvidedSource, QUONFIG_SDK_LOGGING_CONTEXT_NAME } from "./types";
 
 // Context utilities
 export { contextLookup, mergeContexts, getContextValue } from "./context";
