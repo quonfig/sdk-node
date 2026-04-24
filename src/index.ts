@@ -18,6 +18,7 @@ export type {
   WorkspaceConfigDocument,
   QuonfigDatadirEnvironments,
   Contexts,
+  ContextObj,
   ContextValue,
   GetValue,
   OnNoDefault,

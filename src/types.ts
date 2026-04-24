@@ -131,9 +131,14 @@ export interface QuonfigDatadirEnvironments {
 
 // ---- Context ----
 
-export type ContextValue = string | number | boolean | string[] | null | undefined;
+export type ContextValue = unknown;
 
 export type Contexts = { [contextName: string]: { [key: string]: ContextValue } };
+
+// Alias for Reforge-compatible naming. The CLI-generated typesafe client emits
+// `contexts?: Contexts | ContextObj` on every accessor; with ContextValue widened
+// to unknown, Contexts and ContextObj resolve to the same structural type.
+export type ContextObj = Contexts;
 
 // ---- GetValue ----
 
