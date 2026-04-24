@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.16 - 2026-04-24
+
+- Widen `ContextValue` from the scalar union (`string | number | boolean | string[] | null | undefined`) to `unknown`, matching the Reforge SDK's public input shape. Callers can now pass loose context objects (e.g. request payloads containing `Date`, nullable numbers, enum types) without upfront narrowing — the evaluator continues to apply per-operator runtime type checks. Internal storage is unchanged (plain object, not Map). Also exports `ContextObj` as an alias for `Contexts` so generated code emitting `contexts?: Contexts | ContextObj` compiles against this SDK (the CLI `qfg generate --targets node-ts` output was silently broken against 0.0.15 because the narrower `ContextValue` type rejected the generator's local `ContextObj = Record<string, Record<string, unknown>>`).
+
 ## 0.0.15 - 2026-04-22
 
 - Added Winston and Pino ecosystem adapters for drop-in dynamic log levels. Both adapters route every emitted record through `quonfig.shouldLog({ loggerPath, desiredLevel, contexts })` — there is no up-front "set the logger's level" phase, so per-logger rules update live as Quonfig config changes without touching the logger instance.
