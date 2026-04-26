@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.17 - 2026-04-26
+
+- Integration test infrastructure: regenerated tests from the unified TS generator and wired aggregator-helpers to real telemetry collectors so cross-SDK suites exercise the actual emission path. No public API changes.
+- Telemetry: emit proto-style wrapper keys in `selectedValue` payloads (matches the wire format the server expects).
+- Dev experience: dev-context now injects `quonfig-user.email` from `~/.quonfig/tokens.json` when available (qfg-pj0.3), so locally-authenticated agents get user-scoped evaluation without manual context.
+
 ## 0.0.16 - 2026-04-24
 
 - Widen `ContextValue` from the scalar union (`string | number | boolean | string[] | null | undefined`) to `unknown`, matching the Reforge SDK's public input shape. Callers can now pass loose context objects (e.g. request payloads containing `Date`, nullable numbers, enum types) without upfront narrowing — the evaluator continues to apply per-operator runtime type checks. Internal storage is unchanged (plain object, not Map). Also exports `ContextObj` as an alias for `Contexts` so generated code emitting `contexts?: Contexts | ContextObj` compiles against this SDK (the CLI `qfg generate --targets node-ts` output was silently broken against 0.0.15 because the narrower `ContextValue` type rejected the generator's local `ContextObj = Record<string, Record<string, unknown>>`).
