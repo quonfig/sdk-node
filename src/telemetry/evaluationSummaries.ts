@@ -1,5 +1,20 @@
 import type { Evaluation, EvaluationSummary, EvaluationCounter, TelemetryEvent } from "../types";
 
+/**
+ * Map a runtime value onto the proto-style wrapper key used by every SDK's
+ * eval-summary `selectedValue` payload: bool / int / double / string /
+ * stringList. This must match sdk-go's marshalSelectedValue and sdk-ruby's
+ * EvaluationSummariesAggregator#wrap_selected_value so the api-telemetry
+ * server sees a consistent shape across SDKs.
+ */
+function wrapperKeyForValue(v: unknown): string {
+  if (typeof v === "boolean") return "bool";
+  if (typeof v === "number") return Number.isInteger(v) ? "int" : "double";
+  if (typeof v === "string") return "string";
+  if (Array.isArray(v)) return "stringList";
+  return "string";
+}
+
 export class EvaluationSummaryCollector {
   private enabled: boolean;
   private data: Map<string, Map<string, { count: number; reason: number }>> = new Map();
@@ -24,10 +39,11 @@ export class EvaluationSummaryCollector {
     this.startAt = this.startAt ?? Date.now();
 
     const key = JSON.stringify([evaluation.configKey, evaluation.configType]);
+    const wrapperKey = wrapperKeyForValue(evaluation.unwrappedValue);
     const counterKey = JSON.stringify([
       evaluation.configId,
       evaluation.ruleIndex,
-      typeof evaluation.unwrappedValue,
+      wrapperKey,
       evaluation.reportableValue ?? evaluation.unwrappedValue,
       evaluation.weightedValueIndex,
     ]);
@@ -56,14 +72,14 @@ export class EvaluationSummaryCollector {
 
       const counters: EvaluationCounter[] = [];
       rawCounters.forEach(({ count, reason }, counterJSON) => {
-        const [configId, ruleIndex, valueType, value, weightedValueIndex] =
+        const [configId, ruleIndex, wrapperKey, value, weightedValueIndex] =
           JSON.parse(counterJSON);
 
         const counter: EvaluationCounter = {
           configId,
           conditionalValueIndex: ruleIndex,
           configRowIndex: 0,
-          selectedValue: { [valueType]: value },
+          selectedValue: { [wrapperKey]: value },
           count,
           reason,
         };

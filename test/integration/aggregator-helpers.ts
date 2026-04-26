@@ -248,7 +248,7 @@ export function aggregatorPost(
         if (counter.weightedValueIndex !== undefined && counter.weightedValueIndex >= 0) {
           summary.weighted_value_index = counter.weightedValueIndex;
         }
-        out.push({
+        const record: EvaluationSummaryWireRecord = {
           key: s.key,
           type: telemetryConfigType(s.type),
           value: wireValue,
@@ -256,7 +256,14 @@ export function aggregatorPost(
           count: counter.count,
           reason: counter.reason,
           summary,
-        });
+        };
+        // Always emit selected_value (the proto-style {<wrapperKey>: value}).
+        // The api-telemetry server expects it on every eval-summary row;
+        // the cross-SDK YAML asserts it uniformly.
+        if (counter.selectedValue !== undefined && counter.selectedValue !== null) {
+          record.selected_value = counter.selectedValue;
+        }
+        out.push(record);
       }
     }
     return out;
@@ -278,6 +285,7 @@ interface EvaluationSummaryWireRecord {
   value_type: string;
   count: number;
   reason: number;
+  selected_value?: unknown;
   summary: WireSummary;
 }
 

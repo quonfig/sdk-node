@@ -14,55 +14,55 @@ describe("telemetry", () => {
   it("reason is STATIC for config with no targeting rules", () => {
     const aggregator = buildAggregator("evaluation_summary", {  });
     feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.string"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.string", type: "CONFIG", value: "hello.world", value_type: "string", count: 1, reason: 1, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.string", type: "CONFIG", value: "hello.world", value_type: "string", count: 1, reason: 1, selected_value: { string: "hello.world" }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("reason is STATIC for feature flag with only ALWAYS_TRUE rules", () => {
     const aggregator = buildAggregator("evaluation_summary", {  });
     feedAggregator(aggregator, "evaluation_summary", { keys: ["always.true"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "always.true", type: "FEATURE_FLAG", value: true, value_type: "bool", count: 1, reason: 1, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "always.true", type: "FEATURE_FLAG", value: true, value_type: "bool", count: 1, reason: 1, selected_value: { bool: true }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("reason is TARGETING_MATCH when config has targeting rules but evaluation falls through", () => {
     const aggregator = buildAggregator("evaluation_summary", {  });
     feedAggregator(aggregator, "evaluation_summary", { keys: ["my-test-key"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "my-test-key", type: "CONFIG", value: "my-test-value", value_type: "string", count: 1, reason: 2, summary: { config_row_index: 0, conditional_value_index: 1 } }]);
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "my-test-key", type: "CONFIG", value: "my-test-value", value_type: "string", count: 1, reason: 2, selected_value: { string: "my-test-value" }, summary: { config_row_index: 0, conditional_value_index: 1 } }]);
   });
 
   it("reason is TARGETING_MATCH when a targeting rule matches", () => {
     const aggregator = buildAggregator("evaluation_summary", {  });
     feedAggregator(aggregator, "evaluation_summary", { keys: ["feature-flag.integer"] }, mergeContexts({ user: { key: "michael" } } as Contexts));
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.integer", type: "FEATURE_FLAG", value: 5, value_type: "int", count: 1, reason: 2, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.integer", type: "FEATURE_FLAG", value: 5, value_type: "int", count: 1, reason: 2, selected_value: { int: 5 }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("reason is SPLIT for weighted value evaluation", () => {
     const aggregator = buildAggregator("evaluation_summary", {  });
     feedAggregator(aggregator, "evaluation_summary", { keys: ["feature-flag.weighted"] }, mergeContexts({ user: { tracking_id: "92a202f2" } } as Contexts));
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.weighted", type: "FEATURE_FLAG", value: 2, value_type: "int", count: 1, reason: 3, summary: { config_row_index: 0, conditional_value_index: 0, weighted_value_index: 2 } }]);
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.weighted", type: "FEATURE_FLAG", value: 2, value_type: "int", count: 1, reason: 3, selected_value: { int: 2 }, summary: { config_row_index: 0, conditional_value_index: 0, weighted_value_index: 2 } }]);
   });
 
   it("reason is TARGETING_MATCH for feature flag fallthrough with targeting rules", () => {
     const aggregator = buildAggregator("evaluation_summary", {  });
     feedAggregator(aggregator, "evaluation_summary", { keys: ["feature-flag.integer"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.integer", type: "FEATURE_FLAG", value: 3, value_type: "int", count: 1, reason: 2, summary: { config_row_index: 0, conditional_value_index: 1 } }]);
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.integer", type: "FEATURE_FLAG", value: 3, value_type: "int", count: 1, reason: 2, selected_value: { int: 3 }, summary: { config_row_index: 0, conditional_value_index: 1 } }]);
   });
 
   it("evaluation summary deduplicates identical evaluations", () => {
     const aggregator = buildAggregator("evaluation_summary", {  });
     feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.string", "brand.new.string", "brand.new.string", "brand.new.string", "brand.new.string"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.string", type: "CONFIG", value: "hello.world", value_type: "string", count: 5, reason: 1, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.string", type: "CONFIG", value: "hello.world", value_type: "string", count: 5, reason: 1, selected_value: { string: "hello.world" }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("evaluation summary creates separate counters for different rules of same config", () => {
     const aggregator = buildAggregator("evaluation_summary", {  });
     feedAggregator(aggregator, "evaluation_summary", { keys: ["feature-flag.integer"], keys_without_context: ["feature-flag.integer"] }, mergeContexts({ user: { key: "michael" } } as Contexts));
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.integer", type: "FEATURE_FLAG", value: 5, value_type: "int", count: 1, reason: 2, summary: { config_row_index: 0, conditional_value_index: 0 } }, { key: "feature-flag.integer", type: "FEATURE_FLAG", value: 3, value_type: "int", count: 1, reason: 2, summary: { config_row_index: 0, conditional_value_index: 1 } }]);
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.integer", type: "FEATURE_FLAG", value: 5, value_type: "int", count: 1, reason: 2, selected_value: { int: 5 }, summary: { config_row_index: 0, conditional_value_index: 0 } }, { key: "feature-flag.integer", type: "FEATURE_FLAG", value: 3, value_type: "int", count: 1, reason: 2, selected_value: { int: 3 }, summary: { config_row_index: 0, conditional_value_index: 1 } }]);
   });
 
   it("evaluation summary groups by config key", () => {
     const aggregator = buildAggregator("evaluation_summary", {  });
     feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.string", "always.true"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.string", type: "CONFIG", value: "hello.world", value_type: "string", count: 1, reason: 1, summary: { config_row_index: 0, conditional_value_index: 0 } }, { key: "always.true", type: "FEATURE_FLAG", value: true, value_type: "bool", count: 1, reason: 1, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.string", type: "CONFIG", value: "hello.world", value_type: "string", count: 1, reason: 1, selected_value: { string: "hello.world" }, summary: { config_row_index: 0, conditional_value_index: 0 } }, { key: "always.true", type: "FEATURE_FLAG", value: true, value_type: "bool", count: 1, reason: 1, selected_value: { bool: true }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("selectedValue wraps string correctly", () => {

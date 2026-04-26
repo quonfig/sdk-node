@@ -29,6 +29,10 @@ describe("telemetry wire format", () => {
   });
 
   it("selectedValue uses correct type wrapper keys in JSON", () => {
+    // Cross-SDK contract: the proto-style wrapper keys are bool / int /
+    // double / string / stringList — must match sdk-go (marshalSelectedValue)
+    // and sdk-ruby (wrap_selected_value) so api-telemetry sees a consistent
+    // shape across SDKs.
     const collector = new EvaluationSummaryCollector(true);
 
     const ev = evaluateForTelemetry("brand.new.string", {});
@@ -40,19 +44,19 @@ describe("telemetry wire format", () => {
     const ev2 = evaluateForTelemetry("brand.new.boolean", {});
     collector2.push(ev2!);
     const boolEvent = JSON.parse(JSON.stringify(collector2.drain()));
-    expect(boolEvent.summaries.summaries[0].counters[0].selectedValue).toHaveProperty("boolean");
+    expect(boolEvent.summaries.summaries[0].counters[0].selectedValue).toHaveProperty("bool");
 
     const collector3 = new EvaluationSummaryCollector(true);
     const ev3 = evaluateForTelemetry("brand.new.int", {});
     collector3.push(ev3!);
     const intEvent = JSON.parse(JSON.stringify(collector3.drain()));
-    expect(intEvent.summaries.summaries[0].counters[0].selectedValue).toHaveProperty("number");
+    expect(intEvent.summaries.summaries[0].counters[0].selectedValue).toHaveProperty("int");
 
     const collector4 = new EvaluationSummaryCollector(true);
     const ev4 = evaluateForTelemetry("my-string-list-key", {});
     collector4.push(ev4!);
     const listEvent = JSON.parse(JSON.stringify(collector4.drain()));
-    expect(listEvent.summaries.summaries[0].counters[0].selectedValue).toHaveProperty("object");
+    expect(listEvent.summaries.summaries[0].counters[0].selectedValue).toHaveProperty("stringList");
   });
 
   it("evaluation summary JSON structure matches TelemetryPayload envelope shape", () => {
