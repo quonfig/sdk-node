@@ -1,521 +1,133 @@
 // Code generated from integration-test-data/tests/eval/telemetry.yaml. DO NOT EDIT.
+// Regenerate with:
+//   cd integration-test-data/generators && npm run generate -- --target=node
+// Source: integration-test-data/generators/src/targets/node.ts
 
 import { describe, it, expect } from "vitest";
-import {
-  store,
-  evaluator,
-  resolver,
-  envID,
-  evaluateForTelemetry,
-  EvaluationSummaryCollector,
-  ContextShapeCollector,
-  ExampleContextCollector,
-} from "./setup";
-import type { Contexts } from "./setup";
-
-/**
- * Helper to map YAML type strings (CONFIG, FEATURE_FLAG) to ConfigTypeString values.
- */
-function mapType(yamlType: string): string {
-  switch (yamlType) {
-    case "CONFIG":
-      return "config";
-    case "FEATURE_FLAG":
-      return "feature_flag";
-    case "LOG_LEVEL":
-      return "log_level";
-    case "SEGMENT":
-      return "segment";
-    default:
-      return yamlType.toLowerCase();
-  }
-}
+import { store, evaluator, resolver, envID } from "./setup";
+import { mergeContexts } from "../../src/context";
+import type { Contexts } from "../../src/types";
+import { buildAggregator, feedAggregator, aggregatorPost } from "./aggregator-helpers";
 
 describe("telemetry", () => {
-  // ──────────────────────────────────────────────────
-  // Category 1: Evaluation Reason Reporting
-  // ──────────────────────────────────────────────────
 
   it("reason is STATIC for config with no targeting rules", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = {};
-
-    const eval1 = evaluateForTelemetry("brand.new.string", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-    expect(event!.summaries).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "brand.new.string");
-    expect(summary).toBeDefined();
-    expect(summary!.type).toBe(mapType("CONFIG"));
-
-    const counter = summary!.counters[0];
-    expect(counter.count).toBe(1);
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(0);
-    expect(counter.reason).toBe(1); // STATIC
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.string"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.string", type: "CONFIG", value: "hello.world", value_type: "string", count: 1, reason: 1, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("reason is STATIC for feature flag with only ALWAYS_TRUE rules", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = {};
-
-    const eval1 = evaluateForTelemetry("always.true", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-    expect(event!.summaries).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "always.true");
-    expect(summary).toBeDefined();
-    expect(summary!.type).toBe(mapType("FEATURE_FLAG"));
-
-    const counter = summary!.counters[0];
-    expect(counter.count).toBe(1);
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(0);
-    expect(counter.reason).toBe(1); // STATIC
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["always.true"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "always.true", type: "FEATURE_FLAG", value: true, value_type: "bool", count: 1, reason: 1, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("reason is TARGETING_MATCH when config has targeting rules but evaluation falls through", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = {};
-
-    const eval1 = evaluateForTelemetry("my-test-key", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-    expect(event!.summaries).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "my-test-key");
-    expect(summary).toBeDefined();
-    expect(summary!.type).toBe(mapType("CONFIG"));
-
-    const counter = summary!.counters[0];
-    expect(counter.count).toBe(1);
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(1);
-    expect(counter.reason).toBe(2); // TARGETING_MATCH
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["my-test-key"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "my-test-key", type: "CONFIG", value: "my-test-value", value_type: "string", count: 1, reason: 2, summary: { config_row_index: 0, conditional_value_index: 1 } }]);
   });
 
   it("reason is TARGETING_MATCH when a targeting rule matches", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = { user: { key: "michael" } };
-
-    const eval1 = evaluateForTelemetry("feature-flag.integer", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-    expect(event!.summaries).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "feature-flag.integer");
-    expect(summary).toBeDefined();
-    expect(summary!.type).toBe(mapType("FEATURE_FLAG"));
-
-    const counter = summary!.counters[0];
-    expect(counter.count).toBe(1);
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(0);
-    expect(counter.reason).toBe(2); // TARGETING_MATCH
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["feature-flag.integer"] }, mergeContexts({ user: { key: "michael" } } as Contexts));
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.integer", type: "FEATURE_FLAG", value: 5, value_type: "int", count: 1, reason: 2, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("reason is SPLIT for weighted value evaluation", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = { user: { tracking_id: "92a202f2" } };
-
-    const eval1 = evaluateForTelemetry("feature-flag.weighted", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-    expect(event!.summaries).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "feature-flag.weighted");
-    expect(summary).toBeDefined();
-    expect(summary!.type).toBe(mapType("FEATURE_FLAG"));
-
-    const counter = summary!.counters[0];
-    expect(counter.count).toBe(1);
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(0);
-    expect(counter.weightedValueIndex).toBe(2);
-    expect(counter.reason).toBe(3); // SPLIT
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["feature-flag.weighted"] }, mergeContexts({ user: { tracking_id: "92a202f2" } } as Contexts));
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.weighted", type: "FEATURE_FLAG", value: 2, value_type: "int", count: 1, reason: 3, summary: { config_row_index: 0, conditional_value_index: 0, weighted_value_index: 2 } }]);
   });
 
   it("reason is TARGETING_MATCH for feature flag fallthrough with targeting rules", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = {};
-
-    const eval1 = evaluateForTelemetry("feature-flag.integer", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-    expect(event!.summaries).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "feature-flag.integer");
-    expect(summary).toBeDefined();
-    expect(summary!.type).toBe(mapType("FEATURE_FLAG"));
-
-    const counter = summary!.counters[0];
-    expect(counter.count).toBe(1);
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(1);
-    expect(counter.reason).toBe(2); // TARGETING_MATCH
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["feature-flag.integer"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.integer", type: "FEATURE_FLAG", value: 3, value_type: "int", count: 1, reason: 2, summary: { config_row_index: 0, conditional_value_index: 1 } }]);
   });
 
-  // ──────────────────────────────────────────────────
-  // Category 2: Counting & Grouping
-  // ──────────────────────────────────────────────────
-
   it("evaluation summary deduplicates identical evaluations", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = {};
-
-    const keys = [
-      "brand.new.string",
-      "brand.new.string",
-      "brand.new.string",
-      "brand.new.string",
-      "brand.new.string",
-    ];
-    for (const key of keys) {
-      const ev = evaluateForTelemetry(key, contexts);
-      expect(ev).toBeDefined();
-      collector.push(ev!);
-    }
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-    expect(event!.summaries).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "brand.new.string");
-    expect(summary).toBeDefined();
-    expect(summary!.type).toBe(mapType("CONFIG"));
-    expect(summary!.counters).toHaveLength(1);
-
-    const counter = summary!.counters[0];
-    expect(counter.count).toBe(5);
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(0);
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.string", "brand.new.string", "brand.new.string", "brand.new.string", "brand.new.string"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.string", type: "CONFIG", value: "hello.world", value_type: "string", count: 5, reason: 1, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("evaluation summary creates separate counters for different rules of same config", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = { user: { key: "michael" } };
-
-    // Evaluate with context
-    const eval1 = evaluateForTelemetry("feature-flag.integer", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    // Evaluate without context
-    const eval2 = evaluateForTelemetry("feature-flag.integer", {});
-    expect(eval2).toBeDefined();
-    collector.push(eval2!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-    expect(event!.summaries).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "feature-flag.integer");
-    expect(summary).toBeDefined();
-    expect(summary!.type).toBe(mapType("FEATURE_FLAG"));
-    expect(summary!.counters).toHaveLength(2);
-
-    // Counter for rule match (conditionalValueIndex 0, value 5)
-    const counter0 = summary!.counters.find(
-      (c) => c.conditionalValueIndex === 0
-    );
-    expect(counter0).toBeDefined();
-    expect(counter0!.count).toBe(1);
-    expect(counter0!.configRowIndex).toBe(0);
-
-    // Counter for fallthrough (conditionalValueIndex 1, value 3)
-    const counter1 = summary!.counters.find(
-      (c) => c.conditionalValueIndex === 1
-    );
-    expect(counter1).toBeDefined();
-    expect(counter1!.count).toBe(1);
-    expect(counter1!.configRowIndex).toBe(0);
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["feature-flag.integer"], keys_without_context: ["feature-flag.integer"] }, mergeContexts({ user: { key: "michael" } } as Contexts));
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "feature-flag.integer", type: "FEATURE_FLAG", value: 5, value_type: "int", count: 1, reason: 2, summary: { config_row_index: 0, conditional_value_index: 0 } }, { key: "feature-flag.integer", type: "FEATURE_FLAG", value: 3, value_type: "int", count: 1, reason: 2, summary: { config_row_index: 0, conditional_value_index: 1 } }]);
   });
 
   it("evaluation summary groups by config key", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = {};
-
-    const eval1 = evaluateForTelemetry("brand.new.string", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const eval2 = evaluateForTelemetry("always.true", contexts);
-    expect(eval2).toBeDefined();
-    collector.push(eval2!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-    expect(event!.summaries).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    expect(summaries).toHaveLength(2);
-
-    const stringSummary = summaries.find((s) => s.key === "brand.new.string");
-    expect(stringSummary).toBeDefined();
-    expect(stringSummary!.type).toBe(mapType("CONFIG"));
-    expect(stringSummary!.counters[0].count).toBe(1);
-    expect(stringSummary!.counters[0].configRowIndex).toBe(0);
-    expect(stringSummary!.counters[0].conditionalValueIndex).toBe(0);
-
-    const flagSummary = summaries.find((s) => s.key === "always.true");
-    expect(flagSummary).toBeDefined();
-    expect(flagSummary!.type).toBe(mapType("FEATURE_FLAG"));
-    expect(flagSummary!.counters[0].count).toBe(1);
-    expect(flagSummary!.counters[0].configRowIndex).toBe(0);
-    expect(flagSummary!.counters[0].conditionalValueIndex).toBe(0);
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.string", "always.true"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.string", type: "CONFIG", value: "hello.world", value_type: "string", count: 1, reason: 1, summary: { config_row_index: 0, conditional_value_index: 0 } }, { key: "always.true", type: "FEATURE_FLAG", value: true, value_type: "bool", count: 1, reason: 1, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
-  // ──────────────────────────────────────────────────
-  // Category 3: selectedValue Type Wrapping
-  // ──────────────────────────────────────────────────
-
   it("selectedValue wraps string correctly", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = {};
-
-    const eval1 = evaluateForTelemetry("brand.new.string", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "brand.new.string");
-    expect(summary).toBeDefined();
-
-    const counter = summary!.counters[0];
-    expect(counter.selectedValue).toEqual({ string: "hello.world" });
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(0);
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.string"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.string", type: "CONFIG", value: "hello.world", value_type: "string", count: 1, reason: 1, selected_value: { string: "hello.world" }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("selectedValue wraps boolean correctly", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = {};
-
-    const eval1 = evaluateForTelemetry("brand.new.boolean", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "brand.new.boolean");
-    expect(summary).toBeDefined();
-
-    const counter = summary!.counters[0];
-    expect(counter.selectedValue).toEqual({ boolean: false });
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(0);
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.boolean"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.boolean", type: "CONFIG", value: false, value_type: "bool", count: 1, reason: 1, selected_value: { bool: false }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("selectedValue wraps int correctly", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = {};
-
-    const eval1 = evaluateForTelemetry("brand.new.int", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "brand.new.int");
-    expect(summary).toBeDefined();
-
-    const counter = summary!.counters[0];
-    expect(counter.selectedValue).toEqual({ number: 123 });
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(0);
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.int"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.int", type: "CONFIG", value: 123, value_type: "int", count: 1, reason: 1, selected_value: { int: 123 }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("selectedValue wraps double correctly", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = {};
-
-    const eval1 = evaluateForTelemetry("brand.new.double", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "brand.new.double");
-    expect(summary).toBeDefined();
-
-    const counter = summary!.counters[0];
-    expect(counter.selectedValue).toEqual({ number: 123.99 });
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(0);
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.double"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "brand.new.double", type: "CONFIG", value: 123.99, value_type: "double", count: 1, reason: 1, selected_value: { double: 123.99 }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
   it("selectedValue wraps string list correctly", () => {
-    const collector = new EvaluationSummaryCollector(true);
-    const contexts: Contexts = {};
-
-    const eval1 = evaluateForTelemetry("my-string-list-key", contexts);
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-
-    const summaries = event!.summaries!.summaries;
-    const summary = summaries.find((s) => s.key === "my-string-list-key");
-    expect(summary).toBeDefined();
-
-    const counter = summary!.counters[0];
-    expect(counter.selectedValue).toEqual({ object: ["a", "b", "c"] });
-    expect(counter.configRowIndex).toBe(0);
-    expect(counter.conditionalValueIndex).toBe(0);
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["my-string-list-key"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "my-string-list-key", type: "CONFIG", value: ["a", "b", "c"], value_type: "string_list", count: 1, reason: 1, selected_value: { stringList: ["a", "b", "c"] }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
   });
 
-  // ──────────────────────────────────────────────────
-  // Category 4: Context Telemetry
-  // ──────────────────────────────────────────────────
-
   it("context shape merges fields across multiple records", () => {
-    const collector = new ContextShapeCollector("periodic_example");
-
-    collector.push({ user: { name: "alice", age: 30 } });
-    collector.push({ user: { name: "bob", score: 9.5 }, team: { name: "engineering" } });
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-    expect(event!.contextShapes).toBeDefined();
-
-    const shapes = event!.contextShapes!.shapes;
-
-    const userShape = shapes.find((s) => s.name === "user");
-    expect(userShape).toBeDefined();
-    expect(userShape!.fieldTypes.name).toBe(2); // string
-    expect(userShape!.fieldTypes.age).toBe(1); // int
-    expect(userShape!.fieldTypes.score).toBe(4); // double
-
-    const teamShape = shapes.find((s) => s.name === "team");
-    expect(teamShape).toBeDefined();
-    expect(teamShape!.fieldTypes.name).toBe(2); // string
+    const aggregator = buildAggregator("context_shape", {  });
+    feedAggregator(aggregator, "context_shape", [{ user: { name: "alice", age: 30 } }, { user: { name: "bob", score: 9.5 }, team: { name: "engineering" } }], {});
+    expect(aggregatorPost(aggregator, "context_shape", "/api/v1/context-shapes")).toEqual([{ name: "user", field_types: { name: 2, age: 1, score: 4 } }, { name: "team", field_types: { name: 2 } }]);
   });
 
   it("example contexts deduplicates by key value", () => {
-    // Use a large rateLimitMs so deduplication works within the test
-    const collector = new ExampleContextCollector("periodic_example", 10000, 60000);
-
-    collector.push({ user: { key: "user-123", name: "alice" } });
-    collector.push({ user: { key: "user-123", name: "bob" } });
-
-    const event = collector.drain();
-    expect(event).toBeDefined();
-    expect(event!.exampleContexts).toBeDefined();
-
-    const examples = event!.exampleContexts!.examples;
-    // Should deduplicate: only 1 example for key "user-123"
-    expect(examples).toHaveLength(1);
-
-    const userCtx = examples[0].contextSet.contexts.find((c) => c.type === "user");
-    expect(userCtx).toBeDefined();
-    expect(userCtx!.values.key).toBe("user-123");
-    expect(userCtx!.values.name).toBe("alice");
+    const aggregator = buildAggregator("example_contexts", {  });
+    feedAggregator(aggregator, "example_contexts", [{ user: { key: "user-123", name: "alice" } }, { user: { key: "user-123", name: "bob" } }], {});
+    expect(aggregatorPost(aggregator, "example_contexts", "/api/v1/telemetry")).toEqual({ user: { key: "user-123", name: "alice" } });
   });
 
-  // ──────────────────────────────────────────────────
-  // Category 5: Configuration Modes
-  // ──────────────────────────────────────────────────
-
   it("telemetry disabled emits nothing", () => {
-    // Evaluation summaries disabled
-    const collector = new EvaluationSummaryCollector(false);
-
-    const eval1 = evaluateForTelemetry("brand.new.string", {});
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    expect(event).toBeUndefined();
-
-    // Context upload mode "none" disables both shape and example collectors
-    const shapeCollector = new ContextShapeCollector("none");
-    shapeCollector.push({ user: { name: "alice" } });
-    expect(shapeCollector.drain()).toBeUndefined();
-
-    const exampleCollector = new ExampleContextCollector("none", 10000, 0);
-    exampleCollector.push({ user: { key: "test", name: "alice" } });
-    expect(exampleCollector.drain()).toBeUndefined();
+    const aggregator = buildAggregator("evaluation_summary", { collect_evaluation_summaries: false, context_upload_mode: ":none" });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.string"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual(undefined);
   });
 
   it("shapes only mode reports shapes but not examples", () => {
-    const shapeCollector = new ContextShapeCollector("shapes_only");
-    shapeCollector.push({ user: { name: "alice", key: "alice-123" } });
-
-    const shapeEvent = shapeCollector.drain();
-    expect(shapeEvent).toBeDefined();
-    expect(shapeEvent!.contextShapes).toBeDefined();
-
-    const shapes = shapeEvent!.contextShapes!.shapes;
-    const userShape = shapes.find((s) => s.name === "user");
-    expect(userShape).toBeDefined();
-    expect(userShape!.fieldTypes.name).toBe(2); // string
-    expect(userShape!.fieldTypes.key).toBe(2); // string
-
-    // Example contexts should be disabled in shapes_only mode
-    const exampleCollector = new ExampleContextCollector("shapes_only" as any, 10000, 0);
-    exampleCollector.push({ user: { key: "alice-123", name: "alice" } });
-    expect(exampleCollector.drain()).toBeUndefined();
+    const aggregator = buildAggregator("context_shape", { context_upload_mode: ":shape_only" });
+    feedAggregator(aggregator, "context_shape", { user: { name: "alice", key: "alice-123" } }, {});
+    expect(aggregatorPost(aggregator, "context_shape", "/api/v1/context-shapes")).toEqual([{ name: "user", field_types: { name: 2, key: 2 } }]);
   });
 
-  // ──────────────────────────────────────────────────
-  // Category 6: Edge Cases
-  // ──────────────────────────────────────────────────
-
   it("log level evaluations are excluded from telemetry", () => {
-    const collector = new EvaluationSummaryCollector(true);
-
-    const eval1 = evaluateForTelemetry("log-level.prefab.criteria_evaluator", {});
-    expect(eval1).toBeDefined();
-    collector.push(eval1!);
-
-    const event = collector.drain();
-    // log_level evaluations should be filtered out, so drain returns undefined
-    expect(event).toBeUndefined();
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["log-level.prefab.criteria_evaluator"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual(undefined);
   });
 
   it("empty context produces no context telemetry", () => {
-    const collector = new ContextShapeCollector("periodic_example");
-    collector.push({});
-
-    const event = collector.drain();
-    expect(event).toBeUndefined();
+    const aggregator = buildAggregator("context_shape", {  });
+    feedAggregator(aggregator, "context_shape", {  }, {});
+    expect(aggregatorPost(aggregator, "context_shape", "/api/v1/context-shapes")).toEqual(undefined);
   });
 });
