@@ -27,6 +27,7 @@ import { mergeContexts } from "./context";
 import { parseLevel, shouldLog } from "./logger";
 import { durationToMilliseconds } from "./duration";
 import { loadEnvelopeFromDatadir } from "./datadir";
+import { loadQuonfigUserContext } from "./devContext";
 
 import { EvaluationSummaryCollector } from "./telemetry/evaluationSummaries";
 import { ContextShapeCollector } from "./telemetry/contextShapes";
@@ -146,7 +147,7 @@ export class Quonfig {
   private readonly pollInterval: number;
   private readonly namespace?: string;
   private readonly onNoDefault: OnNoDefault;
-  private readonly globalContext?: Contexts;
+  private readonly globalContext: Contexts;
   private readonly initTimeout: number;
   private readonly datadir?: string;
   private readonly datafile?: string | object;
@@ -183,7 +184,11 @@ export class Quonfig {
     this.pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
     this.namespace = options.namespace;
     this.onNoDefault = options.onNoDefault ?? "error";
-    this.globalContext = options.globalContext;
+    const devContextEnabled =
+      options.enableQuonfigUserContext === true ||
+      process.env.QUONFIG_DEV_CONTEXT === "true";
+    const devContext = devContextEnabled ? loadQuonfigUserContext() : undefined;
+    this.globalContext = mergeContexts(devContext, options.globalContext);
     this.initTimeout = options.initTimeout ?? DEFAULT_INIT_TIMEOUT;
     this.datadir = options.datadir;
     this.datafile = options.datafile;

@@ -178,6 +178,16 @@ export interface QuonfigOptions {
   /** Called whenever the config store is updated (SSE push, poll, or initial load). Use this to react to live config changes. */
   onConfigUpdate?: () => void;
   /**
+   * When true (or when env var `QUONFIG_DEV_CONTEXT=true`), the SDK reads
+   * `~/.quonfig/tokens.json` (written by `qfg login`) on construction and
+   * injects `{ "quonfig-user": { email: <userEmail> } }` into globalContext.
+   *
+   * Default OFF. The injected attribute is dev-only by construction: production
+   * servers never have the tokens file, so rules keyed on `quonfig-user.email`
+   * are dead code in prod. Customer-supplied globalContext keys win on collision.
+   */
+  enableQuonfigUserContext?: boolean;
+  /**
    * Config key used by the `shouldLog({loggerPath, ...})` convenience overload.
    *
    * When set (e.g. `"log-level.app-quonfig"`), callers can invoke
