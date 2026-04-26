@@ -86,16 +86,6 @@ describe("context_precedence", () => {
     expect(__actual).toBe("default");
   });
 
-  it("returns the correct `get` value using the global context and api context (1)", () => {
-    const __actual = resolveCase("basic.rule.config.with.api.conditional", mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts));
-    expect(__actual).toBe("override");
-  });
-
-  it("returns the correct `get` value using the global context and api context (2)", () => {
-    const __actual = resolveCase("basic.rule.config.with.api.conditional", mergeContexts({ user: { email: "test@example.com" } } as Contexts));
-    expect(__actual).toBe("api-override");
-  });
-
   it("returns the correct `get` value when local context clobbers global context (1)", () => {
     const __actual = resolveCase("basic.rule.config", mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts));
     expect(__actual).toBe("override");

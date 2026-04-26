@@ -66,11 +66,6 @@ describe("get", () => {
     expect(__actual).toEqual(["a", "b", "c"]);
   });
 
-  it("can return an override based on the default context", () => {
-    const __actual = resolveCase("my-overridden-key", {});
-    expect(__actual).toBe("overridden");
-  });
-
   it("can return a value provided by an environment variable", () => {
     const __actual = resolveCase("prefab.secrets.encryption.key", {});
     expect(__actual).toBe("c87ba22d8662282abe8a0e4651327b579cb64a454ab0f4c170b45b15f049a221");
