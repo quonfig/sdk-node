@@ -187,7 +187,7 @@ export class Quonfig {
     const devContextEnabled =
       options.enableQuonfigUserContext === true ||
       process.env.QUONFIG_DEV_CONTEXT === "true";
-    const devContext = devContextEnabled ? loadQuonfigUserContext() : undefined;
+    const devContext = devContextEnabled ? loadQuonfigUserContext(this.apiUrls) : undefined;
     this.globalContext = mergeContexts(devContext, options.globalContext);
     this.initTimeout = options.initTimeout ?? DEFAULT_INIT_TIMEOUT;
     this.datadir = options.datadir;
