@@ -6,6 +6,9 @@ import type {
   Contexts,
   ContextUploadMode,
   Evaluation,
+  EvaluationDetails,
+  EvaluationErrorCode,
+  EvaluationReason,
   GetValue,
   LogLevelName,
   LogLevelNumber,
@@ -13,6 +16,7 @@ import type {
   QuonfigOptions,
   RawMatch,
   Value,
+  ValueType,
 } from "./types";
 import { QUONFIG_SDK_LOGGING_CONTEXT_NAME } from "./types";
 
@@ -21,7 +25,12 @@ import { Evaluator } from "./evaluator";
 import { Resolver } from "./resolver";
 import { ConfigDependencyResolver } from "./rawMatch";
 import { Transport } from "./transport";
-import { computeReason } from "./reason";
+import {
+  computeReason,
+  ReasonStatic,
+  ReasonTargetingMatch,
+  ReasonSplit,
+} from "./reason";
 import { SSEConnection } from "./sse";
 import { mergeContexts } from "./context";
 import { parseLevel, shouldLog } from "./logger";
@@ -38,6 +47,32 @@ const DEFAULT_API_URLS = ["https://primary.quonfig.com"];
 const DEFAULT_POLL_INTERVAL = 60000;
 const DEFAULT_INIT_TIMEOUT = 10000;
 const DEFAULT_LOG_LEVEL: LogLevelNumber = 5; // warn
+
+/** Caller-side type token used by the *Details API for type-mismatch detection. */
+type RequestedType = "bool" | "string" | "number" | "string_list" | "json";
+
+/**
+ * Decide whether the requested type is compatible with the config's declared
+ * valueType. The requested side is the caller's intent (e.g. `getBoolDetails`);
+ * the actual side is the server-declared `valueType`. Weighted-values configs
+ * declare their underlying type in `valueType`, so the check is straightforward.
+ */
+function isCompatibleValueType(requested: RequestedType, actual: ValueType): boolean {
+  switch (requested) {
+    case "bool":
+      return actual === "bool";
+    case "string":
+      // log-level configs are commonly read as strings ("DEBUG", etc.).
+      return actual === "string" || actual === "log_level";
+    case "number":
+      return actual === "int" || actual === "double" || actual === "duration";
+    case "string_list":
+      return actual === "string_list";
+    case "json":
+      // JSON-shaped reads accept JSON or string_list (callers fall back).
+      return actual === "json" || actual === "string_list";
+  }
+}
 
 /**
  * BoundQuonfig is a Quonfig client bound to a specific context.
@@ -78,6 +113,26 @@ export class BoundQuonfig {
 
   getJSON(key: string, contexts?: Contexts): any {
     return this.client.getJSON(key, mergeContexts(this.boundContexts, contexts));
+  }
+
+  getBoolDetails(key: string, contexts?: Contexts): EvaluationDetails<boolean> {
+    return this.client.getBoolDetails(key, mergeContexts(this.boundContexts, contexts));
+  }
+
+  getStringDetails(key: string, contexts?: Contexts): EvaluationDetails<string> {
+    return this.client.getStringDetails(key, mergeContexts(this.boundContexts, contexts));
+  }
+
+  getNumberDetails(key: string, contexts?: Contexts): EvaluationDetails<number> {
+    return this.client.getNumberDetails(key, mergeContexts(this.boundContexts, contexts));
+  }
+
+  getStringListDetails(key: string, contexts?: Contexts): EvaluationDetails<string[]> {
+    return this.client.getStringListDetails(key, mergeContexts(this.boundContexts, contexts));
+  }
+
+  getJSONDetails(key: string, contexts?: Contexts): EvaluationDetails<unknown> {
+    return this.client.getJSONDetails(key, mergeContexts(this.boundContexts, contexts));
   }
 
   isFeatureEnabled(key: string, contexts?: Contexts): boolean {
@@ -322,6 +377,65 @@ export class Quonfig {
   }
 
   /**
+   * Get a boolean config value with evaluation details (reason + error code).
+   *
+   * Unlike {@link Quonfig.getBool}, this method NEVER throws — errors are
+   * surfaced as `{ value: undefined, reason: "ERROR", errorCode: ... }`.
+   */
+  getBoolDetails(key: string, contexts?: Contexts): EvaluationDetails<boolean> {
+    return this.evaluateDetailsTyped<boolean>(key, "bool", contexts, (raw) => {
+      if (typeof raw === "boolean") return raw;
+      // weighted_values can resolve to other types; coerce defensively
+      return !!raw;
+    });
+  }
+
+  /**
+   * Get a string config value with evaluation details (reason + error code).
+   * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
+   */
+  getStringDetails(key: string, contexts?: Contexts): EvaluationDetails<string> {
+    return this.evaluateDetailsTyped<string>(key, "string", contexts, (raw) => String(raw));
+  }
+
+  /**
+   * Get a numeric config value with evaluation details (reason + error code).
+   * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
+   */
+  getNumberDetails(key: string, contexts?: Contexts): EvaluationDetails<number> {
+    return this.evaluateDetailsTyped<number>(key, "number", contexts, (raw) => {
+      if (typeof raw === "number") return raw;
+      const n = Number(raw);
+      return Number.isNaN(n) ? (undefined as unknown as number) : n;
+    });
+  }
+
+  /**
+   * Get a string-list config value with evaluation details (reason + error code).
+   * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
+   */
+  getStringListDetails(
+    key: string,
+    contexts?: Contexts
+  ): EvaluationDetails<string[]> {
+    return this.evaluateDetailsTyped<string[]>(key, "string_list", contexts, (raw) => {
+      if (Array.isArray(raw)) return raw.map((v: any) => String(v));
+      return undefined as unknown as string[];
+    });
+  }
+
+  /**
+   * Get a JSON config value with evaluation details (reason + error code).
+   * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
+   */
+  getJSONDetails(
+    key: string,
+    contexts?: Contexts
+  ): EvaluationDetails<unknown> {
+    return this.evaluateDetailsTyped<unknown>(key, "json", contexts, (raw) => raw);
+  }
+
+  /**
    * Get a number config value.
    */
   getNumber(key: string, contexts?: Contexts): number | undefined {
@@ -562,6 +676,120 @@ export class Quonfig {
     if (!this.initialized) {
       throw new Error("[quonfig] Not initialized. Call init() first.");
     }
+  }
+
+  /**
+   * Internal: evaluate a config and return {value, reason, errorCode} without
+   * throwing. The `requestedType` is used to detect TYPE_MISMATCH against the
+   * config's declared `valueType`.
+   */
+  private evaluateDetailsRaw(
+    key: string,
+    requestedType: RequestedType,
+    contexts?: Contexts
+  ): { value: GetValue | unknown; reason: EvaluationReason; errorCode?: EvaluationErrorCode } {
+    if (!this.initialized) {
+      return { value: undefined, reason: "ERROR", errorCode: "GENERAL" };
+    }
+
+    let mergedContexts: Contexts;
+    let config;
+    try {
+      mergedContexts = mergeContexts(this.globalContext, contexts);
+      config = this.store.get(key);
+    } catch (err) {
+      return { value: undefined, reason: "ERROR", errorCode: "GENERAL" };
+    }
+
+    if (config === undefined) {
+      return { value: undefined, reason: "ERROR", errorCode: "FLAG_NOT_FOUND" };
+    }
+
+    // Type-mismatch check against the config's declared valueType.
+    if (!isCompatibleValueType(requestedType, config.valueType)) {
+      return { value: undefined, reason: "ERROR", errorCode: "TYPE_MISMATCH" };
+    }
+
+    try {
+      this.contextShapes.push(mergedContexts);
+      this.exampleContexts.push(mergedContexts);
+
+      const match = this.evaluator.evaluateConfig(
+        config,
+        this.environmentId,
+        mergedContexts
+      );
+
+      if (!match.isMatch || match.value === undefined) {
+        return { value: undefined, reason: "DEFAULT" };
+      }
+
+      const { resolved, reportableValue } = this.resolver.resolveValue(
+        match.value,
+        config.key,
+        config.valueType,
+        this.environmentId,
+        mergedContexts
+      );
+
+      const unwrapped = this.resolver.unwrapValue(resolved);
+
+      const reasonNum = computeReason(match, config);
+      const reason: EvaluationReason =
+        reasonNum === ReasonStatic
+          ? "STATIC"
+          : reasonNum === ReasonSplit
+          ? "SPLIT"
+          : reasonNum === ReasonTargetingMatch
+          ? "TARGETING_MATCH"
+          : "TARGETING_MATCH";
+
+      const evaluation: Evaluation = {
+        configId: config.id,
+        configKey: config.key,
+        configType: config.type,
+        unwrappedValue: unwrapped as GetValue,
+        reportableValue: reportableValue,
+        ruleIndex: match.ruleIndex,
+        weightedValueIndex:
+          match.weightedValueIndex >= 0 ? match.weightedValueIndex : undefined,
+        reason: reasonNum,
+      };
+      this.evaluationSummaries.push(evaluation);
+
+      return { value: unwrapped, reason };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+      if (msg.includes("type mismatch")) {
+        return { value: undefined, reason: "ERROR", errorCode: "TYPE_MISMATCH" };
+      }
+      return { value: undefined, reason: "ERROR", errorCode: "GENERAL" };
+    }
+  }
+
+  /**
+   * Internal: typed wrapper around evaluateDetailsRaw — applies a value
+   * coercer and surfaces TYPE_MISMATCH if the coercer can't produce a value.
+   */
+  private evaluateDetailsTyped<T>(
+    key: string,
+    requestedType: RequestedType,
+    contexts: Contexts | undefined,
+    coerce: (raw: unknown) => T | undefined
+  ): EvaluationDetails<T> {
+    const raw = this.evaluateDetailsRaw(key, requestedType, contexts);
+    if (raw.reason !== "STATIC" && raw.reason !== "TARGETING_MATCH" && raw.reason !== "SPLIT") {
+      // DEFAULT or ERROR — pass through with no value
+      return raw.errorCode
+        ? { value: undefined, reason: raw.reason, errorCode: raw.errorCode }
+        : { value: undefined, reason: raw.reason };
+    }
+
+    const coerced = coerce(raw.value as unknown);
+    if (coerced === undefined) {
+      return { value: undefined, reason: "ERROR", errorCode: "TYPE_MISMATCH" };
+    }
+    return { value: coerced, reason: raw.reason };
   }
 
   private handleNoDefault(key: string, defaultValue?: any): any {

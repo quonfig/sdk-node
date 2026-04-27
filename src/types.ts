@@ -214,6 +214,30 @@ export interface EvalMatch {
   weightedValueIndex: number;
 }
 
+// ---- Public Evaluation Details (for *Details API) ----
+
+/** Reason returned by `get*Details` methods. Mirrors OpenFeature StandardResolutionReasons subset. */
+export type EvaluationReason =
+  | "STATIC"
+  | "TARGETING_MATCH"
+  | "SPLIT"
+  | "DEFAULT"
+  | "ERROR";
+
+/** Error code returned alongside `reason: "ERROR"` from `get*Details` methods. */
+export type EvaluationErrorCode = "FLAG_NOT_FOUND" | "TYPE_MISMATCH" | "GENERAL";
+
+/**
+ * Result of a `get*Details` evaluation. Includes the resolved value (when
+ * available) plus a reason describing how the value was selected, along with
+ * an optional error code when the reason is `"ERROR"`.
+ */
+export interface EvaluationDetails<T> {
+  value: T | undefined;
+  reason: EvaluationReason;
+  errorCode?: EvaluationErrorCode;
+}
+
 // ---- Log Level ----
 
 export type LogLevelName = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
