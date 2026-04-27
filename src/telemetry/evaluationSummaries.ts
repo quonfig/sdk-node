@@ -39,12 +39,21 @@ export class EvaluationSummaryCollector {
     this.startAt = this.startAt ?? Date.now();
 
     const key = JSON.stringify([evaluation.configKey, evaluation.configType]);
-    const wrapperKey = wrapperKeyForValue(evaluation.unwrappedValue);
+    // For redacted (confidential / decryptWith) values, the wire shape is
+    // always `{string: "*****<md5>"}` regardless of the underlying type —
+    // the redaction itself is a string and must not masquerade as the
+    // original wrapper. For plain evaluations, derive the wrapper from
+    // the runtime unwrapped value.
+    const isRedacted = evaluation.reportableValue !== undefined;
+    const wrapperKey = isRedacted
+      ? "string"
+      : wrapperKeyForValue(evaluation.unwrappedValue);
+    const selectedRaw = evaluation.reportableValue ?? evaluation.unwrappedValue;
     const counterKey = JSON.stringify([
       evaluation.configId,
       evaluation.ruleIndex,
       wrapperKey,
-      evaluation.reportableValue ?? evaluation.unwrappedValue,
+      selectedRaw,
       evaluation.weightedValueIndex,
     ]);
 

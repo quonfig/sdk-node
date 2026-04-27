@@ -130,4 +130,16 @@ describe("telemetry", () => {
     feedAggregator(aggregator, "context_shape", {  }, {});
     expect(aggregatorPost(aggregator, "context_shape", "/api/v1/context-shapes")).toEqual(undefined);
   });
+
+  it("confidential plain string is redacted in selectedValue", () => {
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["confidential.new.string"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "confidential.new.string", type: "CONFIG", value: "hello.world", value_type: "string", count: 1, reason: 1, selected_value: { string: "*****18aa7" }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
+  });
+
+  it("confidential encrypted string is redacted using ciphertext hash", () => {
+    const aggregator = buildAggregator("evaluation_summary", {  });
+    feedAggregator(aggregator, "evaluation_summary", { keys: ["a.secret.config"] }, {});
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([{ key: "a.secret.config", type: "CONFIG", value: "hello.world", value_type: "string", count: 1, reason: 1, selected_value: { string: "*****936c9" }, summary: { config_row_index: 0, conditional_value_index: 0 } }]);
+  });
 });

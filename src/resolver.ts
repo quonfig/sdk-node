@@ -10,11 +10,15 @@ const TRUE_VALUES = new Set(["true", "1", "t", "yes"]);
 const CONFIDENTIAL_PREFIX = "*****";
 
 /**
- * Make a confidential hash for reporting (MD5 last 5 chars).
+ * Make a confidential hash for reporting (MD5 first 5 chars).
+ *
+ * Format: `*****<first-5-hex-chars-md5>` lowercase. 10 chars total.
+ * Matches the canonical sdk-ruby ConfigValueUnwrapper#reportable_wrapped_value
+ * pattern so all SDKs emit the same redaction on the wire.
  */
 function makeConfidential(secret: string): string {
   const md5 = createHash("md5").update(secret).digest("hex");
-  return `${CONFIDENTIAL_PREFIX}${md5.slice(-5)}`;
+  return `${CONFIDENTIAL_PREFIX}${md5.slice(0, 5)}`;
 }
 
 /**

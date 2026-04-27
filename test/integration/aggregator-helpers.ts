@@ -17,7 +17,7 @@ import { ContextShapeCollector } from "../../src/telemetry/contextShapes";
 import { EvaluationSummaryCollector } from "../../src/telemetry/evaluationSummaries";
 import { ExampleContextCollector } from "../../src/telemetry/exampleContexts";
 import type { ContextUploadMode, Contexts, Evaluation } from "../../src/types";
-import { evaluateForTelemetry } from "./setup";
+import { evaluateForTelemetry, store } from "./setup";
 
 export type AggregatorKind = "context_shape" | "evaluation_summary" | "example_contexts";
 
@@ -28,6 +28,15 @@ interface ContextShapeAggregator {
 interface EvaluationSummaryAggregator {
   kind: "evaluation_summary";
   collector: EvaluationSummaryCollector;
+  // Side-channel populated by `feedAggregator` whenever an evaluation
+  // resolves to a confidential / decryptWith value. The collector itself
+  // (correctly) only emits the redacted `selectedValue` over the wire,
+  // but the cross-SDK YAML asserts both the runtime resolved value
+  // (`value` / `value_type`) and the redacted wire form (`selected_value`).
+  // We stash the runtime unwrapped value here, keyed by config_key, so
+  // `aggregatorPost` can restore the YAML's `value` field after draining.
+  // Mirrors sdk-ruby's `last_unwrapped_overrides` pattern.
+  unwrappedOverrides: Map<string, { unwrapped: unknown; valueType: string }>;
 }
 interface ExampleContextsAggregator {
   kind: "example_contexts";
@@ -63,7 +72,11 @@ export function buildAggregator(
     case "context_shape":
       return { kind, collector: new ContextShapeCollector(uploadMode) };
     case "evaluation_summary":
-      return { kind, collector: new EvaluationSummaryCollector(collectSummaries) };
+      return {
+        kind,
+        collector: new EvaluationSummaryCollector(collectSummaries),
+        unwrappedOverrides: new Map(),
+      };
     case "example_contexts":
       return { kind, collector: new ExampleContextCollector(uploadMode) };
   }
@@ -136,13 +149,40 @@ export function feedAggregator(
 
     for (const key of withCtx) {
       const ev = evaluateForTelemetry(key, contexts);
-      if (ev) agg.collector.push(ev);
+      if (ev) {
+        recordUnwrappedOverride(agg.unwrappedOverrides, ev);
+        agg.collector.push(ev);
+      }
     }
     for (const key of withoutCtx) {
       const ev = evaluateForTelemetry(key, {});
-      if (ev) agg.collector.push(ev);
+      if (ev) {
+        recordUnwrappedOverride(agg.unwrappedOverrides, ev);
+        agg.collector.push(ev);
+      }
     }
   }
+}
+
+/**
+ * Stash the runtime-resolved (unwrapped) value for a confidential /
+ * decryptWith evaluation. The collector itself emits only the redacted
+ * `selectedValue` — the runtime value never crosses the wire — but the
+ * cross-SDK YAML asserts both forms, so the post-projection in
+ * `aggregatorPost` reaches into this side-channel to restore `value` /
+ * `value_type` from the runtime view.
+ */
+function recordUnwrappedOverride(
+  overrides: Map<string, { unwrapped: unknown; valueType: string }>,
+  ev: Evaluation
+): void {
+  if (ev.reportableValue === undefined) return;
+  const cfg = store.get(ev.configKey);
+  const valueType = cfg?.valueType ?? "string";
+  overrides.set(ev.configKey, {
+    unwrapped: ev.unwrappedValue,
+    valueType,
+  });
 }
 
 /**
@@ -239,8 +279,18 @@ export function aggregatorPost(
     const out: EvaluationSummaryWireRecord[] = [];
     for (const s of sorted) {
       for (const counter of s.counters) {
-        const wireValueType = wireValueTypeFor(counter.selectedValue);
-        const wireValue = unwrapSelectedValue(counter.selectedValue);
+        let wireValueType = wireValueTypeFor(counter.selectedValue);
+        let wireValue: unknown = unwrapSelectedValue(counter.selectedValue);
+        // Confidential / decryptWith values: `selectedValue` carries the
+        // redacted wire form (e.g. `{string: "*****abc12"}`), but the YAML
+        // asserts `value` / `value_type` against the runtime resolved
+        // plaintext. Pull those back from the side-channel populated by
+        // `feedAggregator` (mirrors sdk-ruby's `last_unwrapped_overrides`).
+        const override = agg.unwrappedOverrides.get(s.key);
+        if (override !== undefined) {
+          wireValue = override.unwrapped;
+          wireValueType = override.valueType;
+        }
         const summary: WireSummary = {
           config_row_index: counter.configRowIndex,
           conditional_value_index: counter.conditionalValueIndex,
