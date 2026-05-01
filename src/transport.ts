@@ -1,6 +1,5 @@
 import type { ConfigEnvelope } from "./types";
-
-const SDK_VERSION = "0.1.0";
+import SDK_VERSION from "./version";
 
 export interface FetchResult {
   envelope?: ConfigEnvelope;

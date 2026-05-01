@@ -1,6 +1,6 @@
 {
   "name": "@quonfig/node",
-  "version": "0.0.19",
+  "version": "0.0.20",
   "description": "Quonfig SDK for Node.js - Feature Flags, Live Config, and Dynamic Log Levels",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -27,6 +27,7 @@
     "dist"
   ],
   "scripts": {
+    "prebuild": "node scripts/generate-version.mjs",
     "build": "rm -rf dist/ && npx tsup",
     "test": "vitest run",
     "test:watch": "vitest",

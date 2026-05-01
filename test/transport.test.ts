@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Transport } from "../src/transport";
@@ -46,6 +48,22 @@ describe("Transport fetch URL — cache-buster gating", () => {
     expect(capturedUrls[0]).toMatch(/\?_=\d+/);
     expect(capturedUrls[1]).toMatch(/\?_=\d+/);
     expect(capturedUrls[0]).not.toBe(capturedUrls[1]);
+  });
+
+  it("sends X-Quonfig-SDK-Version sourced from package.json", async () => {
+    const pkg = JSON.parse(
+      readFileSync(resolve(__dirname, "../package.json"), "utf8"),
+    ) as { version: string };
+    let captured: Headers | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      captured = new Headers(init?.headers as HeadersInit);
+      return mockFetchOk(makeEnvelope("v1"));
+    });
+
+    const transport = new Transport(["https://api.example.com"], "test-key");
+    await transport.fetchConfigs();
+
+    expect(captured?.get("X-Quonfig-SDK-Version")).toBe(`node-${pkg.version}`);
   });
 
   it("omits cache-buster in production mode", async () => {
