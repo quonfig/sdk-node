@@ -47,8 +47,12 @@ quonfig.close();
 
 ```typescript
 new Quonfig({
-  sdkKey: "your-sdk-key",       // Required
-  apiUrl: "https://primary.quonfig.com", // API endpoint (default)
+  sdkKey: "your-sdk-key",        // Required (or set QUONFIG_BACKEND_SDK_KEY)
+  apiUrls: ["https://primary.quonfig.com", "https://secondary.quonfig.com"],
+                                 // Ordered failover list. Defaults are derived
+                                 // from QUONFIG_DOMAIN (see below).
+  telemetryUrl: "https://telemetry.quonfig.com",
+                                 // Default derived from QUONFIG_DOMAIN.
   enableSSE: true,               // Real-time updates via SSE (default: true)
   enablePolling: false,          // Polling fallback (default: false)
   pollInterval: 60000,           // Polling interval in ms (default: 60000)
@@ -59,6 +63,21 @@ new Quonfig({
   datafile: "./config.json",     // Legacy local envelope path
 });
 ```
+
+## Environment variables
+
+| Variable                    | Purpose                                                                        |
+|-----------------------------|--------------------------------------------------------------------------------|
+| `QUONFIG_BACKEND_SDK_KEY`   | Fallback for `sdkKey` when omitted from options.                               |
+| `QUONFIG_DOMAIN`            | Domain used to derive default `apiUrls` and `telemetryUrl`. Defaults to `quonfig.com`. Set to `quonfig-staging.com` to point everything at staging. |
+| `QUONFIG_ENVIRONMENT`       | Environment name to use in datadir mode (overridden by the `environment` option). |
+| `QUONFIG_DEV_CONTEXT`       | When `true`, injects `quonfig-user.email` from `~/.quonfig/tokens.json`.       |
+
+Resolution order for URLs (highest wins):
+
+1. Explicit `apiUrls` / `telemetryUrl` option.
+2. `QUONFIG_DOMAIN` env var (derives `https://primary.${DOMAIN}`, `https://secondary.${DOMAIN}`, `https://telemetry.${DOMAIN}`).
+3. Hardcoded default `quonfig.com`.
 
 ## Dynamic log levels with Winston
 

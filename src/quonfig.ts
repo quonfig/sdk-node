@@ -24,7 +24,7 @@ import { ConfigStore } from "./store";
 import { Evaluator } from "./evaluator";
 import { Resolver } from "./resolver";
 import { ConfigDependencyResolver } from "./rawMatch";
-import { Transport } from "./transport";
+import { Transport, defaultApiUrls } from "./transport";
 import {
   computeReason,
   ReasonStatic,
@@ -43,7 +43,6 @@ import { ContextShapeCollector } from "./telemetry/contextShapes";
 import { ExampleContextCollector } from "./telemetry/exampleContexts";
 import { TelemetryReporter } from "./telemetry/reporter";
 
-const DEFAULT_API_URLS = ["https://primary.quonfig.com"];
 const DEFAULT_POLL_INTERVAL = 60000;
 const DEFAULT_INIT_TIMEOUT = 10000;
 const DEFAULT_LOG_LEVEL: LogLevelNumber = 5; // warn
@@ -229,7 +228,8 @@ export class Quonfig {
 
   constructor(options: QuonfigOptions) {
     this.sdkKey = options.sdkKey ?? process.env.QUONFIG_BACKEND_SDK_KEY ?? "";
-    this.apiUrls = options.apiUrls ?? DEFAULT_API_URLS;
+    // apiUrls resolution: explicit option > QUONFIG_DOMAIN-derived default.
+    this.apiUrls = options.apiUrls ?? defaultApiUrls();
     if (this.apiUrls.length === 0) {
       throw new Error("[quonfig] apiUrls must not be empty");
     }

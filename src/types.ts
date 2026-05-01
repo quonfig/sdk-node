@@ -157,9 +157,18 @@ export type ContextUploadMode = "none" | "shapes_only" | "periodic_example";
 export interface QuonfigOptions {
   /** SDK key for authentication. Falls back to the `QUONFIG_BACKEND_SDK_KEY` env var when omitted. */
   sdkKey?: string;
-  /** Ordered list of API base URLs to try. Defaults to ["https://primary.quonfig.com"]. SSE stream URLs are derived by prepending "stream." to each hostname. */
+  /**
+   * Ordered list of API base URLs to try. Defaults are derived from the
+   * `QUONFIG_DOMAIN` env var (default `quonfig.com`):
+   * `["https://primary.${DOMAIN}", "https://secondary.${DOMAIN}"]`.
+   * SSE stream URLs are derived by prepending `stream.` to each hostname.
+   */
   apiUrls?: string[];
-  /** Base URL for the dedicated telemetry service. Defaults to https://telemetry.quonfig.com. Overridden by QUONFIG_TELEMETRY_URL env var. */
+  /**
+   * Base URL for the dedicated telemetry service. Defaults to
+   * `https://telemetry.${QUONFIG_DOMAIN}` (default domain `quonfig.com`).
+   * Setting this option supersedes the env-var-derived default.
+   */
   telemetryUrl?: string;
   enableSSE?: boolean;
   enablePolling?: boolean;

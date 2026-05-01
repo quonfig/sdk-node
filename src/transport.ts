@@ -7,13 +7,37 @@ export interface FetchResult {
   notChanged: boolean;
 }
 
+const DEFAULT_DOMAIN = "quonfig.com";
+
+/**
+ * Read the active Quonfig domain. Defaults to `quonfig.com`.
+ *
+ * Set `QUONFIG_DOMAIN=quonfig-staging.com` (or any other domain) to derive
+ * api/sse/telemetry URLs against that domain in one shot. Mirrors the CLI
+ * convention.
+ */
+export function getDomain(): string {
+  const v = process.env.QUONFIG_DOMAIN;
+  return v && v.length > 0 ? v : DEFAULT_DOMAIN;
+}
+
+/** Derive the default ordered list of API base URLs from the active domain. */
+export function defaultApiUrls(): string[] {
+  const domain = getDomain();
+  return [`https://primary.${domain}`, `https://secondary.${domain}`];
+}
+
+/** Derive the default telemetry base URL from the active domain. */
+export function defaultTelemetryUrl(): string {
+  return `https://telemetry.${getDomain()}`;
+}
+
 /**
  * HTTP transport for fetching configs from the Quonfig API.
  *
  * Supports ETag-based caching to avoid re-downloading unchanged configs.
  * Accepts an ordered list of base URLs and tries each in turn (primary/secondary failover).
  */
-export const DEFAULT_TELEMETRY_URL = "https://telemetry.quonfig.com";
 
 /**
  * Derive the SSE stream base URL for an apiUrl by prepending `stream.` to the hostname.
@@ -52,9 +76,10 @@ export class Transport {
     this.streamUrls = this.baseUrls.map((u) => deriveStreamUrl(u));
     this.activeBaseUrl = this.baseUrls[0];
     this.activeStreamUrl = this.streamUrls[0];
-    // Priority: QUONFIG_TELEMETRY_URL env var > constructor option > default
-    const envUrl = process.env.QUONFIG_TELEMETRY_URL;
-    const url = envUrl || telemetryBaseUrl || DEFAULT_TELEMETRY_URL;
+    // Resolution order: explicit option > QUONFIG_DOMAIN-derived default.
+    // QUONFIG_TELEMETRY_URL is intentionally NOT honored — use QUONFIG_DOMAIN
+    // (alpha-phase: no backward-compat).
+    const url = telemetryBaseUrl || defaultTelemetryUrl();
     this.telemetryBaseUrl = url.replace(/\/$/, "");
     this.sdkKey = sdkKey;
   }
