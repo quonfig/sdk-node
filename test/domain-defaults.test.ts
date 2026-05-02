@@ -103,6 +103,79 @@ describe("QUONFIG_DOMAIN env var derivation", () => {
     );
   });
 
+  it("domain init option flips api + telemetry URLs in lockstep (qfg-ppuc.3)", () => {
+    vi.stubEnv("QUONFIG_DOMAIN", "");
+
+    const q = new Quonfig({
+      sdkKey: "test",
+      datafile: emptyEnvelope(),
+      domain: "quonfig-staging.com",
+    });
+
+    const i = internals(q);
+    expect(i.apiUrls).toEqual([
+      "https://primary.quonfig-staging.com",
+      "https://secondary.quonfig-staging.com",
+    ]);
+    expect(i.transport.telemetryBaseUrl).toBe(
+      "https://telemetry.quonfig-staging.com",
+    );
+  });
+
+  it("domain init option wins over QUONFIG_DOMAIN env var", () => {
+    vi.stubEnv("QUONFIG_DOMAIN", "env-should-lose.example");
+
+    const q = new Quonfig({
+      sdkKey: "test",
+      datafile: emptyEnvelope(),
+      domain: "quonfig-staging.com",
+    });
+
+    const i = internals(q);
+    expect(i.apiUrls).toEqual([
+      "https://primary.quonfig-staging.com",
+      "https://secondary.quonfig-staging.com",
+    ]);
+    expect(i.transport.telemetryBaseUrl).toBe(
+      "https://telemetry.quonfig-staging.com",
+    );
+  });
+
+  it("explicit apiUrls + telemetryUrl still override domain init option", () => {
+    vi.stubEnv("QUONFIG_DOMAIN", "");
+
+    const q = new Quonfig({
+      sdkKey: "test",
+      datafile: emptyEnvelope(),
+      domain: "quonfig-staging.com",
+      apiUrls: ["http://localhost:8080"],
+      telemetryUrl: "https://telemetry.example.test",
+    });
+
+    const i = internals(q);
+    expect(i.apiUrls).toEqual(["http://localhost:8080"]);
+    expect(i.transport.telemetryBaseUrl).toBe("https://telemetry.example.test");
+  });
+
+  it("localhost domain still derives subdomains (no special-casing)", () => {
+    vi.stubEnv("QUONFIG_DOMAIN", "");
+
+    const q = new Quonfig({
+      sdkKey: "test",
+      datafile: emptyEnvelope(),
+      domain: "quonfig.localhost",
+    });
+
+    const i = internals(q);
+    expect(i.apiUrls).toEqual([
+      "https://primary.quonfig.localhost",
+      "https://secondary.quonfig.localhost",
+    ]);
+    expect(i.transport.telemetryBaseUrl).toBe(
+      "https://telemetry.quonfig.localhost",
+    );
+  });
+
   it("QUONFIG_TELEMETRY_URL env var is no longer honored", () => {
     // Alpha-phase: deleting backward-compat. Setting the old env var must NOT
     // affect resolution; only QUONFIG_DOMAIN + the option are inputs.

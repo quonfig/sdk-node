@@ -8,27 +8,34 @@ export interface FetchResult {
 
 const DEFAULT_DOMAIN = "quonfig.com";
 
+export type DomainOptions = { domain?: string };
+
 /**
- * Read the active Quonfig domain. Defaults to `quonfig.com`.
+ * Read the active Quonfig domain.
  *
- * Set `QUONFIG_DOMAIN=quonfig-staging.com` (or any other domain) to derive
- * api/sse/telemetry URLs against that domain in one shot. Mirrors the CLI
- * convention.
+ * Resolution order (highest wins):
+ *   1. `options.domain` — explicit init option (mirrors @quonfig/javascript;
+ *      gives server callers a non-env-var way to flip api+telemetry in lockstep)
+ *   2. `process.env.QUONFIG_DOMAIN` — convenient for staging/prod deploys
+ *   3. Hardcoded default `"quonfig.com"`
  */
-export function getDomain(): string {
+export function getDomain(options?: DomainOptions): string {
+  if (options && typeof options.domain === "string" && options.domain.length > 0) {
+    return options.domain;
+  }
   const v = process.env.QUONFIG_DOMAIN;
   return v && v.length > 0 ? v : DEFAULT_DOMAIN;
 }
 
 /** Derive the default ordered list of API base URLs from the active domain. */
-export function defaultApiUrls(): string[] {
-  const domain = getDomain();
+export function defaultApiUrls(options?: DomainOptions): string[] {
+  const domain = getDomain(options);
   return [`https://primary.${domain}`, `https://secondary.${domain}`];
 }
 
 /** Derive the default telemetry base URL from the active domain. */
-export function defaultTelemetryUrl(): string {
-  return `https://telemetry.${getDomain()}`;
+export function defaultTelemetryUrl(options?: DomainOptions): string {
+  return `https://telemetry.${getDomain(options)}`;
 }
 
 /**
@@ -70,15 +77,15 @@ export class Transport {
    */
   private __testStreamUrlOverride?: string;
 
-  constructor(baseUrls: string[], sdkKey: string, telemetryBaseUrl?: string) {
+  constructor(baseUrls: string[], sdkKey: string, telemetryBaseUrl?: string, domain?: string) {
     this.baseUrls = baseUrls.map((u) => u.replace(/\/$/, ""));
     this.streamUrls = this.baseUrls.map((u) => deriveStreamUrl(u));
     this.activeBaseUrl = this.baseUrls[0];
     this.activeStreamUrl = this.streamUrls[0];
-    // Resolution order: explicit option > QUONFIG_DOMAIN-derived default.
+    // Resolution order: explicit telemetryUrl > options.domain > QUONFIG_DOMAIN > default.
     // QUONFIG_TELEMETRY_URL is intentionally NOT honored — use QUONFIG_DOMAIN
     // (alpha-phase: no backward-compat).
-    const url = telemetryBaseUrl || defaultTelemetryUrl();
+    const url = telemetryBaseUrl || defaultTelemetryUrl({ domain });
     this.telemetryBaseUrl = url.replace(/\/$/, "");
     this.sdkKey = sdkKey;
   }

@@ -158,16 +158,27 @@ export interface QuonfigOptions {
   /** SDK key for authentication. Falls back to the `QUONFIG_BACKEND_SDK_KEY` env var when omitted. */
   sdkKey?: string;
   /**
-   * Ordered list of API base URLs to try. Defaults are derived from the
-   * `QUONFIG_DOMAIN` env var (default `quonfig.com`):
-   * `["https://primary.${DOMAIN}", "https://secondary.${DOMAIN}"]`.
+   * Single knob that flips api + sse + telemetry URLs in lockstep. Mirrors
+   * the `domain` option in @quonfig/javascript.
+   *   `domain: "quonfig-staging.com"` derives:
+   *     api:        https://primary.quonfig-staging.com (+ secondary)
+   *     sse:        https://stream.primary.quonfig-staging.com (+ secondary)
+   *     telemetry:  https://telemetry.quonfig-staging.com
+   *
+   * Resolution order (highest wins): explicit `apiUrls` / `telemetryUrl` >
+   * `domain` init option > `process.env.QUONFIG_DOMAIN` > `"quonfig.com"`.
+   */
+  domain?: string;
+  /**
+   * Ordered list of API base URLs to try. Escape hatch for deploys that don't
+   * follow the `primary.${domain}` / `secondary.${domain}` convention.
    * SSE stream URLs are derived by prepending `stream.` to each hostname.
+   * When set, wins over `domain`.
    */
   apiUrls?: string[];
   /**
-   * Base URL for the dedicated telemetry service. Defaults to
-   * `https://telemetry.${QUONFIG_DOMAIN}` (default domain `quonfig.com`).
-   * Setting this option supersedes the env-var-derived default.
+   * Base URL for the dedicated telemetry service. Escape hatch for deploys
+   * that split telemetry off the primary domain. When set, wins over `domain`.
    */
   telemetryUrl?: string;
   enableSSE?: boolean;

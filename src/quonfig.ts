@@ -228,8 +228,8 @@ export class Quonfig {
 
   constructor(options: QuonfigOptions) {
     this.sdkKey = options.sdkKey ?? process.env.QUONFIG_BACKEND_SDK_KEY ?? "";
-    // apiUrls resolution: explicit option > QUONFIG_DOMAIN-derived default.
-    this.apiUrls = options.apiUrls ?? defaultApiUrls();
+    // apiUrls resolution: explicit option > options.domain > QUONFIG_DOMAIN > default.
+    this.apiUrls = options.apiUrls ?? defaultApiUrls({ domain: options.domain });
     if (this.apiUrls.length === 0) {
       throw new Error("[quonfig] apiUrls must not be empty");
     }
@@ -258,7 +258,7 @@ export class Quonfig {
     this.evaluator = new Evaluator(this.store);
     this.resolver = new Resolver(this.store, this.evaluator);
     this.dependencyResolver = new ConfigDependencyResolver(this.store, this.evaluator);
-    this.transport = new Transport(this.apiUrls, this.sdkKey, this.telemetryUrl);
+    this.transport = new Transport(this.apiUrls, this.sdkKey, this.telemetryUrl, options.domain);
 
     // Initialize telemetry collectors
     const contextUploadMode: ContextUploadMode = options.contextUploadMode ?? "periodic_example";
