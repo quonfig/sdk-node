@@ -46,7 +46,10 @@ export class Client {
     if (this.jwt) {
       h["Authorization"] = `Bearer ${this.jwt}`;
     } else if (this.sdkKey) {
-      h["Authorization"] = `Basic ${Buffer.from(this.sdkKey).toString("base64")}`;
+      // Match Transport.getAuthHeader: base64("1:{sdkKey}"). api-delivery and
+      // api-telemetry both split on the first colon; sending base64(sdkKey)
+      // alone yields no colon and api-telemetry returns 401.
+      h["Authorization"] = `Basic ${Buffer.from(`1:${this.sdkKey}`).toString("base64")}`;
     }
 
     return h;
