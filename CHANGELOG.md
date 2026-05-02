@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.22 - 2026-05-02
+
+- New `domain` init option that flips api + sse + telemetry URLs in lockstep — mirrors the `domain` option added in `@quonfig/javascript@0.0.13`. Resolution order: explicit `apiUrls` / `telemetryUrl` > `options.domain` > `process.env.QUONFIG_DOMAIN` > `"quonfig.com"`. Existing callers using only the env var or only `apiUrls` are unaffected (qfg-ppuc.3).
+
 ## 0.0.21 - 2026-05-02
 
 - `close()` now drains pending telemetry before stopping the reporter, and returns a `Promise<void>` instead of `void`. Buffered eval summaries / context shapes that hadn't hit the periodic flush window were previously dropped on clean shutdown — they're now POSTed before the timers stop. Mirrors the `sdk-javascript@0.0.12` contract (qfg-q3cx) and the Go/Ruby/Python "close drains" behavior. Also fixes the OpenFeature provider foot-gun (qfg-vrfm): consumers calling `OpenFeature.close()` no longer silently lose telemetry, even without an explicit `await provider.getClient().flush()`.
