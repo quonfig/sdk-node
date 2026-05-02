@@ -651,9 +651,14 @@ export class Quonfig {
   }
 
   /**
-   * Close the SDK. Stops SSE, polling, and telemetry.
+   * Close the SDK. Drains pending telemetry, then stops SSE, polling, and
+   * the telemetry reporter. Returns a Promise so callers can `await close()`
+   * before exiting; matches Go/Ruby/Python "close drains" behavior and the
+   * sdk-javascript@0.0.12 contract.
    */
-  close(): void {
+  async close(): Promise<void> {
+    await this.flush();
+
     if (this.sseConnection) {
       this.sseConnection.close();
       this.sseConnection = undefined;

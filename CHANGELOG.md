@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.21 - 2026-05-02
+
+- `close()` now drains pending telemetry before stopping the reporter, and returns a `Promise<void>` instead of `void`. Buffered eval summaries / context shapes that hadn't hit the periodic flush window were previously dropped on clean shutdown — they're now POSTed before the timers stop. Mirrors the `sdk-javascript@0.0.12` contract (qfg-q3cx) and the Go/Ruby/Python "close drains" behavior. Also fixes the OpenFeature provider foot-gun (qfg-vrfm): consumers calling `OpenFeature.close()` no longer silently lose telemetry, even without an explicit `await provider.getClient().flush()`.
+- Migration: existing call sites that did `quonfig.close()` synchronously continue to work but no longer block on the drain. To preserve the new behavior, switch to `await quonfig.close()`.
+
 ## 0.0.17 - 2026-04-26
 
 - Integration test infrastructure: regenerated tests from the unified TS generator and wired aggregator-helpers to real telemetry collectors so cross-SDK suites exercise the actual emission path. No public API changes.
