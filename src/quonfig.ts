@@ -228,6 +228,11 @@ export class Quonfig {
 
   constructor(options: QuonfigOptions) {
     this.sdkKey = options.sdkKey ?? process.env.QUONFIG_BACKEND_SDK_KEY ?? "";
+    if (!this.sdkKey && !options.datadir && !options.datafile) {
+      throw new Error(
+        'Quonfig SDK requires an SDK key. Pass sdkKey: "qf_sk_..." in the constructor options, or set the QUONFIG_BACKEND_SDK_KEY environment variable. Note: the option name is sdkKey, not apiKey.'
+      );
+    }
     // apiUrls resolution: explicit option > options.domain > QUONFIG_DOMAIN > default.
     this.apiUrls = options.apiUrls ?? defaultApiUrls({ domain: options.domain });
     if (this.apiUrls.length === 0) {

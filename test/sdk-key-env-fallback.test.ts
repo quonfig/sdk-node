@@ -19,9 +19,10 @@ describe("Quonfig sdkKey env var fallback", () => {
     expect((q as unknown as { sdkKey: string }).sdkKey).toBe("env-key");
   });
 
-  it("leaves sdkKey empty when neither option nor env set", () => {
+  it("throws when neither option nor env set (and no datadir/datafile)", () => {
     vi.stubEnv("QUONFIG_BACKEND_SDK_KEY", "");
-    const q = new Quonfig({} as Parameters<typeof Quonfig>[0]);
-    expect((q as unknown as { sdkKey: string }).sdkKey).toBe("");
+    expect(() => new Quonfig({} as Parameters<typeof Quonfig>[0])).toThrowError(
+      /Quonfig SDK requires an SDK key/
+    );
   });
 });
