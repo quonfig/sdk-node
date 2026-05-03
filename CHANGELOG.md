@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.23 - 2026-05-02
+
+- Fix: throw a clear error when `sdkKey` is empty in cloud mode instead of failing silently downstream (qfg-zcsj).
+- Fix: align `ApiClient` auth header with the Transport — both now send `Authorization: Basic <base64("1:<sdkKey>")>` so REST and SSE auth go through the same code path (qfg-ds7v).
+- Test: regression coverage for URL fall-through on transport-layer errors (the SDK now retries the secondary URL when the primary throws, not just on non-2xx responses).
+
 ## 0.0.22 - 2026-05-02
 
 - New `domain` init option that flips api + sse + telemetry URLs in lockstep — mirrors the `domain` option added in `@quonfig/javascript@0.0.13`. Resolution order: explicit `apiUrls` / `telemetryUrl` > `options.domain` > `process.env.QUONFIG_DOMAIN` > `"quonfig.com"`. Existing callers using only the env var or only `apiUrls` are unaffected (qfg-ppuc.3).
@@ -8,6 +14,21 @@
 
 - `close()` now drains pending telemetry before stopping the reporter, and returns a `Promise<void>` instead of `void`. Buffered eval summaries / context shapes that hadn't hit the periodic flush window were previously dropped on clean shutdown — they're now POSTed before the timers stop. Mirrors the `sdk-javascript@0.0.12` contract (qfg-q3cx) and the Go/Ruby/Python "close drains" behavior. Also fixes the OpenFeature provider foot-gun (qfg-vrfm): consumers calling `OpenFeature.close()` no longer silently lose telemetry, even without an explicit `await provider.getClient().flush()`.
 - Migration: existing call sites that did `quonfig.close()` synchronously continue to work but no longer block on the drain. To preserve the new behavior, switch to `await quonfig.close()`.
+
+## 0.0.20 - 2026-05-01
+
+- The `X-Quonfig-SDK-Version` telemetry header now reflects the published `package.json` version instead of the hardcoded `node-0.1.0` string. A new `scripts/generate-version.mjs` runs in `prebuild` to write `src/version.ts` from `package.json`, and a regression test in `test/transport.test.ts` asserts the header value matches `package.json` at runtime so future bumps can't drift again.
+
+## 0.0.19 - 2026-05-01
+
+- Replace `QUONFIG_TELEMETRY_URL` with `QUONFIG_DOMAIN` derivation: a single env var now governs api, sse, and telemetry URLs in lockstep, eliminating the silent prod-telemetry mismatch when reading from staging (qfg-3uo8). The explicit `apiUrls` / `telemetryUrl` constructor options still take precedence.
+
+## 0.0.18 - 2026-04-27
+
+- Added `getBoolDetails`, `getStringDetails`, `getNumberDetails`, `getStringListDetails`, and `getJSONDetails` (with `BoundQuonfig` parity), returning `EvaluationDetails<T>` with `reason` in `{STATIC, TARGETING_MATCH, SPLIT, DEFAULT, ERROR}` and an `errorCode` in `{FLAG_NOT_FOUND, TYPE_MISMATCH, GENERAL}` on `ERROR`. Lets callers introspect *why* an evaluation returned what it did without a separate API.
+- Fix: `selectedValue` redaction now hashes only the value (not the whole row) and uses the **first** 5 hex chars of the md5 instead of the last 5, matching the cross-SDK redaction spec. Two bugs carried over from the Reforge predecessor.
+- Fix: dev-context now reads `~/.quonfig/tokens-<domain-with-dashes>.json` when the SDK is configured against a non-production domain, mirroring `cli/src/util/token-storage.ts:14`. Locally-authenticated agents pointed at staging now get user-scoped evaluation again (qfg-pj0.9).
+- Test: added the `dev_overrides` generated suite covering `quonfig-user.email IS_ONE_OF [...]` rules — fires on match, falls through when the attribute is absent (qfg-pj0.7).
 
 ## 0.0.17 - 2026-04-26
 
