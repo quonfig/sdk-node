@@ -1,5 +1,11 @@
 import type { Logger } from "./sdkLogger";
 
+/**
+ * SSE connection lifecycle states surfaced via QuonfigOptions.onSSEConnectionStateChange.
+ * See {@link QuonfigOptions.onSSEConnectionStateChange} for transition details.
+ */
+export type SSEConnectionState = "connecting" | "connected" | "error" | "disconnected";
+
 // ---- Value Types ----
 
 export type ValueType =
@@ -199,6 +205,14 @@ export interface QuonfigOptions {
   environment?: string;
   /** Called whenever the config store is updated (SSE push, poll, or initial load). Use this to react to live config changes. */
   onConfigUpdate?: () => void;
+  /**
+   * Called when the SSE connection transitions between lifecycle states.
+   * States: `connecting` (start or auto-reconnect after error), `connected`
+   * (stream active), `error` (transport error; eventsource will auto-reconnect),
+   * `disconnected` (close() called). Useful for surfacing SSE health to host
+   * applications. Has no effect when `enableSSE: false`.
+   */
+  onSSEConnectionStateChange?: (state: SSEConnectionState) => void;
   /**
    * When true (or when env var `QUONFIG_DEV_CONTEXT=true`), the SDK reads
    * `~/.quonfig/tokens.json` (written by `qfg login`) on construction and

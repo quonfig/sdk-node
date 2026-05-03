@@ -15,6 +15,7 @@ import type {
   OnNoDefault,
   QuonfigOptions,
   RawMatch,
+  SSEConnectionState,
   Value,
   ValueType,
 } from "./types";
@@ -208,6 +209,7 @@ export class Quonfig {
   private readonly datafile?: string | object;
   private readonly requestedEnvironment: string;
   private readonly onConfigUpdate?: () => void;
+  private readonly onSSEConnectionStateChange?: (state: SSEConnectionState) => void;
   private readonly loggerKey?: string;
   private readonly logger: NormalizedLogger;
 
@@ -259,6 +261,7 @@ export class Quonfig {
     // Environment: explicit option supersedes QUONFIG_ENVIRONMENT env var
     this.requestedEnvironment = options.environment || process.env.QUONFIG_ENVIRONMENT || "";
     this.onConfigUpdate = options.onConfigUpdate;
+    this.onSSEConnectionStateChange = options.onSSEConnectionStateChange;
     this.loggerKey = options.loggerKey;
     this.logger = normalizeLogger(options.logger);
     this.instanceHash = randomUUID();
@@ -863,7 +866,9 @@ export class Quonfig {
   }
 
   private startSSE(): void {
-    this.sseConnection = new SSEConnection(this.transport, this.logger);
+    this.sseConnection = new SSEConnection(this.transport, this.logger, {
+      onConnectionStateChange: this.onSSEConnectionStateChange,
+    });
     this.sseConnection.start((envelope: ConfigEnvelope) => {
       this.store.update(envelope);
       this.environmentId = envelope.meta.environment;

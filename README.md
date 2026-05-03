@@ -79,6 +79,59 @@ Resolution order for URLs (highest wins):
 2. `QUONFIG_DOMAIN` env var (derives `https://primary.${DOMAIN}`, `https://secondary.${DOMAIN}`, `https://telemetry.${DOMAIN}`).
 3. Hardcoded default `quonfig.com`.
 
+## SSE: real-time updates
+
+When `enableSSE: true` (the default), the SDK opens a Server-Sent Events stream
+to `https://stream.${primary}/api/v2/sse/config` and applies each pushed envelope
+to the in-memory store. `get*` calls always read from the in-memory store, so
+flag reads never block on the network — they continue returning the last-known
+values during a disconnect.
+
+### Reconnection behavior
+
+Reconnection is delegated entirely to the
+[`eventsource`](https://www.npmjs.com/package/eventsource) library (currently
+v2.x) and is **not** configurable from `@quonfig/node`. In v2.x the defaults are:
+
+- **Initial reconnect delay:** 1000ms
+- **Backoff:** none (constant delay; no exponential growth)
+- **Jitter:** none
+- **Max retries:** unlimited — the library will retry indefinitely
+- **Server-driven delay:** the server can override the delay by sending a
+  `retry: <ms>` field in any event (per the W3C EventSource spec)
+
+If you need different behavior, file an issue — we may add a configuration
+escape hatch.
+
+### Observing connection health
+
+Pass `onSSEConnectionStateChange` to surface SSE lifecycle transitions to your
+host application (logging, metrics, status pages, etc.):
+
+```typescript
+const quonfig = new Quonfig({
+  sdkKey: process.env.QUONFIG_BACKEND_SDK_KEY!,
+  onSSEConnectionStateChange: (state) => {
+    // state: "connecting" | "connected" | "error" | "disconnected"
+    metrics.gauge("quonfig.sse.state", state);
+    if (state === "error") log.warn("Quonfig SSE disconnected; reconnecting…");
+  },
+});
+```
+
+State semantics:
+
+| State          | When it fires                                                         |
+|----------------|------------------------------------------------------------------------|
+| `connecting`   | `init()` has started SSE; or after an error while the library retries. |
+| `connected`    | The SSE stream is open and receiving events.                          |
+| `error`        | The transport surfaced an error. The library will auto-reconnect.     |
+| `disconnected` | `quonfig.close()` was called.                                         |
+
+The callback is fired only on transitions — duplicate consecutive states are
+suppressed. During a disconnect, `get*` calls keep returning the last-known
+config from the in-memory store.
+
 ## Dynamic log levels with Winston
 
 `winston` is an optional peer dependency. Install it alongside `@quonfig/node`, then compose the format:
