@@ -3,6 +3,7 @@ import * as os from "os";
 import { join } from "path";
 
 import type { Contexts } from "./types";
+import { normalizeLogger, type Logger } from "./sdkLogger";
 
 /**
  * Picks the per-domain tokens file written by `qfg login`, mirroring
@@ -52,7 +53,7 @@ function deriveDomainFromApiUrls(apiUrls?: string[]): string {
  * run `qfg login` and therefore have no tokens file. Rules keyed on
  * `quonfig-user.email` are dead code in prod.
  */
-export function loadQuonfigUserContext(apiUrls?: string[]): Contexts | undefined {
+export function loadQuonfigUserContext(apiUrls?: string[], logger?: Logger): Contexts | undefined {
   const path = join(os.homedir(), ".quonfig", tokenFilenameForApiUrls(apiUrls));
 
   let raw: string;
@@ -66,8 +67,8 @@ export function loadQuonfigUserContext(apiUrls?: string[]): Contexts | undefined
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    console.warn(
-      `[quonfig] dev-context: could not parse ${path} (${(err as Error).message}); skipping injection`
+    normalizeLogger(logger).warn(
+      `dev-context: could not parse ${path} (${(err as Error).message}); skipping injection`
     );
     return undefined;
   }

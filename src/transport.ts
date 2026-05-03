@@ -1,4 +1,5 @@
 import type { ConfigEnvelope } from "./types";
+import { normalizeLogger, type Logger, type NormalizedLogger } from "./sdkLogger";
 import SDK_VERSION from "./version";
 
 export interface FetchResult {
@@ -69,6 +70,7 @@ export class Transport {
   private activeStreamUrl: string;
   private telemetryBaseUrl: string;
   private sdkKey: string;
+  private logger: NormalizedLogger;
   private etag: string = "";
   /**
    * Test-only override. When set, `getSSEUrl()` returns this value verbatim
@@ -77,7 +79,13 @@ export class Transport {
    */
   private __testStreamUrlOverride?: string;
 
-  constructor(baseUrls: string[], sdkKey: string, telemetryBaseUrl?: string, domain?: string) {
+  constructor(
+    baseUrls: string[],
+    sdkKey: string,
+    telemetryBaseUrl?: string,
+    domain?: string,
+    logger?: Logger,
+  ) {
     this.baseUrls = baseUrls.map((u) => u.replace(/\/$/, ""));
     this.streamUrls = this.baseUrls.map((u) => deriveStreamUrl(u));
     this.activeBaseUrl = this.baseUrls[0];
@@ -88,6 +96,7 @@ export class Transport {
     const url = telemetryBaseUrl || defaultTelemetryUrl({ domain });
     this.telemetryBaseUrl = url.replace(/\/$/, "");
     this.sdkKey = sdkKey;
+    this.logger = normalizeLogger(logger);
   }
 
   /**
@@ -186,7 +195,7 @@ export class Transport {
     if (!response.ok) {
       // Telemetry failures are non-fatal; just log
       const body = await response.text().catch(() => "");
-      console.warn(`[quonfig] Telemetry POST failed: ${response.status} ${body}`);
+      this.logger.warn(`Telemetry POST failed: ${response.status} ${body}`);
     }
   }
 

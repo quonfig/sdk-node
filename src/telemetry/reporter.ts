@@ -1,5 +1,6 @@
 import type { TelemetryEvent, TelemetryPayload } from "../types";
 import type { Transport } from "../transport";
+import { normalizeLogger, type Logger, type NormalizedLogger } from "../sdkLogger";
 import type { EvaluationSummaryCollector } from "./evaluationSummaries";
 import type { ContextShapeCollector } from "./contextShapes";
 import type { ExampleContextCollector } from "./exampleContexts";
@@ -19,6 +20,7 @@ export class TelemetryReporter {
   private maxDelay: number;
   private currentDelay: number;
   private stopped: boolean = false;
+  private logger: NormalizedLogger;
 
   constructor(args: {
     transport: Transport;
@@ -28,6 +30,7 @@ export class TelemetryReporter {
     exampleContexts: ExampleContextCollector;
     initialDelay?: number;
     maxDelay?: number;
+    logger?: Logger;
   }) {
     this.transport = args.transport;
     this.instanceHash = args.instanceHash;
@@ -37,6 +40,7 @@ export class TelemetryReporter {
     this.initialDelay = args.initialDelay ?? 8000;
     this.maxDelay = args.maxDelay ?? 600000;
     this.currentDelay = this.initialDelay;
+    this.logger = normalizeLogger(args.logger);
   }
 
   /**
@@ -67,7 +71,7 @@ export class TelemetryReporter {
         // Success — reset to base interval
         this.currentDelay = this.initialDelay;
       } catch (err) {
-        console.warn("[quonfig] Telemetry sync error:", err);
+        this.logger.warn("Telemetry sync error:", err);
         // Exponential backoff with cap on failure
         this.currentDelay = Math.min(this.currentDelay * 1.5, this.maxDelay);
       } finally {

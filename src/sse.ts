@@ -1,5 +1,6 @@
 import type { ConfigEnvelope } from "./types";
 import type { Transport } from "./transport";
+import { normalizeLogger, type Logger, type NormalizedLogger } from "./sdkLogger";
 
 /**
  * SSE connection for receiving real-time config updates.
@@ -9,9 +10,11 @@ import type { Transport } from "./transport";
 export class SSEConnection {
   private transport: Transport;
   private eventSource: any = null;
+  private logger: NormalizedLogger;
 
-  constructor(transport: Transport) {
+  constructor(transport: Transport, logger?: Logger) {
     this.transport = transport;
+    this.logger = normalizeLogger(logger);
   }
 
   /**
@@ -22,7 +25,7 @@ export class SSEConnection {
   start(onUpdate: (envelope: ConfigEnvelope) => void): void {
     // Dynamic import of eventsource to avoid issues when it's not installed
     this.connectSSE(onUpdate).catch((err) => {
-      console.warn("[quonfig] SSE connection failed:", err);
+      this.logger.warn("SSE connection failed:", err);
     });
   }
 
@@ -42,16 +45,16 @@ export class SSEConnection {
           const envelope: ConfigEnvelope = JSON.parse(event.data);
           onUpdate(envelope);
         } catch (err) {
-          console.warn("[quonfig] SSE message parse error:", err);
+          this.logger.warn("SSE message parse error:", err);
         }
       };
 
       this.eventSource.onerror = (err: any) => {
-        console.warn("[quonfig] SSE error:", err);
+        this.logger.warn("SSE error:", err);
         // EventSource will auto-reconnect
       };
     } catch (err) {
-      console.warn("[quonfig] Failed to initialize SSE:", err);
+      this.logger.warn("Failed to initialize SSE:", err);
     }
   }
 

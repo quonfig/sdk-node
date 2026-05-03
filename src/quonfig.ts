@@ -33,6 +33,7 @@ import {
 } from "./reason";
 import { SSEConnection } from "./sse";
 import { mergeContexts } from "./context";
+import { normalizeLogger, type NormalizedLogger } from "./sdkLogger";
 import { parseLevel, shouldLog } from "./logger";
 import { durationToMilliseconds } from "./duration";
 import { loadEnvelopeFromDatadir } from "./datadir";
@@ -208,6 +209,7 @@ export class Quonfig {
   private readonly requestedEnvironment: string;
   private readonly onConfigUpdate?: () => void;
   private readonly loggerKey?: string;
+  private readonly logger: NormalizedLogger;
 
   private store: ConfigStore;
   private evaluator: Evaluator;
@@ -247,7 +249,9 @@ export class Quonfig {
     const devContextEnabled =
       options.enableQuonfigUserContext === true ||
       process.env.QUONFIG_DEV_CONTEXT === "true";
-    const devContext = devContextEnabled ? loadQuonfigUserContext(this.apiUrls) : undefined;
+    const devContext = devContextEnabled
+      ? loadQuonfigUserContext(this.apiUrls, options.logger)
+      : undefined;
     this.globalContext = mergeContexts(devContext, options.globalContext);
     this.initTimeout = options.initTimeout ?? DEFAULT_INIT_TIMEOUT;
     this.datadir = options.datadir;
@@ -256,6 +260,7 @@ export class Quonfig {
     this.requestedEnvironment = options.environment || process.env.QUONFIG_ENVIRONMENT || "";
     this.onConfigUpdate = options.onConfigUpdate;
     this.loggerKey = options.loggerKey;
+    this.logger = normalizeLogger(options.logger);
     this.instanceHash = randomUUID();
 
     // Initialize core components
@@ -263,7 +268,7 @@ export class Quonfig {
     this.evaluator = new Evaluator(this.store);
     this.resolver = new Resolver(this.store, this.evaluator);
     this.dependencyResolver = new ConfigDependencyResolver(this.store, this.evaluator);
-    this.transport = new Transport(this.apiUrls, this.sdkKey, this.telemetryUrl, options.domain);
+    this.transport = new Transport(this.apiUrls, this.sdkKey, this.telemetryUrl, options.domain, options.logger);
 
     // Initialize telemetry collectors
     const contextUploadMode: ContextUploadMode = options.contextUploadMode ?? "periodic_example";
@@ -296,7 +301,7 @@ export class Quonfig {
     try {
       await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
-      console.warn("[quonfig] Initialization failed:", err);
+      this.logger.warn("Initialization failed:", err);
       throw err;
     }
 
@@ -538,7 +543,7 @@ export class Quonfig {
   }): boolean {
     const desiredLevelNum = parseLevel(args.desiredLevel);
     if (desiredLevelNum === undefined) {
-      console.warn(`[quonfig] Invalid desiredLevel "${args.desiredLevel}". Returning true.`);
+      this.logger.warn(`Invalid desiredLevel "${args.desiredLevel}". Returning true.`);
       return true;
     }
 
@@ -811,7 +816,7 @@ export class Quonfig {
       case "error":
         throw new Error(`No value found for key "${key}"`);
       case "warn":
-        console.warn(`[quonfig] No value found for key "${key}"`);
+        this.logger.warn(`No value found for key "${key}"`);
         return undefined;
       case "ignore":
         return undefined;
@@ -858,7 +863,7 @@ export class Quonfig {
   }
 
   private startSSE(): void {
-    this.sseConnection = new SSEConnection(this.transport);
+    this.sseConnection = new SSEConnection(this.transport, this.logger);
     this.sseConnection.start((envelope: ConfigEnvelope) => {
       this.store.update(envelope);
       this.environmentId = envelope.meta.environment;
@@ -870,7 +875,7 @@ export class Quonfig {
     const poll = (): void => {
       this.fetchAndInstall()
         .catch((err) => {
-          console.warn("[quonfig] Polling error:", err);
+          this.logger.warn("Polling error:", err);
         })
         .finally(() => {
           this.pollTimer = setTimeout(poll, this.pollInterval);
@@ -900,6 +905,7 @@ export class Quonfig {
       evaluationSummaries: this.evaluationSummaries,
       contextShapes: this.contextShapes,
       exampleContexts: this.exampleContexts,
+      logger: this.logger,
     });
 
     this.telemetryReporter.start();

@@ -1,3 +1,5 @@
+import type { Logger } from "./sdkLogger";
+
 // ---- Value Types ----
 
 export type ValueType =
@@ -219,6 +221,15 @@ export interface QuonfigOptions {
    *
    * Callers retain the escape hatch of passing `configKey` directly.
    */
+  /**
+   * Optional logger that receives SDK-internal warnings and errors (transport
+   * failures, SSE errors, telemetry POST failures, etc.). When omitted, the
+   * SDK writes to `console.warn`/`console.error` with a `[quonfig]` prefix.
+   *
+   * Shape matches Pino, Winston, Bunyan, and `console`, so host apps can pass
+   * their existing logger instance directly.
+   */
+  logger?: Logger;
   loggerKey?: string;
 }
 

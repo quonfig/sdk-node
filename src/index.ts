@@ -74,6 +74,9 @@ export { hashZeroToOne } from "./hashing";
 // Logger utilities
 export { parseLevel, wordLevelToNumber, shouldLog } from "./logger";
 
+// SDK-internal pluggable logger (for routing SDK warnings/errors)
+export type { Logger } from "./sdkLogger";
+
 // Evaluator (for advanced usage / testing)
 export { Evaluator } from "./evaluator";
 export { ConfigStore } from "./store";
