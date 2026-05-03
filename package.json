@@ -58,7 +58,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "eventsource": "^2.0.2",
+    "eventsource": "^3.0.0",
     "murmurhash": "^2.0.1"
   },
   "peerDependencies": {
@@ -74,7 +74,6 @@
     }
   },
   "devDependencies": {
-    "@types/eventsource": "^1.1.15",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.11.0",
     "js-yaml": "^4.1.1",

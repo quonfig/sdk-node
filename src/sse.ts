@@ -97,9 +97,18 @@ export class SSEConnection {
   }
 
   private async defaultFactory(): Promise<EventSourceFactory> {
-    const EventSourceModule: any = await import("eventsource");
-    const EventSourceCtor = EventSourceModule.default || EventSourceModule;
-    return (url, init) => new EventSourceCtor(url, init) as EventSourceLike;
+    // eventsource v3 dropped the default export and the `headers` init option.
+    // Auth headers must be injected via a custom `fetch` instead.
+    const { EventSource } = await import("eventsource");
+    return (url, init) => {
+      const headers = init.headers;
+      const customFetch: typeof fetch = (input, fetchInit) =>
+        fetch(input, {
+          ...fetchInit,
+          headers: { ...(fetchInit?.headers as Record<string, string>), ...headers },
+        });
+      return new EventSource(url, { fetch: customFetch }) as EventSourceLike;
+    };
   }
 
   private setState(next: SSEConnectionState): void {

@@ -12,6 +12,8 @@ interface LiveSSEServer {
   emit: (envelope: ConfigEnvelope) => void;
   /** Forcibly close every active SSE response, simulating a network drop. */
   dropAll: () => void;
+  /** Headers seen on each incoming SSE request, in arrival order. */
+  observedHeaders: http.IncomingHttpHeaders[];
   close: () => Promise<void>;
 }
 
@@ -19,9 +21,11 @@ function startSSEServer(): Promise<LiveSSEServer> {
   return new Promise((resolve) => {
     const clients: http.ServerResponse[] = [];
     const sockets = new Set<net.Socket>();
+    const observedHeaders: http.IncomingHttpHeaders[] = [];
 
     const server = http.createServer((req, res) => {
       if (req.url?.startsWith("/api/v2/sse/config")) {
+        observedHeaders.push(req.headers);
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -49,6 +53,7 @@ function startSSEServer(): Promise<LiveSSEServer> {
       const addr = server.address() as net.AddressInfo;
       resolve({
         port: addr.port,
+        observedHeaders,
         emit: (envelope) => {
           const payload = `data: ${JSON.stringify(envelope)}\n\n`;
           for (const c of clients) c.write(payload);
@@ -124,10 +129,10 @@ describe("SSEConnection — live-server smoke test", () => {
     await waitFor(() => states.includes("error"), 5000);
 
     // Wait for the library's reconnect to land; default reconnect delay is
-    // ~1s in v2. Bump timeout to be safe in CI.
+    // ~3s in v3. Bump timeout to be safe in CI.
     await waitFor(
       () => states.filter((s) => s === "connected").length >= 2,
-      10_000
+      15_000
     );
 
     // After reconnect, the server should still be able to deliver new events.
@@ -139,4 +144,25 @@ describe("SSEConnection — live-server smoke test", () => {
     expect(received.map((e) => e.meta.version)).toContain("v1");
     expect(received.map((e) => e.meta.version)).toContain("v2");
   }, 30_000);
+
+  it("sends the SDK-key Basic auth header on the SSE request", async () => {
+    const sdkKey = "test-key";
+    const transport = new Transport(["http://127.0.0.1"], sdkKey);
+    (transport as any).__testStreamUrlOverride = `http://127.0.0.1:${srv.port}/api/v2/sse/config`;
+
+    const states: SSEConnectionState[] = [];
+    const sse = new SSEConnection(transport, undefined, {
+      onConnectionStateChange: (s) => states.push(s),
+    });
+
+    sse.start(() => {});
+    await waitFor(() => states.includes("connected"), 5000);
+
+    const expected = "Basic " + Buffer.from(`1:${sdkKey}`).toString("base64");
+    expect(srv.observedHeaders.length).toBeGreaterThan(0);
+    expect(srv.observedHeaders[0].authorization).toBe(expected);
+    expect(srv.observedHeaders[0]["x-quonfig-sdk-version"]).toMatch(/^node-/);
+
+    sse.close();
+  }, 15_000);
 });
