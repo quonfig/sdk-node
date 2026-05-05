@@ -66,47 +66,45 @@ new Quonfig({
 
 ## Environment variables
 
-| Variable                    | Purpose                                                                        |
-|-----------------------------|--------------------------------------------------------------------------------|
-| `QUONFIG_BACKEND_SDK_KEY`   | Fallback for `sdkKey` when omitted from options.                               |
-| `QUONFIG_DOMAIN`            | Domain used to derive default `apiUrls` and `telemetryUrl`. Defaults to `quonfig.com`. Set to `quonfig-staging.com` to point everything at staging. |
-| `QUONFIG_ENVIRONMENT`       | Environment name to use in datadir mode (overridden by the `environment` option). |
-| `QUONFIG_DEV_CONTEXT`       | When `true`, injects `quonfig-user.email` from `~/.quonfig/tokens.json`.       |
+| Variable                  | Purpose                                                                                                                                             |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `QUONFIG_BACKEND_SDK_KEY` | Fallback for `sdkKey` when omitted from options.                                                                                                    |
+| `QUONFIG_DOMAIN`          | Domain used to derive default `apiUrls` and `telemetryUrl`. Defaults to `quonfig.com`. Set to `quonfig-staging.com` to point everything at staging. |
+| `QUONFIG_ENVIRONMENT`     | Environment name to use in datadir mode (overridden by the `environment` option).                                                                   |
+| `QUONFIG_DEV_CONTEXT`     | When `true`, injects `quonfig-user.email` from `~/.quonfig/tokens.json`.                                                                            |
 
 Resolution order for URLs (highest wins):
 
 1. Explicit `apiUrls` / `telemetryUrl` option.
-2. `QUONFIG_DOMAIN` env var (derives `https://primary.${DOMAIN}`, `https://secondary.${DOMAIN}`, `https://telemetry.${DOMAIN}`).
+2. `QUONFIG_DOMAIN` env var (derives `https://primary.${DOMAIN}`, `https://secondary.${DOMAIN}`,
+   `https://telemetry.${DOMAIN}`).
 3. Hardcoded default `quonfig.com`.
 
 ## SSE: real-time updates
 
-When `enableSSE: true` (the default), the SDK opens a Server-Sent Events stream
-to `https://stream.${primary}/api/v2/sse/config` and applies each pushed envelope
-to the in-memory store. `get*` calls always read from the in-memory store, so
-flag reads never block on the network — they continue returning the last-known
-values during a disconnect.
+When `enableSSE: true` (the default), the SDK opens a Server-Sent Events stream to
+`https://stream.${primary}/api/v2/sse/config` and applies each pushed envelope to the in-memory
+store. `get*` calls always read from the in-memory store, so flag reads never block on the network —
+they continue returning the last-known values during a disconnect.
 
 ### Reconnection behavior
 
-Reconnection is delegated entirely to the
-[`eventsource`](https://www.npmjs.com/package/eventsource) library (currently
-v2.x) and is **not** configurable from `@quonfig/node`. In v2.x the defaults are:
+Reconnection is delegated entirely to the [`eventsource`](https://www.npmjs.com/package/eventsource)
+library (currently v2.x) and is **not** configurable from `@quonfig/node`. In v2.x the defaults are:
 
 - **Initial reconnect delay:** 1000ms
 - **Backoff:** none (constant delay; no exponential growth)
 - **Jitter:** none
 - **Max retries:** unlimited — the library will retry indefinitely
-- **Server-driven delay:** the server can override the delay by sending a
-  `retry: <ms>` field in any event (per the W3C EventSource spec)
+- **Server-driven delay:** the server can override the delay by sending a `retry: <ms>` field in any
+  event (per the W3C EventSource spec)
 
-If you need different behavior, file an issue — we may add a configuration
-escape hatch.
+If you need different behavior, file an issue — we may add a configuration escape hatch.
 
 ### Observing connection health
 
-Pass `onSSEConnectionStateChange` to surface SSE lifecycle transitions to your
-host application (logging, metrics, status pages, etc.):
+Pass `onSSEConnectionStateChange` to surface SSE lifecycle transitions to your host application
+(logging, metrics, status pages, etc.):
 
 ```typescript
 const quonfig = new Quonfig({
@@ -121,20 +119,20 @@ const quonfig = new Quonfig({
 
 State semantics:
 
-| State          | When it fires                                                         |
-|----------------|------------------------------------------------------------------------|
+| State          | When it fires                                                          |
+| -------------- | ---------------------------------------------------------------------- |
 | `connecting`   | `init()` has started SSE; or after an error while the library retries. |
-| `connected`    | The SSE stream is open and receiving events.                          |
-| `error`        | The transport surfaced an error. The library will auto-reconnect.     |
-| `disconnected` | `quonfig.close()` was called.                                         |
+| `connected`    | The SSE stream is open and receiving events.                           |
+| `error`        | The transport surfaced an error. The library will auto-reconnect.      |
+| `disconnected` | `quonfig.close()` was called.                                          |
 
-The callback is fired only on transitions — duplicate consecutive states are
-suppressed. During a disconnect, `get*` calls keep returning the last-known
-config from the in-memory store.
+The callback is fired only on transitions — duplicate consecutive states are suppressed. During a
+disconnect, `get*` calls keep returning the last-known config from the in-memory store.
 
 ## Dynamic log levels with Winston
 
-`winston` is an optional peer dependency. Install it alongside `@quonfig/node`, then compose the format:
+`winston` is an optional peer dependency. Install it alongside `@quonfig/node`, then compose the
+format:
 
 ```typescript
 import winston from "winston";
@@ -156,10 +154,12 @@ const logger = winston.createLogger({
   transports: [new winston.transports.Console()],
 });
 
-logger.info("live-controlled");  // emits iff shouldLog says so.
+logger.info("live-controlled"); // emits iff shouldLog says so.
 ```
 
-The `loggerPath` (second arg) is forwarded to `quonfig.shouldLog` verbatim — no normalization — so rules can key on whatever identifier shape you actually log (`"com.app.Auth"`, `"MyApp::Services::Auth"`, etc.).
+The `loggerPath` (second arg) is forwarded to `quonfig.shouldLog` verbatim — no normalization — so
+rules can key on whatever identifier shape you actually log (`"com.app.Auth"`,
+`"MyApp::Services::Auth"`, etc.).
 
 ## Dynamic log levels with Pino
 
@@ -184,7 +184,8 @@ const logger = pino({
 logger.debug("live-controlled");
 ```
 
-Both adapters also ship convenience constructors — `createWinstonLogger` and `createPinoLogger` — that return a ready-to-use logger with the Quonfig gate already attached.
+Both adapters also ship convenience constructors — `createWinstonLogger` and `createPinoLogger` —
+that return a ready-to-use logger with the Quonfig gate already attached.
 
 ## License
 

@@ -13,13 +13,7 @@ function resolveCase(key: string, contexts: any): unknown {
   if (!cfg) return undefined;
   const match = evaluator.evaluateConfig(cfg, envID, contexts);
   if (!match.isMatch || !match.value) return undefined;
-  const { resolved } = resolver.resolveValue(
-    match.value,
-    cfg.key,
-    cfg.valueType,
-    envID,
-    contexts
-  );
+  const { resolved } = resolver.resolveValue(match.value, cfg.key, cfg.valueType, envID, contexts);
   return resolver.unwrapValue(resolved);
 }
 
@@ -40,7 +34,7 @@ function runRaiseCase(
   key: string,
   contexts: any,
   _errorKey: string,
-  errClass: ErrorConstructor,
+  errClass: ErrorConstructor
 ): void {
   expect(() => {
     const cfg = store.get(key);
@@ -48,51 +42,81 @@ function runRaiseCase(
     const match = evaluator.evaluateConfig(cfg, envID, contexts);
     if (!match.isMatch || !match.value) throw new Error(`no match for key: ${key}`);
     const { resolved } = resolver.resolveValue(
-      match.value, cfg.key, cfg.valueType, envID, contexts
+      match.value,
+      cfg.key,
+      cfg.valueType,
+      envID,
+      contexts
     );
     return resolver.unwrapValue(resolved);
   }).toThrow(errClass);
 }
 
 describe("enabled_with_contexts", () => {
-
   it("returns true from global context", () => {
-    const __actual = enabledCase("feature-flag.in-seg.segment-and", mergeContexts({ "": { domain: "prefab.cloud" }, user: { key: "michael" } } as Contexts));
+    const __actual = enabledCase(
+      "feature-flag.in-seg.segment-and",
+      mergeContexts({ "": { domain: "prefab.cloud" }, user: { key: "michael" } } as Contexts)
+    );
     expect(__actual).toBe(true);
   });
 
   it("returns false due to local context override", () => {
-    const __actual = enabledCase("feature-flag.in-seg.segment-and", mergeContexts({ "": { domain: "prefab.cloud" }, user: { key: "james" } } as Contexts));
+    const __actual = enabledCase(
+      "feature-flag.in-seg.segment-and",
+      mergeContexts({ "": { domain: "prefab.cloud" }, user: { key: "james" } } as Contexts)
+    );
     expect(__actual).toBe(false);
   });
 
   it("returns false for untouched scope context", () => {
-    const __actual = enabledCase("feature-flag.in-seg.segment-and", mergeContexts({ "": { domain: "example.com" }, user: { key: "nobody" } } as Contexts));
+    const __actual = enabledCase(
+      "feature-flag.in-seg.segment-and",
+      mergeContexts({ "": { domain: "example.com" }, user: { key: "nobody" } } as Contexts)
+    );
     expect(__actual).toBe(false);
   });
 
   it("returns false due to partial scope context override of user.key", () => {
-    const __actual = enabledCase("feature-flag.in-seg.segment-and", mergeContexts({ "": { domain: "example.com" }, user: { key: "michael" } } as Contexts));
+    const __actual = enabledCase(
+      "feature-flag.in-seg.segment-and",
+      mergeContexts({ "": { domain: "example.com" }, user: { key: "michael" } } as Contexts)
+    );
     expect(__actual).toBe(false);
   });
 
   it("returns false due to partial scope context override of domain", () => {
-    const __actual = enabledCase("feature-flag.in-seg.segment-and", mergeContexts({ "": { domain: "example.com", key: "prefab.cloud" }, user: { key: "nobody" } } as Contexts));
+    const __actual = enabledCase(
+      "feature-flag.in-seg.segment-and",
+      mergeContexts({
+        "": { domain: "example.com", key: "prefab.cloud" },
+        user: { key: "nobody" },
+      } as Contexts)
+    );
     expect(__actual).toBe(false);
   });
 
   it("returns true due to full scope context override of user.key and domain", () => {
-    const __actual = enabledCase("feature-flag.in-seg.segment-and", mergeContexts({ "": { domain: "prefab.cloud" }, user: { key: "michael" } } as Contexts));
+    const __actual = enabledCase(
+      "feature-flag.in-seg.segment-and",
+      mergeContexts({ "": { domain: "prefab.cloud" }, user: { key: "michael" } } as Contexts)
+    );
     expect(__actual).toBe(true);
   });
 
   it("returns false for rule with different case on context property name", () => {
-    const __actual = enabledCase("mixed.case.property.name", mergeContexts({ user: { IsHuman: "verified" } } as Contexts));
+    const __actual = enabledCase(
+      "mixed.case.property.name",
+      mergeContexts({ user: { IsHuman: "verified" } } as Contexts)
+    );
     expect(__actual).toBe(false);
   });
 
   it("returns true for matching case on context property name", () => {
-    const __actual = enabledCase("mixed.case.property.name", mergeContexts({ user: { isHuman: "verified" } } as Contexts));
+    const __actual = enabledCase(
+      "mixed.case.property.name",
+      mergeContexts({ user: { isHuman: "verified" } } as Contexts)
+    );
     expect(__actual).toBe(true);
   });
 });

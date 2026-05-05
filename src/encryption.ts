@@ -40,18 +40,14 @@ export function encrypt(clearText: string, keyStringHex: string): string {
  */
 export function decrypt(encryptedString: string, keyStringHex: string): string {
   if (keyStringHex.length !== 64) {
-    throw new Error(
-      "Invalid key length. Key must be a 64-character hex string."
-    );
+    throw new Error("Invalid key length. Key must be a 64-character hex string.");
   }
 
   const key = Buffer.from(keyStringHex, "hex");
   const parts = encryptedString.split(SEPARATOR);
 
   if (parts.length !== 3) {
-    throw new Error(
-      "Invalid encrypted string. Must contain encrypted data, IV, and auth tag."
-    );
+    throw new Error("Invalid encrypted string. Must contain encrypted data, IV, and auth tag.");
   }
 
   const encryptedDataPart = parts[0]!;

@@ -14,10 +14,7 @@ function makeTransport(): Transport {
   return new Transport(["https://primary.quonfig.com"], "test-key");
 }
 
-function makeSSE(
-  states: SSEConnectionState[],
-  factoryOut: { value: FakeEventSource | null }
-) {
+function makeSSE(states: SSEConnectionState[], factoryOut: { value: FakeEventSource | null }) {
   const factory = (_url: string, _init: { headers: Record<string, string> }) => {
     const es: FakeEventSource = {
       onopen: null,

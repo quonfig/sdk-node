@@ -13,13 +13,7 @@ function resolveCase(key: string, contexts: any): unknown {
   if (!cfg) return undefined;
   const match = evaluator.evaluateConfig(cfg, envID, contexts);
   if (!match.isMatch || !match.value) return undefined;
-  const { resolved } = resolver.resolveValue(
-    match.value,
-    cfg.key,
-    cfg.valueType,
-    envID,
-    contexts
-  );
+  const { resolved } = resolver.resolveValue(match.value, cfg.key, cfg.valueType, envID, contexts);
   return resolver.unwrapValue(resolved);
 }
 
@@ -40,7 +34,7 @@ function runRaiseCase(
   key: string,
   contexts: any,
   _errorKey: string,
-  errClass: ErrorConstructor,
+  errClass: ErrorConstructor
 ): void {
   expect(() => {
     const cfg = store.get(key);
@@ -48,91 +42,142 @@ function runRaiseCase(
     const match = evaluator.evaluateConfig(cfg, envID, contexts);
     if (!match.isMatch || !match.value) throw new Error(`no match for key: ${key}`);
     const { resolved } = resolver.resolveValue(
-      match.value, cfg.key, cfg.valueType, envID, contexts
+      match.value,
+      cfg.key,
+      cfg.valueType,
+      envID,
+      contexts
     );
     return resolver.unwrapValue(resolved);
   }).toThrow(errClass);
 }
 
 describe("context_precedence", () => {
-
   it("returns the correct `flag` value using the global context (1)", () => {
-    const __actual = enabledCase("mixed.case.property.name", mergeContexts({ user: { isHuman: "verified" } } as Contexts));
+    const __actual = enabledCase(
+      "mixed.case.property.name",
+      mergeContexts({ user: { isHuman: "verified" } } as Contexts)
+    );
     expect(__actual).toBe(true);
   });
 
   it("returns the correct `flag` value using the global context (2)", () => {
-    const __actual = enabledCase("mixed.case.property.name", mergeContexts({ user: { isHuman: "?" } } as Contexts));
+    const __actual = enabledCase(
+      "mixed.case.property.name",
+      mergeContexts({ user: { isHuman: "?" } } as Contexts)
+    );
     expect(__actual).toBe(false);
   });
 
   it("returns the correct `flag` value when local context clobbers global context (1)", () => {
-    const __actual = enabledCase("mixed.case.property.name", mergeContexts({ user: { isHuman: "verified" } } as Contexts));
+    const __actual = enabledCase(
+      "mixed.case.property.name",
+      mergeContexts({ user: { isHuman: "verified" } } as Contexts)
+    );
     expect(__actual).toBe(true);
   });
 
   it("returns the correct `flag` value when local context clobbers global context (2)", () => {
-    const __actual = enabledCase("mixed.case.property.name", mergeContexts({ user: { isHuman: "?" } } as Contexts));
+    const __actual = enabledCase(
+      "mixed.case.property.name",
+      mergeContexts({ user: { isHuman: "?" } } as Contexts)
+    );
     expect(__actual).toBe(false);
   });
 
   it("returns the correct `flag` value when block context clobbers global context (1)", () => {
-    const __actual = enabledCase("mixed.case.property.name", mergeContexts({ user: { isHuman: "?" } } as Contexts));
+    const __actual = enabledCase(
+      "mixed.case.property.name",
+      mergeContexts({ user: { isHuman: "?" } } as Contexts)
+    );
     expect(__actual).toBe(false);
   });
 
   it("returns the correct `flag` value when block context clobbers global context (2)", () => {
-    const __actual = enabledCase("mixed.case.property.name", mergeContexts({ user: { isHuman: "verified" } } as Contexts));
+    const __actual = enabledCase(
+      "mixed.case.property.name",
+      mergeContexts({ user: { isHuman: "verified" } } as Contexts)
+    );
     expect(__actual).toBe(true);
   });
 
   it("returns the correct `flag` value when local context clobbers block context (1)", () => {
-    const __actual = enabledCase("mixed.case.property.name", mergeContexts({ user: { isHuman: "?" } } as Contexts));
+    const __actual = enabledCase(
+      "mixed.case.property.name",
+      mergeContexts({ user: { isHuman: "?" } } as Contexts)
+    );
     expect(__actual).toBe(false);
   });
 
   it("returns the correct `flag` value when local context clobbers block context (2)", () => {
-    const __actual = enabledCase("mixed.case.property.name", mergeContexts({ user: { isHuman: "verified" } } as Contexts));
+    const __actual = enabledCase(
+      "mixed.case.property.name",
+      mergeContexts({ user: { isHuman: "verified" } } as Contexts)
+    );
     expect(__actual).toBe(true);
   });
 
   it("returns the correct `get` value using the global context (1)", () => {
-    const __actual = resolveCase("basic.rule.config", mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts));
+    const __actual = resolveCase(
+      "basic.rule.config",
+      mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts)
+    );
     expect(__actual).toBe("override");
   });
 
   it("returns the correct `get` value using the global context (2)", () => {
-    const __actual = resolveCase("basic.rule.config", mergeContexts({ user: { email: "test@example.com" } } as Contexts));
+    const __actual = resolveCase(
+      "basic.rule.config",
+      mergeContexts({ user: { email: "test@example.com" } } as Contexts)
+    );
     expect(__actual).toBe("default");
   });
 
   it("returns the correct `get` value when local context clobbers global context (1)", () => {
-    const __actual = resolveCase("basic.rule.config", mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts));
+    const __actual = resolveCase(
+      "basic.rule.config",
+      mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts)
+    );
     expect(__actual).toBe("override");
   });
 
   it("returns the correct `get` value when local context clobbers global context (2)", () => {
-    const __actual = resolveCase("basic.rule.config", mergeContexts({ user: { email: "test@example.com" } } as Contexts));
+    const __actual = resolveCase(
+      "basic.rule.config",
+      mergeContexts({ user: { email: "test@example.com" } } as Contexts)
+    );
     expect(__actual).toBe("default");
   });
 
   it("returns the correct `get` value when block context clobbers global context (1)", () => {
-    const __actual = resolveCase("basic.rule.config", mergeContexts({ user: { email: "test@example.com" } } as Contexts));
+    const __actual = resolveCase(
+      "basic.rule.config",
+      mergeContexts({ user: { email: "test@example.com" } } as Contexts)
+    );
     expect(__actual).toBe("default");
   });
 
   it("returns the correct `get` value when block context clobbers global context (2)", () => {
-    const __actual = resolveCase("basic.rule.config", mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts));
+    const __actual = resolveCase(
+      "basic.rule.config",
+      mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts)
+    );
     expect(__actual).toBe("override");
   });
 
   it("returns the correct `get` value when local context clobbers block context (1)", () => {
-    const __actual = resolveCase("basic.rule.config", mergeContexts({ user: { email: "test@example.com" } } as Contexts));
+    const __actual = resolveCase(
+      "basic.rule.config",
+      mergeContexts({ user: { email: "test@example.com" } } as Contexts)
+    );
     expect(__actual).toBe("default");
   });
 
   it("returns the correct `get` value when local context clobbers block context (2)", () => {
-    const __actual = resolveCase("basic.rule.config", mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts));
+    const __actual = resolveCase(
+      "basic.rule.config",
+      mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts)
+    );
     expect(__actual).toBe("override");
   });
 });

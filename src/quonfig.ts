@@ -26,12 +26,7 @@ import { Evaluator } from "./evaluator";
 import { Resolver } from "./resolver";
 import { ConfigDependencyResolver } from "./rawMatch";
 import { Transport, defaultApiUrls } from "./transport";
-import {
-  computeReason,
-  ReasonStatic,
-  ReasonTargetingMatch,
-  ReasonSplit,
-} from "./reason";
+import { computeReason, ReasonStatic, ReasonTargetingMatch, ReasonSplit } from "./reason";
 import { SSEConnection } from "./sse";
 import { mergeContexts } from "./context";
 import { normalizeLogger, type NormalizedLogger } from "./sdkLogger";
@@ -175,10 +170,7 @@ export class BoundQuonfig {
 
   inContext(contexts: Contexts): BoundQuonfig;
   inContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
-  inContext<T>(
-    contexts: Contexts,
-    fn?: (rf: BoundQuonfig) => T
-  ): BoundQuonfig | T {
+  inContext<T>(contexts: Contexts, fn?: (rf: BoundQuonfig) => T): BoundQuonfig | T {
     const bound = new BoundQuonfig(this.client, mergeContexts(this.boundContexts, contexts));
     return fn ? fn(bound) : bound;
   }
@@ -249,8 +241,7 @@ export class Quonfig {
     this.namespace = options.namespace;
     this.onNoDefault = options.onNoDefault ?? "error";
     const devContextEnabled =
-      options.enableQuonfigUserContext === true ||
-      process.env.QUONFIG_DEV_CONTEXT === "true";
+      options.enableQuonfigUserContext === true || process.env.QUONFIG_DEV_CONTEXT === "true";
     const devContext = devContextEnabled
       ? loadQuonfigUserContext(this.apiUrls, options.logger)
       : undefined;
@@ -271,7 +262,13 @@ export class Quonfig {
     this.evaluator = new Evaluator(this.store);
     this.resolver = new Resolver(this.store, this.evaluator);
     this.dependencyResolver = new ConfigDependencyResolver(this.store, this.evaluator);
-    this.transport = new Transport(this.apiUrls, this.sdkKey, this.telemetryUrl, options.domain, options.logger);
+    this.transport = new Transport(
+      this.apiUrls,
+      this.sdkKey,
+      this.telemetryUrl,
+      options.domain,
+      options.logger
+    );
 
     // Initialize telemetry collectors
     const contextUploadMode: ContextUploadMode = options.contextUploadMode ?? "periodic_example";
@@ -343,11 +340,7 @@ export class Quonfig {
     this.exampleContexts.push(mergedContexts);
 
     // Evaluate
-    const match = this.evaluator.evaluateConfig(
-      config,
-      this.environmentId,
-      mergedContexts
-    );
+    const match = this.evaluator.evaluateConfig(config, this.environmentId, mergedContexts);
 
     if (!match.isMatch || match.value === undefined) {
       return this.handleNoDefault(key, defaultValue);
@@ -428,10 +421,7 @@ export class Quonfig {
    * Get a string-list config value with evaluation details (reason + error code).
    * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
    */
-  getStringListDetails(
-    key: string,
-    contexts?: Contexts
-  ): EvaluationDetails<string[]> {
+  getStringListDetails(key: string, contexts?: Contexts): EvaluationDetails<string[]> {
     return this.evaluateDetailsTyped<string[]>(key, "string_list", contexts, (raw) => {
       if (Array.isArray(raw)) return raw.map((v: any) => String(v));
       return undefined as unknown as string[];
@@ -442,10 +432,7 @@ export class Quonfig {
    * Get a JSON config value with evaluation details (reason + error code).
    * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
    */
-  getJSONDetails(
-    key: string,
-    contexts?: Contexts
-  ): EvaluationDetails<unknown> {
+  getJSONDetails(key: string, contexts?: Contexts): EvaluationDetails<unknown> {
     return this.evaluateDetailsTyped<unknown>(key, "json", contexts, (raw) => raw);
   }
 
@@ -558,14 +545,12 @@ export class Quonfig {
 
     if (args.loggerPath !== undefined) {
       if (args.configKey !== undefined) {
-        throw new Error(
-          "[quonfig] shouldLog: pass either `configKey` or `loggerPath`, not both."
-        );
+        throw new Error("[quonfig] shouldLog: pass either `configKey` or `loggerPath`, not both.");
       }
       if (!this.loggerKey) {
         throw new Error(
           "[quonfig] shouldLog({loggerPath}) requires the `loggerKey` option on the Quonfig constructor. " +
-            "Pass `loggerKey: \"log-level.<your-app>\"` or use the `configKey` form instead."
+            'Pass `loggerKey: "log-level.<your-app>"` or use the `configKey` form instead.'
         );
       }
       resolvedConfigKey = this.loggerKey;
@@ -579,9 +564,7 @@ export class Quonfig {
     } else if (args.configKey !== undefined) {
       resolvedConfigKey = args.configKey;
     } else {
-      throw new Error(
-        "[quonfig] shouldLog requires either `configKey` or `loggerPath`."
-      );
+      throw new Error("[quonfig] shouldLog requires either `configKey` or `loggerPath`.");
     }
 
     return shouldLog({
@@ -615,11 +598,7 @@ export class Quonfig {
   getRawMatch(key: string, contexts?: Contexts): RawMatch | undefined {
     this.requireInitialized();
     const mergedContexts = mergeContexts(this.globalContext, contexts);
-    return this.dependencyResolver.resolveWithDependencies(
-      key,
-      this.environmentId,
-      mergedContexts
-    );
+    return this.dependencyResolver.resolveWithDependencies(key, this.environmentId, mergedContexts);
   }
 
   /**
@@ -639,10 +618,7 @@ export class Quonfig {
    */
   inContext(contexts: Contexts): BoundQuonfig;
   inContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
-  inContext<T>(
-    contexts: Contexts,
-    fn?: (rf: BoundQuonfig) => T
-  ): BoundQuonfig | T {
+  inContext<T>(contexts: Contexts, fn?: (rf: BoundQuonfig) => T): BoundQuonfig | T {
     const bound = new BoundQuonfig(this, mergeContexts(this.globalContext, contexts));
     return fn ? fn(bound) : bound;
   }
@@ -733,11 +709,7 @@ export class Quonfig {
       this.contextShapes.push(mergedContexts);
       this.exampleContexts.push(mergedContexts);
 
-      const match = this.evaluator.evaluateConfig(
-        config,
-        this.environmentId,
-        mergedContexts
-      );
+      const match = this.evaluator.evaluateConfig(config, this.environmentId, mergedContexts);
 
       if (!match.isMatch || match.value === undefined) {
         return { value: undefined, reason: "DEFAULT" };
@@ -758,10 +730,10 @@ export class Quonfig {
         reasonNum === ReasonStatic
           ? "STATIC"
           : reasonNum === ReasonSplit
-          ? "SPLIT"
-          : reasonNum === ReasonTargetingMatch
-          ? "TARGETING_MATCH"
-          : "TARGETING_MATCH";
+            ? "SPLIT"
+            : reasonNum === ReasonTargetingMatch
+              ? "TARGETING_MATCH"
+              : "TARGETING_MATCH";
 
       const evaluation: Evaluation = {
         configId: config.id,
@@ -770,8 +742,7 @@ export class Quonfig {
         unwrappedValue: unwrapped as GetValue,
         reportableValue: reportableValue,
         ruleIndex: match.ruleIndex,
-        weightedValueIndex:
-          match.weightedValueIndex >= 0 ? match.weightedValueIndex : undefined,
+        weightedValueIndex: match.weightedValueIndex >= 0 ? match.weightedValueIndex : undefined,
         reason: reasonNum,
       };
       this.evaluationSummaries.push(evaluation);

@@ -1,11 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: [
-    "src/index.ts",
-    "src/integrations/winston.ts",
-    "src/integrations/pino.ts",
-  ],
+  entry: ["src/index.ts", "src/integrations/winston.ts", "src/integrations/pino.ts"],
   format: ["esm", "cjs"],
   dts: true,
   sourcemap: true,

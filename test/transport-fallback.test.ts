@@ -37,16 +37,14 @@ describe("Transport URL fallback on transport-layer errors", () => {
         const cause = Object.assign(new Error("SSL_ERROR_SYSCALL"), {
           code: "ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC",
         });
-        return Promise.reject(
-          Object.assign(new TypeError("fetch failed"), { cause }),
-        );
+        return Promise.reject(Object.assign(new TypeError("fetch failed"), { cause }));
       }
       return mockFetchOk(makeEnvelope("v1"));
     });
 
     const transport = new Transport(
       ["https://primary.example.com", "https://secondary.example.com"],
-      "test-key",
+      "test-key"
     );
 
     const result = await transport.fetchConfigs();
@@ -73,7 +71,7 @@ describe("Transport URL fallback on transport-layer errors", () => {
 
     const transport = new Transport(
       ["https://primary.example.com", "https://secondary.example.com"],
-      "test-key",
+      "test-key"
     );
     const result = await transport.fetchConfigs();
     expect(result.envelope?.meta.version).toBe("v2");
@@ -89,7 +87,7 @@ describe("Transport URL fallback on transport-layer errors", () => {
 
     const transport = new Transport(
       ["https://primary.example.com", "https://secondary.example.com"],
-      "test-key",
+      "test-key"
     );
 
     await expect(transport.fetchConfigs()).rejects.toThrow(/ECONNRESET/);

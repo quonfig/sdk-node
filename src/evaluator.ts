@@ -1,11 +1,4 @@
-import type {
-  ConfigResponse,
-  Contexts,
-  Criterion,
-  EvalMatch,
-  Rule,
-  Value,
-} from "./types";
+import type { ConfigResponse, Contexts, Criterion, EvalMatch, Rule, Value } from "./types";
 import { getContextValue } from "./context";
 import { evaluateCriterion } from "./operators";
 import type { SegmentResolver } from "./operators";
@@ -37,11 +30,7 @@ export class Evaluator {
    *  4. For each rule, all criteria must match (AND logic)
    *  5. If matched value is weighted_values, resolve through WeightedValueResolver
    */
-  evaluateConfig(
-    cfg: ConfigResponse,
-    envID: string,
-    contexts: Contexts
-  ): EvalMatch {
+  evaluateConfig(cfg: ConfigResponse, envID: string, contexts: Contexts): EvalMatch {
     // Try environment-specific rules first
     if (envID && cfg.environment && cfg.environment.id === envID) {
       const match = this.evaluateRules(cfg, cfg.environment.rules ?? [], contexts, 0);
@@ -113,10 +102,7 @@ export class Evaluator {
     contexts: Contexts
   ): boolean {
     const propertyName = criterion.propertyName ?? "";
-    const { value: contextValue, exists: contextExists } = getContextValue(
-      contexts,
-      propertyName
-    );
+    const { value: contextValue, exists: contextExists } = getContextValue(contexts, propertyName);
 
     // Build a segment resolver that recursively evaluates segment configs
     const segmentResolver: SegmentResolver = (segmentKey: string) => {

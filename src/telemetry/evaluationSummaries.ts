@@ -45,9 +45,7 @@ export class EvaluationSummaryCollector {
     // original wrapper. For plain evaluations, derive the wrapper from
     // the runtime unwrapped value.
     const isRedacted = evaluation.reportableValue !== undefined;
-    const wrapperKey = isRedacted
-      ? "string"
-      : wrapperKeyForValue(evaluation.unwrappedValue);
+    const wrapperKey = isRedacted ? "string" : wrapperKeyForValue(evaluation.unwrappedValue);
     const selectedRaw = evaluation.reportableValue ?? evaluation.unwrappedValue;
     const counterKey = JSON.stringify([
       evaluation.configId,

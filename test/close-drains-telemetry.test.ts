@@ -67,7 +67,7 @@ describe("close() drains telemetry (qfg-vrfm)", () => {
             }),
           }),
         ],
-      }),
+      })
     );
 
     vi.restoreAllMocks();

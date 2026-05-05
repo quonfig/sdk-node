@@ -29,11 +29,7 @@ export class ConfigDependencyResolver {
     this.evaluator = evaluator;
   }
 
-  resolveWithDependencies(
-    key: string,
-    envID: string,
-    contexts: Contexts
-  ): RawMatch | undefined {
+  resolveWithDependencies(key: string, envID: string, contexts: Contexts): RawMatch | undefined {
     const config = this.resolve(key, envID, contexts, new Set());
     if (config === undefined) return undefined;
     return { config };
@@ -95,8 +91,7 @@ export class ConfigDependencyResolver {
       metadata: {
         configRowIndex: match.ruleIndex,
         conditionalValueIndex: 0,
-        weightedValueIndex:
-          match.weightedValueIndex >= 0 ? match.weightedValueIndex : undefined,
+        weightedValueIndex: match.weightedValueIndex >= 0 ? match.weightedValueIndex : undefined,
         type: cfg.type,
         id: cfg.id,
         valueType: cfg.valueType,

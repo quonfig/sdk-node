@@ -418,7 +418,12 @@ describe("Quonfig datadir", () => {
 
 function createDatadir(args: {
   environments: string[];
-  entries: Partial<Record<"configs" | "feature-flags" | "segments" | "schemas" | "log-levels", WorkspaceConfigDocument[]>>;
+  entries: Partial<
+    Record<
+      "configs" | "feature-flags" | "segments" | "schemas" | "log-levels",
+      WorkspaceConfigDocument[]
+    >
+  >;
 }): string {
   const datadir = createTempDir();
 

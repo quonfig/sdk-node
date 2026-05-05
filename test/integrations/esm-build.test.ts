@@ -24,36 +24,28 @@ describe("ESM subpath integrations load in pure-Node ESM", () => {
 
   it("createWinstonFormat loads when the bundle is imported as ESM", () => {
     const script = `
-      import { createWinstonFormat } from "${join(
-        repoRoot,
-        "dist/integrations/winston.js"
-      )}";
+      import { createWinstonFormat } from "${join(repoRoot, "dist/integrations/winston.js")}";
       createWinstonFormat({ shouldLog: () => true }, "test.path");
       console.log("__ESM_OK__");
     `;
-    const result = spawnSync(
-      process.execPath,
-      ["--input-type=module", "-e", script],
-      { encoding: "utf8", cwd: repoRoot }
-    );
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+      encoding: "utf8",
+      cwd: repoRoot,
+    });
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("__ESM_OK__");
   });
 
   it("createPinoLogger loads when the bundle is imported as ESM", () => {
     const script = `
-      import { createPinoLogger } from "${join(
-        repoRoot,
-        "dist/integrations/pino.js"
-      )}";
+      import { createPinoLogger } from "${join(repoRoot, "dist/integrations/pino.js")}";
       createPinoLogger({ shouldLog: () => true }, "test.path");
       console.log("__ESM_OK__");
     `;
-    const result = spawnSync(
-      process.execPath,
-      ["--input-type=module", "-e", script],
-      { encoding: "utf8", cwd: repoRoot }
-    );
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+      encoding: "utf8",
+      cwd: repoRoot,
+    });
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("__ESM_OK__");
   });

@@ -51,9 +51,9 @@ describe("Transport fetch URL — cache-buster gating", () => {
   });
 
   it("sends X-Quonfig-SDK-Version sourced from package.json", async () => {
-    const pkg = JSON.parse(
-      readFileSync(resolve(__dirname, "../package.json"), "utf8"),
-    ) as { version: string };
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, "../package.json"), "utf8")) as {
+      version: string;
+    };
     let captured: Headers | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
       captured = new Headers(init?.headers as HeadersInit);

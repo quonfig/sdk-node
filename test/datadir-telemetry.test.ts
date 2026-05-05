@@ -61,7 +61,7 @@ describe("telemetry reporter starts in datadir mode", () => {
             }),
           }),
         ],
-      }),
+      })
     );
 
     vi.restoreAllMocks();

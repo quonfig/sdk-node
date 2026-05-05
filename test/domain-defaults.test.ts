@@ -38,10 +38,7 @@ describe("QUONFIG_DOMAIN env var derivation", () => {
     });
 
     const i = internals(q);
-    expect(i.apiUrls).toEqual([
-      "https://primary.quonfig.com",
-      "https://secondary.quonfig.com",
-    ]);
+    expect(i.apiUrls).toEqual(["https://primary.quonfig.com", "https://secondary.quonfig.com"]);
     expect(i.transport.telemetryBaseUrl).toBe("https://telemetry.quonfig.com");
     expect(i.transport.baseUrls).toEqual([
       "https://primary.quonfig.com",
@@ -62,9 +59,7 @@ describe("QUONFIG_DOMAIN env var derivation", () => {
       "https://primary.quonfig-staging.com",
       "https://secondary.quonfig-staging.com",
     ]);
-    expect(i.transport.telemetryBaseUrl).toBe(
-      "https://telemetry.quonfig-staging.com"
-    );
+    expect(i.transport.telemetryBaseUrl).toBe("https://telemetry.quonfig-staging.com");
   });
 
   it("explicit telemetryUrl option overrides QUONFIG_DOMAIN", () => {
@@ -98,9 +93,7 @@ describe("QUONFIG_DOMAIN env var derivation", () => {
     const i = internals(q);
     expect(i.apiUrls).toEqual(["http://localhost:8080"]);
     // telemetry still derives from domain (independent resolution)
-    expect(i.transport.telemetryBaseUrl).toBe(
-      "https://telemetry.quonfig-staging.com"
-    );
+    expect(i.transport.telemetryBaseUrl).toBe("https://telemetry.quonfig-staging.com");
   });
 
   it("domain init option flips api + telemetry URLs in lockstep (qfg-ppuc.3)", () => {
@@ -117,9 +110,7 @@ describe("QUONFIG_DOMAIN env var derivation", () => {
       "https://primary.quonfig-staging.com",
       "https://secondary.quonfig-staging.com",
     ]);
-    expect(i.transport.telemetryBaseUrl).toBe(
-      "https://telemetry.quonfig-staging.com",
-    );
+    expect(i.transport.telemetryBaseUrl).toBe("https://telemetry.quonfig-staging.com");
   });
 
   it("domain init option wins over QUONFIG_DOMAIN env var", () => {
@@ -136,9 +127,7 @@ describe("QUONFIG_DOMAIN env var derivation", () => {
       "https://primary.quonfig-staging.com",
       "https://secondary.quonfig-staging.com",
     ]);
-    expect(i.transport.telemetryBaseUrl).toBe(
-      "https://telemetry.quonfig-staging.com",
-    );
+    expect(i.transport.telemetryBaseUrl).toBe("https://telemetry.quonfig-staging.com");
   });
 
   it("explicit apiUrls + telemetryUrl still override domain init option", () => {
@@ -171,9 +160,7 @@ describe("QUONFIG_DOMAIN env var derivation", () => {
       "https://primary.quonfig.localhost",
       "https://secondary.quonfig.localhost",
     ]);
-    expect(i.transport.telemetryBaseUrl).toBe(
-      "https://telemetry.quonfig.localhost",
-    );
+    expect(i.transport.telemetryBaseUrl).toBe("https://telemetry.quonfig.localhost");
   });
 
   it("QUONFIG_TELEMETRY_URL env var is no longer honored", () => {
@@ -187,8 +174,6 @@ describe("QUONFIG_DOMAIN env var derivation", () => {
       datafile: emptyEnvelope(),
     });
 
-    expect(internals(q).transport.telemetryBaseUrl).toBe(
-      "https://telemetry.quonfig.com"
-    );
+    expect(internals(q).transport.telemetryBaseUrl).toBe("https://telemetry.quonfig.com");
   });
 });

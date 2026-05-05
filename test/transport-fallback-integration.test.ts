@@ -32,7 +32,7 @@ function startHealthyHttpServer(): Promise<{ port: number; close: () => void }> 
           JSON.stringify({
             meta: { version: "real-v1", environment: "Production" },
             configs: [],
-          }),
+          })
         );
         return;
       }
@@ -65,11 +65,8 @@ describe("Transport URL fallback against real broken-TLS endpoint", () => {
 
   it("falls through from a TLS-broken first URL to a healthy second URL", async () => {
     const transport = new Transport(
-      [
-        `https://127.0.0.1:${brokenSecure.port}`,
-        `http://127.0.0.1:${healthy.port}`,
-      ],
-      "test-key",
+      [`https://127.0.0.1:${brokenSecure.port}`, `http://127.0.0.1:${healthy.port}`],
+      "test-key"
     );
 
     const result = await transport.fetchConfigs();
@@ -78,10 +75,7 @@ describe("Transport URL fallback against real broken-TLS endpoint", () => {
   });
 
   it("falls through when ONLY the broken URL is configured (no fallback) — surfaces a transport error", async () => {
-    const transport = new Transport(
-      [`https://127.0.0.1:${brokenSecure.port}`],
-      "test-key",
-    );
+    const transport = new Transport([`https://127.0.0.1:${brokenSecure.port}`], "test-key");
     await expect(transport.fetchConfigs()).rejects.toThrow();
   });
 });

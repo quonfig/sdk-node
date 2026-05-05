@@ -84,7 +84,7 @@ export class Transport {
     sdkKey: string,
     telemetryBaseUrl?: string,
     domain?: string,
-    logger?: Logger,
+    logger?: Logger
   ) {
     this.baseUrls = baseUrls.map((u) => u.replace(/\/$/, ""));
     this.streamUrls = this.baseUrls.map((u) => deriveStreamUrl(u));

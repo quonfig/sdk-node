@@ -142,9 +142,7 @@ export function createPinoLogger(
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     pino = require("pino");
   } catch {
-    throw new Error(
-      "[quonfig] createPinoLogger requires pino. Install it with: npm install pino"
-    );
+    throw new Error("[quonfig] createPinoLogger requires pino. Install it with: npm install pino");
   }
 
   const pinoFactory = typeof pino === "function" ? pino : pino.default;

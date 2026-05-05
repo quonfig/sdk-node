@@ -16,10 +16,7 @@ process.env.IS_A_NUMBER = "1234";
 process.env.NOT_A_NUMBER = "not_a_number";
 delete process.env.MISSING_ENV_VAR;
 
-const DATA_DIR = path.resolve(
-  __dirname,
-  "../../../integration-test-data/data/integration-tests"
-);
+const DATA_DIR = path.resolve(__dirname, "../../../integration-test-data/data/integration-tests");
 
 if (!fs.existsSync(DATA_DIR)) {
   throw new Error(
@@ -51,9 +48,7 @@ function toConfigResponse(raw: any): ConfigResponse {
   let environment: ConfigResponse["environment"] = undefined;
 
   if (Array.isArray(raw.environments)) {
-    const envMatch = raw.environments.find(
-      (e: any) => e.id === ENV_ID
-    );
+    const envMatch = raw.environments.find((e: any) => e.id === ENV_ID);
     if (envMatch) {
       environment = envMatch;
     }
@@ -103,10 +98,7 @@ export type { Contexts, Evaluation };
 /**
  * Evaluate a config key and return an Evaluation object for telemetry recording.
  */
-export function evaluateForTelemetry(
-  key: string,
-  contexts: Contexts = {}
-): Evaluation | undefined {
+export function evaluateForTelemetry(key: string, contexts: Contexts = {}): Evaluation | undefined {
   const cfg = store.get(key);
   if (!cfg) return undefined;
 

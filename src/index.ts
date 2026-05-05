@@ -124,5 +124,10 @@ export { ExampleContextCollector } from "./telemetry/exampleContexts";
 export { TelemetryReporter } from "./telemetry/reporter";
 
 // CLI compatibility (HTTP client, SDK-key parsing, legacy value types)
-export { Client, getProjectEnvFromSdkKey, ConfigValueType, valueTypeStringForConfig } from "./cli-compat";
+export {
+  Client,
+  getProjectEnvFromSdkKey,
+  ConfigValueType,
+  valueTypeStringForConfig,
+} from "./cli-compat";
 export type { ClientOptions, ProjectEnvId, ConfigValue } from "./cli-compat";

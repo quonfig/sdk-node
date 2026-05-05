@@ -95,31 +95,17 @@ describe("shouldLog({loggerPath}) convenience", () => {
     await quonfig.init();
 
     // foo.bar -> debug rule. debug emits debug/info/warn/error/fatal.
-    expect(
-      quonfig.shouldLog({ loggerPath: "foo.bar", desiredLevel: "debug" })
-    ).toBe(true);
-    expect(
-      quonfig.shouldLog({ loggerPath: "foo.bar", desiredLevel: "info" })
-    ).toBe(true);
-    expect(
-      quonfig.shouldLog({ loggerPath: "foo.bar", desiredLevel: "trace" })
-    ).toBe(false);
+    expect(quonfig.shouldLog({ loggerPath: "foo.bar", desiredLevel: "debug" })).toBe(true);
+    expect(quonfig.shouldLog({ loggerPath: "foo.bar", desiredLevel: "info" })).toBe(true);
+    expect(quonfig.shouldLog({ loggerPath: "foo.bar", desiredLevel: "trace" })).toBe(false);
 
     // noisy.thing -> error rule. error does NOT emit info.
-    expect(
-      quonfig.shouldLog({ loggerPath: "noisy.thing", desiredLevel: "info" })
-    ).toBe(false);
-    expect(
-      quonfig.shouldLog({ loggerPath: "noisy.thing", desiredLevel: "error" })
-    ).toBe(true);
+    expect(quonfig.shouldLog({ loggerPath: "noisy.thing", desiredLevel: "info" })).toBe(false);
+    expect(quonfig.shouldLog({ loggerPath: "noisy.thing", desiredLevel: "error" })).toBe(true);
 
     // otherwise -> info default rule. info does NOT emit debug.
-    expect(
-      quonfig.shouldLog({ loggerPath: "other.thing", desiredLevel: "debug" })
-    ).toBe(false);
-    expect(
-      quonfig.shouldLog({ loggerPath: "other.thing", desiredLevel: "info" })
-    ).toBe(true);
+    expect(quonfig.shouldLog({ loggerPath: "other.thing", desiredLevel: "debug" })).toBe(false);
+    expect(quonfig.shouldLog({ loggerPath: "other.thing", desiredLevel: "info" })).toBe(true);
   });
 
   it("passes native identifiers through unnormalized", async () => {
@@ -212,9 +198,9 @@ describe("shouldLog({loggerPath}) convenience", () => {
     });
     await quonfig.init();
 
-    expect(() =>
-      quonfig.shouldLog({ loggerPath: "foo.bar", desiredLevel: "info" })
-    ).toThrow(/loggerKey/);
+    expect(() => quonfig.shouldLog({ loggerPath: "foo.bar", desiredLevel: "info" })).toThrow(
+      /loggerKey/
+    );
   });
 
   it("preserves the existing shouldLog({configKey}) primitive unchanged", async () => {
@@ -261,12 +247,8 @@ describe("shouldLog({loggerPath}) convenience", () => {
     await quonfig.init();
 
     // info emits info but not debug.
-    expect(
-      quonfig.shouldLog({ configKey: "log-level.raw", desiredLevel: "info" })
-    ).toBe(true);
-    expect(
-      quonfig.shouldLog({ configKey: "log-level.raw", desiredLevel: "debug" })
-    ).toBe(false);
+    expect(quonfig.shouldLog({ configKey: "log-level.raw", desiredLevel: "info" })).toBe(true);
+    expect(quonfig.shouldLog({ configKey: "log-level.raw", desiredLevel: "debug" })).toBe(false);
   });
 
   it("BoundQuonfig inherits loggerKey and merges bound contexts", async () => {
@@ -331,18 +313,12 @@ describe("shouldLog({loggerPath}) convenience", () => {
     const bound = quonfig.inContext({ tenant: { id: "alpha" } });
 
     // Bound tenant=alpha + svc.* path -> debug rule.
-    expect(
-      bound.shouldLog({ loggerPath: "svc.users", desiredLevel: "debug" })
-    ).toBe(true);
+    expect(bound.shouldLog({ loggerPath: "svc.users", desiredLevel: "debug" })).toBe(true);
     // Non-matching path -> warn default, does not emit info.
-    expect(
-      bound.shouldLog({ loggerPath: "other.path", desiredLevel: "info" })
-    ).toBe(false);
+    expect(bound.shouldLog({ loggerPath: "other.path", desiredLevel: "info" })).toBe(false);
 
     // Without the bound tenant context -> warn default, debug not emitted.
-    expect(
-      quonfig.shouldLog({ loggerPath: "svc.users", desiredLevel: "debug" })
-    ).toBe(false);
+    expect(quonfig.shouldLog({ loggerPath: "svc.users", desiredLevel: "debug" })).toBe(false);
   });
 });
 

@@ -13,13 +13,7 @@ function resolveCase(key: string, contexts: any): unknown {
   if (!cfg) return undefined;
   const match = evaluator.evaluateConfig(cfg, envID, contexts);
   if (!match.isMatch || !match.value) return undefined;
-  const { resolved } = resolver.resolveValue(
-    match.value,
-    cfg.key,
-    cfg.valueType,
-    envID,
-    contexts
-  );
+  const { resolved } = resolver.resolveValue(match.value, cfg.key, cfg.valueType, envID, contexts);
   return resolver.unwrapValue(resolved);
 }
 
@@ -40,7 +34,7 @@ function runRaiseCase(
   key: string,
   contexts: any,
   _errorKey: string,
-  errClass: ErrorConstructor,
+  errClass: ErrorConstructor
 ): void {
   expect(() => {
     const cfg = store.get(key);
@@ -48,26 +42,38 @@ function runRaiseCase(
     const match = evaluator.evaluateConfig(cfg, envID, contexts);
     if (!match.isMatch || !match.value) throw new Error(`no match for key: ${key}`);
     const { resolved } = resolver.resolveValue(
-      match.value, cfg.key, cfg.valueType, envID, contexts
+      match.value,
+      cfg.key,
+      cfg.valueType,
+      envID,
+      contexts
     );
     return resolver.unwrapValue(resolved);
   }).toThrow(errClass);
 }
 
 describe("get_weighted_values", () => {
-
   it("weighted value is consistent 1", () => {
-    const __actual = resolveCase("feature-flag.weighted", mergeContexts({ user: { tracking_id: "a72c15f5" } } as Contexts));
+    const __actual = resolveCase(
+      "feature-flag.weighted",
+      mergeContexts({ user: { tracking_id: "a72c15f5" } } as Contexts)
+    );
     expect(__actual).toBe(1);
   });
 
   it("weighted value is consistent 2", () => {
-    const __actual = resolveCase("feature-flag.weighted", mergeContexts({ user: { tracking_id: "92a202f2" } } as Contexts));
+    const __actual = resolveCase(
+      "feature-flag.weighted",
+      mergeContexts({ user: { tracking_id: "92a202f2" } } as Contexts)
+    );
     expect(__actual).toBe(2);
   });
 
   it("weighted value is consistent 3", () => {
-    const __actual = resolveCase("feature-flag.weighted", mergeContexts({ user: { tracking_id: "8f414100" } } as Contexts));
+    const __actual = resolveCase(
+      "feature-flag.weighted",
+      mergeContexts({ user: { tracking_id: "8f414100" } } as Contexts)
+    );
     expect(__actual).toBe(3);
   });
 });

@@ -46,11 +46,7 @@ export class WeightedValueResolver {
     return { value: undefined, index: -1 };
   }
 
-  private getUserFraction(
-    wv: WeightedValuesData,
-    configKey: string,
-    contexts: Contexts
-  ): number {
+  private getUserFraction(wv: WeightedValuesData, configKey: string, contexts: Contexts): number {
     if (wv.hashByPropertyName) {
       const value = contextLookup(contexts, wv.hashByPropertyName);
       if (value !== undefined && value !== null) {

@@ -1,4 +1,10 @@
-import type { ConfigEnvelope, ConfigResponse, Value, WeightedValuesData, ProvidedData } from "./types";
+import type {
+  ConfigEnvelope,
+  ConfigResponse,
+  Value,
+  WeightedValuesData,
+  ProvidedData,
+} from "./types";
 
 /**
  * In-memory config store.

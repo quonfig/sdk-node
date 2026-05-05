@@ -8,10 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const winston = require("winston");
 
 import { Quonfig, QUONFIG_SDK_LOGGING_CONTEXT_NAME } from "../../src";
-import {
-  createWinstonFormat,
-  createWinstonLogger,
-} from "../../src/integrations/winston";
+import { createWinstonFormat, createWinstonLogger } from "../../src/integrations/winston";
 import type { WorkspaceConfigDocument } from "../../src/types";
 
 const tempDirs: string[] = [];
@@ -27,10 +24,7 @@ afterEach(() => {
  * we can assert on. Every record that gets through the Quonfig format lands
  * in `records`.
  */
-function captureWinstonRecords(args: {
-  quonfig: Quonfig;
-  loggerPath: string;
-}): {
+function captureWinstonRecords(args: { quonfig: Quonfig; loggerPath: string }): {
   logger: any;
   records: Array<Record<string, unknown>>;
 } {
@@ -58,9 +52,7 @@ function captureWinstonRecords(args: {
       createWinstonFormat(args.quonfig, args.loggerPath),
       winston.format.json()
     ),
-    transports: [
-      new winston.transports.Stream({ stream: capture }),
-    ],
+    transports: [new winston.transports.Stream({ stream: capture })],
   });
 
   return { logger, records };

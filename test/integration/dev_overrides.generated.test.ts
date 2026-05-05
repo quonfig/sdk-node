@@ -13,13 +13,7 @@ function resolveCase(key: string, contexts: any): unknown {
   if (!cfg) return undefined;
   const match = evaluator.evaluateConfig(cfg, envID, contexts);
   if (!match.isMatch || !match.value) return undefined;
-  const { resolved } = resolver.resolveValue(
-    match.value,
-    cfg.key,
-    cfg.valueType,
-    envID,
-    contexts
-  );
+  const { resolved } = resolver.resolveValue(match.value, cfg.key, cfg.valueType, envID, contexts);
   return resolver.unwrapValue(resolved);
 }
 
@@ -40,7 +34,7 @@ function runRaiseCase(
   key: string,
   contexts: any,
   _errorKey: string,
-  errClass: ErrorConstructor,
+  errClass: ErrorConstructor
 ): void {
   expect(() => {
     const cfg = store.get(key);
@@ -48,31 +42,49 @@ function runRaiseCase(
     const match = evaluator.evaluateConfig(cfg, envID, contexts);
     if (!match.isMatch || !match.value) throw new Error(`no match for key: ${key}`);
     const { resolved } = resolver.resolveValue(
-      match.value, cfg.key, cfg.valueType, envID, contexts
+      match.value,
+      cfg.key,
+      cfg.valueType,
+      envID,
+      contexts
     );
     return resolver.unwrapValue(resolved);
   }).toThrow(errClass);
 }
 
 describe("dev_overrides", () => {
-
   it("override fires when quonfig-user.email matches", () => {
-    const __actual = enabledCase("feature-flag.dev-override", mergeContexts({ "quonfig-user": { email: "bob@foo.com" } } as Contexts));
+    const __actual = enabledCase(
+      "feature-flag.dev-override",
+      mergeContexts({ "quonfig-user": { email: "bob@foo.com" } } as Contexts)
+    );
     expect(__actual).toBe(true);
   });
 
   it("override does not fire when attribute absent (prod simulation)", () => {
-    const __actual = enabledCase("feature-flag.dev-override", mergeContexts({ user: { email: "bob@foo.com" } } as Contexts));
+    const __actual = enabledCase(
+      "feature-flag.dev-override",
+      mergeContexts({ user: { email: "bob@foo.com" } } as Contexts)
+    );
     expect(__actual).toBe(false);
   });
 
   it("override matches any email in IS_ONE_OF list", () => {
-    const __actual = enabledCase("feature-flag.dev-override.multi-email", mergeContexts({ "quonfig-user": { email: "alice@foo.com" } } as Contexts));
+    const __actual = enabledCase(
+      "feature-flag.dev-override.multi-email",
+      mergeContexts({ "quonfig-user": { email: "alice@foo.com" } } as Contexts)
+    );
     expect(__actual).toBe(true);
   });
 
   it("override beats customer rule by priority", () => {
-    const __actual = enabledCase("feature-flag.dev-override.priority", mergeContexts({ "quonfig-user": { email: "bob@foo.com" }, user: { country: "DE" } } as Contexts));
+    const __actual = enabledCase(
+      "feature-flag.dev-override.priority",
+      mergeContexts({
+        "quonfig-user": { email: "bob@foo.com" },
+        user: { country: "DE" },
+      } as Contexts)
+    );
     expect(__actual).toBe(true);
   });
 });

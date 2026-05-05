@@ -23,12 +23,7 @@ export type ValueType =
 
 // ---- Config Types ----
 
-export type ConfigTypeString =
-  | "feature_flag"
-  | "config"
-  | "segment"
-  | "log_level"
-  | "schema";
+export type ConfigTypeString = "feature_flag" | "config" | "segment" | "log_level" | "schema";
 
 // ---- Provided Data ----
 
@@ -262,12 +257,7 @@ export interface EvalMatch {
 // ---- Public Evaluation Details (for *Details API) ----
 
 /** Reason returned by `get*Details` methods. Mirrors OpenFeature StandardResolutionReasons subset. */
-export type EvaluationReason =
-  | "STATIC"
-  | "TARGETING_MATCH"
-  | "SPLIT"
-  | "DEFAULT"
-  | "ERROR";
+export type EvaluationReason = "STATIC" | "TARGETING_MATCH" | "SPLIT" | "DEFAULT" | "ERROR";
 
 /** Error code returned alongside `reason: "ERROR"` from `get*Details` methods. */
 export type EvaluationErrorCode = "FLAG_NOT_FOUND" | "TYPE_MISMATCH" | "GENERAL";

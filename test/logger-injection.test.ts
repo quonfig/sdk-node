@@ -48,7 +48,7 @@ describe("pluggable Logger option", () => {
       "test-key",
       "https://telemetry.example.com",
       undefined,
-      logger,
+      logger
     );
 
     await transport.postTelemetry({ instanceHash: "h", events: [] } as any);
@@ -73,7 +73,7 @@ describe("pluggable Logger option", () => {
     const transport = new Transport(
       ["https://api.example.com"],
       "test-key",
-      "https://telemetry.example.com",
+      "https://telemetry.example.com"
     );
 
     await transport.postTelemetry({ instanceHash: "h", events: [] } as any);

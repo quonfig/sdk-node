@@ -15,9 +15,7 @@ describe("deriveStreamUrl", () => {
   });
 
   it("prepends 'stream.' to localhost, preserving scheme and port", () => {
-    expect(deriveStreamUrl("http://localhost:8080")).toBe(
-      "http://stream.localhost:8080"
-    );
+    expect(deriveStreamUrl("http://localhost:8080")).toBe("http://stream.localhost:8080");
   });
 
   it("preserves non-root paths", () => {
@@ -65,9 +63,7 @@ function mockFetchOk(envelope: ConfigEnvelope): Promise<Response> {
 describe("Transport.getSSEUrl", () => {
   it("derives SSE URL from the primary apiUrl by default", () => {
     const transport = new Transport(["https://primary.quonfig.com"], "test-key");
-    expect(transport.getSSEUrl()).toBe(
-      "https://stream.primary.quonfig.com/api/v2/sse/config"
-    );
+    expect(transport.getSSEUrl()).toBe("https://stream.primary.quonfig.com/api/v2/sse/config");
   });
 
   it("tracks the stream URL that corresponds to the successful apiUrl on failover", async () => {
@@ -88,9 +84,7 @@ describe("Transport.getSSEUrl", () => {
 
     await transport.fetchConfigs();
     expect(call).toHaveBeenCalledTimes(2);
-    expect(transport.getSSEUrl()).toBe(
-      "https://stream.secondary.quonfig.com/api/v2/sse/config"
-    );
+    expect(transport.getSSEUrl()).toBe("https://stream.secondary.quonfig.com/api/v2/sse/config");
   });
 
   it("honors __testStreamUrlOverride for injected test servers", () => {

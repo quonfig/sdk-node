@@ -129,9 +129,7 @@ describe("Quonfig.inContext callback overload", () => {
         events: expect.arrayContaining([
           expect.objectContaining({
             summaries: expect.objectContaining({
-              summaries: expect.arrayContaining([
-                expect.objectContaining({ key: "greeting" }),
-              ]),
+              summaries: expect.arrayContaining([expect.objectContaining({ key: "greeting" })]),
             }),
           }),
         ]),

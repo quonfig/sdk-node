@@ -7,10 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const pino = require("pino");
 
 import { Quonfig, QUONFIG_SDK_LOGGING_CONTEXT_NAME } from "../../src";
-import {
-  createPinoHooks,
-  createPinoLogger,
-} from "../../src/integrations/pino";
+import { createPinoHooks, createPinoLogger } from "../../src/integrations/pino";
 import type { WorkspaceConfigDocument } from "../../src/types";
 
 const tempDirs: string[] = [];
@@ -25,10 +22,10 @@ afterEach(() => {
  * Capture every JSON line emitted by a Pino logger into an array. Uses
  * `pino.destination` with a custom write stream.
  */
-function captureRecords(args: {
-  quonfig: Quonfig;
-  loggerPath: string;
-}): { logger: any; records: Array<Record<string, unknown>> } {
+function captureRecords(args: { quonfig: Quonfig; loggerPath: string }): {
+  logger: any;
+  records: Array<Record<string, unknown>>;
+} {
   const records: Array<Record<string, unknown>> = [];
 
   const dest = {

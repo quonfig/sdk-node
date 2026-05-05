@@ -1,7 +1,12 @@
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
 
-import type { ConfigEnvelope, ConfigResponse, QuonfigDatadirEnvironments, WorkspaceConfigDocument } from "./types";
+import type {
+  ConfigEnvelope,
+  ConfigResponse,
+  QuonfigDatadirEnvironments,
+  WorkspaceConfigDocument,
+} from "./types";
 
 const CONFIG_SUBDIRS = ["configs", "feature-flags", "segments", "schemas", "log-levels"] as const;
 
@@ -45,7 +50,9 @@ function resolveEnvironment(quonfigPath: string, environment: string): string {
     throw new Error(`[quonfig] Datadir is missing quonfig.json: ${quonfigPath}`);
   }
 
-  const { environments } = JSON.parse(readFileSync(quonfigPath, "utf-8")) as QuonfigDatadirEnvironments;
+  const { environments } = JSON.parse(
+    readFileSync(quonfigPath, "utf-8")
+  ) as QuonfigDatadirEnvironments;
 
   // If quonfig.json defines a non-empty list, validate that the requested environment is in it
   if (environments.length > 0 && !environments.includes(environment)) {
@@ -71,7 +78,10 @@ function toConfigResponse(raw: WorkspaceConfigDocument, environmentId: string): 
   };
 }
 
-function effectiveSendToClientSdk(type: WorkspaceConfigDocument["type"], raw: boolean | undefined): boolean {
+function effectiveSendToClientSdk(
+  type: WorkspaceConfigDocument["type"],
+  raw: boolean | undefined
+): boolean {
   if (type === "feature_flag") {
     return true;
   }

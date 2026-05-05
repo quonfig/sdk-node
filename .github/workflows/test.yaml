@@ -12,24 +12,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ['18', '20', '22', '24']
+        node-version: ["18", "20", "22", "24"]
     steps:
       - name: Checkout sdk-node
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           path: sdk-node
 
       - name: Checkout integration-test-data
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: quonfig/integration-test-data
           path: integration-test-data
           ref: main
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+          cache: "npm"
           cache-dependency-path: sdk-node/package-lock.json
 
       - name: Install
@@ -39,6 +39,10 @@ jobs:
       - name: Typecheck
         working-directory: sdk-node
         run: npm run lint
+
+      - name: Run formatter
+        working-directory: sdk-node
+        run: npm run prettier
 
       - name: Build
         working-directory: sdk-node

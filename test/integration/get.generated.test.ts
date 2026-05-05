@@ -13,13 +13,7 @@ function resolveCase(key: string, contexts: any): unknown {
   if (!cfg) return undefined;
   const match = evaluator.evaluateConfig(cfg, envID, contexts);
   if (!match.isMatch || !match.value) return undefined;
-  const { resolved } = resolver.resolveValue(
-    match.value,
-    cfg.key,
-    cfg.valueType,
-    envID,
-    contexts
-  );
+  const { resolved } = resolver.resolveValue(match.value, cfg.key, cfg.valueType, envID, contexts);
   return resolver.unwrapValue(resolved);
 }
 
@@ -40,7 +34,7 @@ function runRaiseCase(
   key: string,
   contexts: any,
   _errorKey: string,
-  errClass: ErrorConstructor,
+  errClass: ErrorConstructor
 ): void {
   expect(() => {
     const cfg = store.get(key);
@@ -48,14 +42,17 @@ function runRaiseCase(
     const match = evaluator.evaluateConfig(cfg, envID, contexts);
     if (!match.isMatch || !match.value) throw new Error(`no match for key: ${key}`);
     const { resolved } = resolver.resolveValue(
-      match.value, cfg.key, cfg.valueType, envID, contexts
+      match.value,
+      cfg.key,
+      cfg.valueType,
+      envID,
+      contexts
     );
     return resolver.unwrapValue(resolved);
   }).toThrow(errClass);
 }
 
 describe("get", () => {
-
   it("get returns a found value for key", () => {
     const __actual = resolveCase("my-test-key", {});
     expect(__actual).toBe("my-test-value");
@@ -137,22 +134,34 @@ describe("get", () => {
   });
 
   it("list on left side test (1)", () => {
-    const __actual = resolveCase("left.hand.list.test", mergeContexts({ user: { name: "james", aka: ["happy", "sleepy"] } } as Contexts));
+    const __actual = resolveCase(
+      "left.hand.list.test",
+      mergeContexts({ user: { name: "james", aka: ["happy", "sleepy"] } } as Contexts)
+    );
     expect(__actual).toBe("correct");
   });
 
   it("list on left side test (2)", () => {
-    const __actual = resolveCase("left.hand.list.test", mergeContexts({ user: { name: "james", aka: ["a", "b"] } } as Contexts));
+    const __actual = resolveCase(
+      "left.hand.list.test",
+      mergeContexts({ user: { name: "james", aka: ["a", "b"] } } as Contexts)
+    );
     expect(__actual).toBe("default");
   });
 
   it("list on left side test opposite (1)", () => {
-    const __actual = resolveCase("left.hand.test.opposite", mergeContexts({ user: { name: "james", aka: ["happy", "sleepy"] } } as Contexts));
+    const __actual = resolveCase(
+      "left.hand.test.opposite",
+      mergeContexts({ user: { name: "james", aka: ["happy", "sleepy"] } } as Contexts)
+    );
     expect(__actual).toBe("default");
   });
 
   it("list on left side test (3)", () => {
-    const __actual = resolveCase("left.hand.test.opposite", mergeContexts({ user: { name: "james", aka: ["a", "b"] } } as Contexts));
+    const __actual = resolveCase(
+      "left.hand.test.opposite",
+      mergeContexts({ user: { name: "james", aka: ["a", "b"] } } as Contexts)
+    );
     expect(__actual).toBe("correct");
   });
 });

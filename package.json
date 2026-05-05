@@ -32,7 +32,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "prettier": "prettier . -l",
+    "prettier:fix": "prettier --write .",
+    "version": "prettier --write CHANGELOG.md README.md && git add CHANGELOG.md README.md"
   },
   "keywords": [
     "quonfig",
@@ -78,6 +81,7 @@
     "@types/node": "^20.11.0",
     "js-yaml": "^4.1.1",
     "pino": "9.14.0",
+    "prettier": "^3.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.3.0",
     "vitest": "^1.0.0",

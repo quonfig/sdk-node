@@ -77,11 +77,7 @@ function envelope(version: string): ConfigEnvelope {
   return { meta: { version, environment: "Production" }, configs: [] };
 }
 
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs: number,
-  pollMs = 25
-): Promise<void> {
+async function waitFor(predicate: () => boolean, timeoutMs: number, pollMs = 25): Promise<void> {
   const start = Date.now();
   while (!predicate()) {
     if (Date.now() - start > timeoutMs) {
@@ -130,10 +126,7 @@ describe("SSEConnection — live-server smoke test", () => {
 
     // Wait for the library's reconnect to land; default reconnect delay is
     // ~3s in v3. Bump timeout to be safe in CI.
-    await waitFor(
-      () => states.filter((s) => s === "connected").length >= 2,
-      15_000
-    );
+    await waitFor(() => states.filter((s) => s === "connected").length >= 2, 15_000);
 
     // After reconnect, the server should still be able to deliver new events.
     srv.emit(envelope("v2"));

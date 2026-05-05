@@ -22,10 +22,7 @@ export function durationToMilliseconds(duration: string): number {
   const seconds = parseFloat(match.groups?.["seconds"] ?? "0");
 
   return (
-    (days * DAYS_IN_SECONDS +
-      hours * HOURS_IN_SECONDS +
-      minutes * MINUTES_IN_SECONDS +
-      seconds) *
+    (days * DAYS_IN_SECONDS + hours * HOURS_IN_SECONDS + minutes * MINUTES_IN_SECONDS + seconds) *
     1000
   );
 }

@@ -23,7 +23,8 @@ function emptyEnvelope(): ConfigEnvelope {
 }
 
 function readGlobalContext(q: Quonfig): Record<string, Record<string, unknown>> | undefined {
-  return (q as unknown as { globalContext?: Record<string, Record<string, unknown>> }).globalContext;
+  return (q as unknown as { globalContext?: Record<string, Record<string, unknown>> })
+    .globalContext;
 }
 
 describe("Quonfig dev-context injection", () => {
@@ -45,7 +46,12 @@ describe("Quonfig dev-context injection", () => {
   it("injects quonfig-user.email when option enabled and file exists", async () => {
     writeFileSync(
       join(tmpHome, ".quonfig", "tokens.json"),
-      JSON.stringify({ userEmail: "bob@foo.com", accessToken: "x", refreshToken: "y", expiresAt: 0 })
+      JSON.stringify({
+        userEmail: "bob@foo.com",
+        accessToken: "x",
+        refreshToken: "y",
+        expiresAt: 0,
+      })
     );
 
     const q = new Quonfig({

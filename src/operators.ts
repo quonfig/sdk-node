@@ -220,7 +220,12 @@ export function evaluateCriterion(
 
     case OP_PROP_MATCHES:
     case OP_PROP_DOES_NOT_MATCH: {
-      if (contextExists && matchValue !== undefined && isString(contextValue) && isString(matchValue.value)) {
+      if (
+        contextExists &&
+        matchValue !== undefined &&
+        isString(contextValue) &&
+        isString(matchValue.value)
+      ) {
         try {
           const re = new RegExp(matchValue.value);
           const matched = re.test(contextValue);
@@ -256,7 +261,12 @@ export function evaluateCriterion(
     case OP_PROP_GREATER_THAN_OR_EQUAL:
     case OP_PROP_LESS_THAN:
     case OP_PROP_LESS_THAN_OR_EQUAL: {
-      if (contextExists && matchValue !== undefined && isNumber(contextValue) && isNumericValue(matchValue.value)) {
+      if (
+        contextExists &&
+        matchValue !== undefined &&
+        isNumber(contextValue) &&
+        isNumericValue(matchValue.value)
+      ) {
         const cmp = compareNumbers(contextValue, matchValue.value);
         if (cmp !== undefined) {
           switch (criterion.operator) {
@@ -292,7 +302,12 @@ export function evaluateCriterion(
     case OP_PROP_SEMVER_LESS_THAN:
     case OP_PROP_SEMVER_EQUAL:
     case OP_PROP_SEMVER_GREATER_THAN: {
-      if (contextExists && matchValue !== undefined && isString(contextValue) && isString(matchValue.value)) {
+      if (
+        contextExists &&
+        matchValue !== undefined &&
+        isString(contextValue) &&
+        isString(matchValue.value)
+      ) {
         const svContext = parseSemver(contextValue);
         const svMatch = parseSemver(matchValue.value);
         if (svContext !== undefined && svMatch !== undefined) {

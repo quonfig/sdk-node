@@ -65,8 +65,7 @@ export function buildAggregator(
   overrides: Record<string, unknown>
 ): Aggregator {
   const uploadMode = normalizeUploadMode(overrides["context_upload_mode"]);
-  const collectSummaries =
-    overrides["collect_evaluation_summaries"] === false ? false : true;
+  const collectSummaries = overrides["collect_evaluation_summaries"] === false ? false : true;
 
   switch (kind) {
     case "context_shape":
@@ -120,9 +119,7 @@ export function feedAggregator(
   contexts: Contexts
 ): void {
   if (agg.kind !== kind) {
-    throw new Error(
-      `feedAggregator: kind mismatch — agg=${agg.kind}, requested=${kind}`
-    );
+    throw new Error(`feedAggregator: kind mismatch — agg=${agg.kind}, requested=${kind}`);
   }
 
   if (kind === "context_shape" || kind === "example_contexts") {
@@ -220,15 +217,9 @@ function normalizeContextRecords(data: unknown): Contexts[] {
  * SDK targets but is informational here — Node-side helpers don't actually
  * post.
  */
-export function aggregatorPost(
-  agg: Aggregator,
-  kind: AggregatorKind,
-  _endpoint: string
-): unknown {
+export function aggregatorPost(agg: Aggregator, kind: AggregatorKind, _endpoint: string): unknown {
   if (agg.kind !== kind) {
-    throw new Error(
-      `aggregatorPost: kind mismatch — agg=${agg.kind}, requested=${kind}`
-    );
+    throw new Error(`aggregatorPost: kind mismatch — agg=${agg.kind}, requested=${kind}`);
   }
 
   if (agg.kind === "context_shape") {

@@ -36,8 +36,6 @@ describe("Resolver unwrapValue json", () => {
     // (QuonfigValueTypeError).
     const stringified = '{"a":1,"b":"c"}';
     const val: Value = { type: "json", value: stringified };
-    expect(() => resolver.unwrapValue(val)).toThrow(
-      /json value must be a native JSON type/
-    );
+    expect(() => resolver.unwrapValue(val)).toThrow(/json value must be a native JSON type/);
   });
 });

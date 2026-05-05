@@ -66,9 +66,7 @@ export class Client {
     const isORPC = path.startsWith("/api/v1/");
     this.log("ApiClient", `POST ${url}`);
     // oRPC endpoints use a wire format: request wrapped as { json: <payload> }
-    const body = isORPC
-      ? JSON.stringify({ json: payload })
-      : JSON.stringify(payload);
+    const body = isORPC ? JSON.stringify({ json: payload }) : JSON.stringify(payload);
     const raw = await fetch(url, {
       method: "POST",
       headers: this.headers(),
@@ -102,7 +100,6 @@ export class Client {
       body: JSON.stringify(payload),
     });
   }
-
 }
 
 // ---- SDK Key Parsing ----
@@ -178,8 +175,6 @@ export interface ConfigValue {
  * Extract the value-type string for a ConfigResponse (e.g., "bool", "string", "int").
  * Used by the CLI's `serve` command to format evaluation responses.
  */
-export function valueTypeStringForConfig(
-  config: ConfigResponse
-): ValueType | undefined {
+export function valueTypeStringForConfig(config: ConfigResponse): ValueType | undefined {
   return config.valueType;
 }

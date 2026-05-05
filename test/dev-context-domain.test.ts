@@ -24,7 +24,8 @@ function emptyEnvelope(): ConfigEnvelope {
 }
 
 function readGlobalContext(q: Quonfig): Record<string, Record<string, unknown>> | undefined {
-  return (q as unknown as { globalContext?: Record<string, Record<string, unknown>> }).globalContext;
+  return (q as unknown as { globalContext?: Record<string, Record<string, unknown>> })
+    .globalContext;
 }
 
 describe("tokenFilenameForApiUrls", () => {
@@ -36,11 +37,7 @@ describe("tokenFilenameForApiUrls", () => {
     ["production app host", ["https://app.quonfig.com"], "tokens.json"],
     ["production primary host", ["https://primary.quonfig.com"], "tokens.json"],
     ["plain quonfig.com", ["https://quonfig.com"], "tokens.json"],
-    [
-      "staging app host",
-      ["https://app.quonfig-staging.com"],
-      "tokens-quonfig-staging-com.json",
-    ],
+    ["staging app host", ["https://app.quonfig-staging.com"], "tokens-quonfig-staging-com.json"],
     [
       "staging primary host",
       ["https://primary.quonfig-staging.com"],
@@ -161,10 +158,7 @@ describe("Quonfig dev-context per-domain tokens file", () => {
       sdkKey: "test",
       datafile: emptyEnvelope(),
       enableQuonfigUserContext: true,
-      apiUrls: [
-        "https://app.quonfig-staging.com",
-        "https://app.quonfig.com",
-      ],
+      apiUrls: ["https://app.quonfig-staging.com", "https://app.quonfig.com"],
     });
     await q.init();
 
