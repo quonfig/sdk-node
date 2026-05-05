@@ -292,6 +292,7 @@ export class Quonfig {
     if (this.datadir || this.datafile) {
       this.loadLocalData();
       this.initialized = true;
+      this.startTelemetry();
       return;
     }
 

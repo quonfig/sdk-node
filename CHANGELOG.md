@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.25 - 2026-05-04
+
+- Fix: start the telemetry reporter in datadir/datafile mode. Previously `init()` returned early when `datadir` or `datafile` was set and skipped `startTelemetry()`, so dogfood services running in datadir mode silently dropped every eval summary even with a valid sdk key. Surfaced while wiring the Quonfig dogfood services (app-quonfig, api-telemetry) to send telemetry from `our-config/`.
+
 ## 0.0.23 - 2026-05-02
 
 - Fix: throw a clear error when `sdkKey` is empty in cloud mode instead of failing silently downstream (qfg-zcsj).
