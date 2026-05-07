@@ -131,8 +131,13 @@ export class BoundQuonfig {
     return this.client.getJSONDetails(key, mergeContexts(this.boundContexts, contexts));
   }
 
+  isEnabled(key: string, contexts?: Contexts): boolean {
+    return this.client.isEnabled(key, mergeContexts(this.boundContexts, contexts));
+  }
+
+  /** @deprecated Use `isEnabled` instead. Kept for backwards compatibility with the Reforge launch SDK and earlier Quonfig releases. */
   isFeatureEnabled(key: string, contexts?: Contexts): boolean {
-    return this.client.isFeatureEnabled(key, mergeContexts(this.boundContexts, contexts));
+    return this.isEnabled(key, contexts);
   }
 
   shouldLog(args: {
@@ -491,12 +496,17 @@ export class Quonfig {
    * Check if a feature flag is enabled.
    * Returns false if the key is not found or the value is not a boolean.
    */
-  isFeatureEnabled(key: string, contexts?: Contexts): boolean {
+  isEnabled(key: string, contexts?: Contexts): boolean {
     const value = this.get(key, contexts, undefined);
     if (typeof value === "boolean") return value;
     if (value === "true") return true;
     if (value === "false") return false;
     return false;
+  }
+
+  /** @deprecated Use `isEnabled` instead. Kept for backwards compatibility with the Reforge launch SDK and earlier Quonfig releases. */
+  isFeatureEnabled(key: string, contexts?: Contexts): boolean {
+    return this.isEnabled(key, contexts);
   }
 
   /**

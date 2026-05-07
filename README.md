@@ -19,7 +19,7 @@ const quonfig = new Quonfig({ sdkKey: "your-sdk-key" });
 await quonfig.init();
 
 // Feature flags
-if (quonfig.isFeatureEnabled("new-dashboard")) {
+if (quonfig.isEnabled("new-dashboard")) {
   // show new dashboard
 }
 
@@ -37,11 +37,15 @@ const userClient = quonfig.inContext({
   user: { key: "user-123", plan: "pro" },
 });
 userClient.get("feature-x");
-userClient.isFeatureEnabled("beta-feature");
+userClient.isEnabled("beta-feature");
 
 // Clean up when done
 quonfig.close();
 ```
+
+> **Migrating from earlier releases:** `isFeatureEnabled` is still available as a deprecated alias
+> of `isEnabled` — both behave identically. New code should prefer `isEnabled`, which matches
+> `@quonfig/javascript` and `@quonfig/react`.
 
 ## Options
 
