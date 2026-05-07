@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ["18", "20", "22", "24"]
+        node-version: ["20.9.0", "22", "24"]
     steps:
       - name: Checkout sdk-node
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

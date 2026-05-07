@@ -58,7 +58,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.9.0"
   },
   "dependencies": {
     "eventsource": "^3.0.0",
