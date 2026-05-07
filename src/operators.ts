@@ -28,6 +28,8 @@ export const OP_PROP_SEMVER_EQUAL = "PROP_SEMVER_EQUAL";
 export const OP_PROP_SEMVER_GREATER_THAN = "PROP_SEMVER_GREATER_THAN";
 export const OP_IN_SEG = "IN_SEG";
 export const OP_NOT_IN_SEG = "NOT_IN_SEG";
+export const OP_IS_PRESENT = "IS_PRESENT";
+export const OP_IS_NOT_PRESENT = "IS_NOT_PRESENT";
 
 // ---- Segment resolver type ----
 
@@ -323,6 +325,14 @@ export function evaluateCriterion(
         }
       }
       return false;
+    }
+
+    case OP_IS_PRESENT:
+    case OP_IS_NOT_PRESENT: {
+      // Presence-only operator: takes only propertyName, no valueToMatch.
+      // contextExists is true iff the dotted path resolved AND the value is
+      // not null AND not undefined. Empty string, 0, and false are present.
+      return contextExists === (criterion.operator === OP_IS_PRESENT);
     }
 
     case OP_IN_SEG:

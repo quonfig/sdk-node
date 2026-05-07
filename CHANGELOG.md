@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.26 - 2026-05-07
+
+- Add `IS_PRESENT` and `IS_NOT_PRESENT` targeting operators (qfg-7jnb.3). Both are presence-only
+  operators — they take only `propertyName` (no `valueToMatch`). `IS_PRESENT(prop)` resolves the
+  dotted path against the merged context and returns `true` iff the path resolves AND the value is
+  not `null` and not `undefined`. Empty string `""`, `0`, and `false` are intentionally considered
+  present (the question is "is the field set", type-agnostic). Missing intermediate keys in dotted
+  paths count as not present. `IS_NOT_PRESENT` is the negation. Exported as `OP_IS_PRESENT` /
+  `OP_IS_NOT_PRESENT`.
+
 ## 0.0.25 - 2026-05-04
 
 - Fix: start the telemetry reporter in datadir/datafile mode. Previously `init()` returned early
