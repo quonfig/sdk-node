@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.0.27 - 2026-05-10
+
+- Expose `variant`, `errorMessage`, and `flagMetadata` on `EvaluationDetails`, plumbing internal
+  evaluation metadata (`configId`, `configType`, `ruleIndex`, `weightedValueIndex`, `environment`)
+  through to the public details API per the cross-SDK spec
+  (`project/plans/openfeature-resolution-details.md`). `configType` values are SHOUTY_SNAKE,
+  metadata keys are camelCase, and `environment` is read from `QUONFIG_ENVIRONMENT` (qfg-9dbl).
+- Add `isEnabled(key, contexts?)` as the canonical flag-check method on both `Quonfig` and
+  `BoundQuonfig`, aligning sdk-node with `@quonfig/javascript` and `@quonfig/react`.
+  `isFeatureEnabled` remains as a `@deprecated` passthrough so existing callers (including code
+  migrated from the Reforge launch SDK) keep working unchanged (qfg-rp6t).
+- Bump `engines.node` floor to `>=20.9.0`. Node 18 hit EOL on 2025-04-30, and 20.9.0 is the
+  strictest 20.x floor any installed dep currently requires. CI matrix drops Node 18 and pins the
+  lowest entry to 20.9.0 (qfg-y7xh).
+
 ## 0.0.26 - 2026-05-07
 
 - Add `IS_PRESENT` and `IS_NOT_PRESENT` targeting operators (qfg-7jnb.3). Both are presence-only
