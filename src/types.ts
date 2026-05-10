@@ -266,11 +266,18 @@ export type EvaluationErrorCode = "FLAG_NOT_FOUND" | "TYPE_MISMATCH" | "GENERAL"
  * Result of a `get*Details` evaluation. Includes the resolved value (when
  * available) plus a reason describing how the value was selected, along with
  * an optional error code when the reason is `"ERROR"`.
+ *
+ * `variant` and `flagMetadata` follow the cross-SDK spec
+ * `project/plans/openfeature-resolution-details.md`. `errorMessage` is set
+ * only when `reason === "ERROR"`.
  */
 export interface EvaluationDetails<T> {
   value: T | undefined;
   reason: EvaluationReason;
   errorCode?: EvaluationErrorCode;
+  errorMessage?: string;
+  variant?: string;
+  flagMetadata?: Record<string, unknown>;
 }
 
 // ---- Log Level ----

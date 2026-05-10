@@ -3,6 +3,7 @@ import { readFileSync } from "fs";
 
 import type {
   ConfigEnvelope,
+  ConfigTypeString,
   Contexts,
   ContextUploadMode,
   Evaluation,
@@ -686,15 +687,30 @@ export class Quonfig {
   /**
    * Internal: evaluate a config and return {value, reason, errorCode} without
    * throwing. The `requestedType` is used to detect TYPE_MISMATCH against the
-   * config's declared `valueType`.
+   * config's declared `valueType`. When the evaluation produces metadata
+   * (configId, configType, ruleIndex, weightedValueIndex), it is returned in
+   * `evaluation` so callers can build OpenFeature-style flagMetadata.
    */
   private evaluateDetailsRaw(
     key: string,
     requestedType: RequestedType,
     contexts?: Contexts
-  ): { value: GetValue | unknown; reason: EvaluationReason; errorCode?: EvaluationErrorCode } {
+  ): {
+    value: GetValue | unknown;
+    reason: EvaluationReason;
+    errorCode?: EvaluationErrorCode;
+    errorMessage?: string;
+    evaluation?: Evaluation;
+    configId?: string;
+    configType?: ConfigTypeString;
+  } {
     if (!this.initialized) {
-      return { value: undefined, reason: "ERROR", errorCode: "GENERAL" };
+      return {
+        value: undefined,
+        reason: "ERROR",
+        errorCode: "GENERAL",
+        errorMessage: "Quonfig SDK not initialized",
+      };
     }
 
     let mergedContexts: Contexts;
@@ -703,16 +719,29 @@ export class Quonfig {
       mergedContexts = mergeContexts(this.globalContext, contexts);
       config = this.store.get(key);
     } catch (err) {
-      return { value: undefined, reason: "ERROR", errorCode: "GENERAL" };
+      const message = err instanceof Error ? err.message : String(err);
+      return { value: undefined, reason: "ERROR", errorCode: "GENERAL", errorMessage: message };
     }
 
     if (config === undefined) {
-      return { value: undefined, reason: "ERROR", errorCode: "FLAG_NOT_FOUND" };
+      return {
+        value: undefined,
+        reason: "ERROR",
+        errorCode: "FLAG_NOT_FOUND",
+        errorMessage: `No config found for key "${key}"`,
+      };
     }
 
     // Type-mismatch check against the config's declared valueType.
     if (!isCompatibleValueType(requestedType, config.valueType)) {
-      return { value: undefined, reason: "ERROR", errorCode: "TYPE_MISMATCH" };
+      return {
+        value: undefined,
+        reason: "ERROR",
+        errorCode: "TYPE_MISMATCH",
+        errorMessage: `Config "${key}" has type ${config.valueType}, expected ${requestedType}`,
+        configId: config.id,
+        configType: config.type,
+      };
     }
 
     try {
@@ -722,7 +751,12 @@ export class Quonfig {
       const match = this.evaluator.evaluateConfig(config, this.environmentId, mergedContexts);
 
       if (!match.isMatch || match.value === undefined) {
-        return { value: undefined, reason: "DEFAULT" };
+        return {
+          value: undefined,
+          reason: "DEFAULT",
+          configId: config.id,
+          configType: config.type,
+        };
       }
 
       const { resolved, reportableValue } = this.resolver.resolveValue(
@@ -757,13 +791,28 @@ export class Quonfig {
       };
       this.evaluationSummaries.push(evaluation);
 
-      return { value: unwrapped, reason };
+      return { value: unwrapped, reason, evaluation };
     } catch (err) {
-      const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+      const message = err instanceof Error ? err.message : String(err);
+      const msg = message.toLowerCase();
       if (msg.includes("type mismatch")) {
-        return { value: undefined, reason: "ERROR", errorCode: "TYPE_MISMATCH" };
+        return {
+          value: undefined,
+          reason: "ERROR",
+          errorCode: "TYPE_MISMATCH",
+          errorMessage: message,
+          configId: config.id,
+          configType: config.type,
+        };
       }
-      return { value: undefined, reason: "ERROR", errorCode: "GENERAL" };
+      return {
+        value: undefined,
+        reason: "ERROR",
+        errorCode: "GENERAL",
+        errorMessage: message,
+        configId: config.id,
+        configType: config.type,
+      };
     }
   }
 
@@ -779,17 +828,101 @@ export class Quonfig {
   ): EvaluationDetails<T> {
     const raw = this.evaluateDetailsRaw(key, requestedType, contexts);
     if (raw.reason !== "STATIC" && raw.reason !== "TARGETING_MATCH" && raw.reason !== "SPLIT") {
-      // DEFAULT or ERROR — pass through with no value
-      return raw.errorCode
-        ? { value: undefined, reason: raw.reason, errorCode: raw.errorCode }
-        : { value: undefined, reason: raw.reason };
+      // DEFAULT or ERROR — pass through with no value but still attach
+      // variant + flagMetadata per the cross-SDK spec.
+      const base: EvaluationDetails<T> = {
+        value: undefined,
+        reason: raw.reason,
+        variant: this.buildVariant(raw.reason, undefined, undefined),
+        flagMetadata: this.buildFlagMetadata(raw.configId, raw.configType, undefined, undefined),
+      };
+      if (raw.errorCode) base.errorCode = raw.errorCode;
+      if (raw.errorMessage) base.errorMessage = raw.errorMessage;
+      return base;
     }
 
     const coerced = coerce(raw.value as unknown);
     if (coerced === undefined) {
-      return { value: undefined, reason: "ERROR", errorCode: "TYPE_MISMATCH" };
+      return {
+        value: undefined,
+        reason: "ERROR",
+        errorCode: "TYPE_MISMATCH",
+        errorMessage: `Config "${key}" value could not be coerced to ${requestedType}`,
+        variant: this.buildVariant("ERROR", undefined, undefined),
+        flagMetadata: this.buildFlagMetadata(
+          raw.evaluation?.configId,
+          raw.evaluation?.configType,
+          undefined,
+          undefined
+        ),
+      };
     }
-    return { value: coerced, reason: raw.reason };
+
+    const ev = raw.evaluation;
+    return {
+      value: coerced,
+      reason: raw.reason,
+      variant: this.buildVariant(raw.reason, ev?.ruleIndex, ev?.weightedValueIndex),
+      flagMetadata: this.buildFlagMetadata(
+        ev?.configId,
+        ev?.configType,
+        ev?.ruleIndex,
+        ev?.weightedValueIndex,
+        raw.reason
+      ),
+    };
+  }
+
+  /**
+   * Build the variant string per the cross-SDK spec
+   * (project/plans/openfeature-resolution-details.md §2).
+   */
+  private buildVariant(
+    reason: EvaluationReason,
+    ruleIndex: number | undefined,
+    weightedValueIndex: number | undefined
+  ): string {
+    switch (reason) {
+      case "STATIC":
+        return "static";
+      case "TARGETING_MATCH":
+        return ruleIndex !== undefined ? `targeting:${ruleIndex}` : "targeting:0";
+      case "SPLIT":
+        return weightedValueIndex !== undefined ? `split:${weightedValueIndex}` : "split:0";
+      case "DEFAULT":
+      case "ERROR":
+      default:
+        return "default";
+    }
+  }
+
+  /**
+   * Build the flagMetadata map per the cross-SDK spec
+   * (project/plans/openfeature-resolution-details.md §3) using node/go/java
+   * camelCase keys and SHOUTY_SNAKE configType values.
+   */
+  private buildFlagMetadata(
+    configId: string | undefined,
+    configType: ConfigTypeString | undefined,
+    ruleIndex: number | undefined,
+    weightedValueIndex: number | undefined,
+    reason?: EvaluationReason
+  ): Record<string, unknown> {
+    const md: Record<string, unknown> = {};
+    if (configId !== undefined) md.configId = configId;
+    if (configType !== undefined) md.configType = configType.toUpperCase();
+    if (this.requestedEnvironment) md.environment = this.requestedEnvironment;
+    if (
+      ruleIndex !== undefined &&
+      ruleIndex >= 0 &&
+      (reason === "TARGETING_MATCH" || reason === "SPLIT")
+    ) {
+      md.ruleIndex = ruleIndex;
+    }
+    if (weightedValueIndex !== undefined && reason === "SPLIT") {
+      md.weightedValueIndex = weightedValueIndex;
+    }
+    return md;
   }
 
   private handleNoDefault(key: string, defaultValue?: any): any {
