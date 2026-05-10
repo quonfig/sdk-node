@@ -8,7 +8,9 @@ import type {
   WorkspaceConfigDocument,
 } from "./types";
 
-const CONFIG_SUBDIRS = ["configs", "feature-flags", "segments", "schemas", "log-levels"] as const;
+// `schemas/` is intentionally excluded — it holds raw JSON Schema documents
+// (no key/type/valueType), not Quonfig configs. See qfg-uzsl / qfg-2inx.
+const CONFIG_SUBDIRS = ["configs", "feature-flags", "segments", "log-levels"] as const;
 
 export function loadEnvelopeFromDatadir(datadir: string, environment: string): ConfigEnvelope {
   const environmentId = resolveEnvironment(join(datadir, "quonfig.json"), environment);
@@ -26,6 +28,14 @@ export function loadEnvelopeFromDatadir(datadir: string, environment: string): C
 
     for (const filename of filenames) {
       const raw = JSON.parse(readFileSync(join(dir, filename), "utf-8")) as WorkspaceConfigDocument;
+      // Defense-in-depth: a doc with no `key` isn't a Quonfig Config (e.g. a
+      // misplaced JSON Schema). Reject rather than emit an empty-key stub —
+      // matches api-delivery loader.go (qfg-uzsl).
+      if (!raw.key) {
+        throw new Error(
+          `[quonfig] ${join(subdir, filename)} has empty key — file is not a Quonfig Config`
+        );
+      }
       configs.push(toConfigResponse(raw, environmentId));
     }
   }

@@ -354,6 +354,61 @@ describe("Quonfig datadir", () => {
     ).toBe(true);
   });
 
+  it("ignores schemas/ JSON Schema docs (no empty-key configs in envelope)", () => {
+    const datadir = createTempDir();
+    writeJson(join(datadir, "quonfig.json"), { environments: ["production"] });
+
+    // A real JSON Schema document — has no `key`/`type`/`valueType` fields.
+    mkdirSync(join(datadir, "schemas"), { recursive: true });
+    writeJson(join(datadir, "schemas", "user-shape.json"), {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      $id: "https://quonfig.com/schemas/user-shape",
+      title: "User",
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        plan: { type: "string" },
+      },
+      required: ["id"],
+    });
+
+    // A real config alongside, so we know the loader still works for valid dirs.
+    mkdirSync(join(datadir, "configs"), { recursive: true });
+    writeJson(
+      join(datadir, "configs", "real-config.json"),
+      configDoc({
+        key: "real-config",
+        type: "config",
+        valueType: "string",
+        defaultValue: "ok",
+      })
+    );
+
+    const envelope = loadEnvelopeFromDatadir(datadir, "production");
+
+    // No empty-key or undefined-key configs should leak through.
+    for (const cfg of envelope.configs) {
+      expect(cfg.key, `unexpected config from schema doc: ${JSON.stringify(cfg)}`).toBeTruthy();
+    }
+    expect(envelope.configs.map((c) => c.key)).toEqual(["real-config"]);
+  });
+
+  it("rejects config files with missing/empty key (defense-in-depth)", () => {
+    const datadir = createTempDir();
+    writeJson(join(datadir, "quonfig.json"), { environments: ["production"] });
+
+    mkdirSync(join(datadir, "configs"), { recursive: true });
+    // A schema-like doc misplaced into configs/ — must be rejected, not silently
+    // turned into an empty-key ConfigResponse.
+    writeJson(join(datadir, "configs", "stray-schema.json"), {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      title: "Stray",
+      type: "object",
+    });
+
+    expect(() => loadEnvelopeFromDatadir(datadir, "production")).toThrow(/empty key/i);
+  });
+
   it("flush posts pending telemetry after evaluation", async () => {
     const envelope: ConfigEnvelope = {
       meta: {
