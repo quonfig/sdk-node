@@ -154,6 +154,31 @@ State semantics:
 The callback is fired only on transitions — duplicate consecutive states are suppressed. During a
 disconnect, `get*` calls keep returning the last-known config from the in-memory store.
 
+### Diagnostic health signals
+
+Two getters expose aggregate health for logging, dashboards, and ad-hoc debugging:
+
+```typescript
+quonfig.lastSuccessfulRefresh(); // Date | undefined — wall-clock time of the last installed envelope (any source).
+quonfig.connectionState();
+// "initializing" | "connected" | "disconnected" | "falling_back"
+```
+
+| State          | Meaning                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------- |
+| `initializing` | `init()` has not yet returned.                                                              |
+| `connected`    | SSE is live, or the SDK is running from a local `datadir`/`datafile`.                       |
+| `disconnected` | SSE has errored and the fallback grace timer has not elapsed, or `close()` has been called. |
+| `falling_back` | The Layer 2 HTTP fallback poller is the active update channel.                              |
+
+> Do not wire `lastSuccessfulRefresh()` or `connectionState()` directly into a Kubernetes liveness
+> probe. These signals are diagnostic, not pass/fail. A liveness probe based on SDK freshness will
+> amplify transient network blips into restart cascades.
+
+If you need a binary signal in your own observability stack, compose your own threshold from the two
+getters (e.g. "warn at 5 min stale, page at 15 min") and feed it into a metric or readiness probe —
+never a liveness probe.
+
 ## Dynamic log levels with Winston
 
 `winston` is an optional peer dependency. Install it alongside `@quonfig/node`, then compose the

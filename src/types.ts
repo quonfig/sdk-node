@@ -6,6 +6,21 @@ import type { Logger } from "./sdkLogger";
  */
 export type SSEConnectionState = "connecting" | "connected" | "error" | "disconnected";
 
+/**
+ * Aggregate connection state surfaced via {@link Quonfig.connectionState}.
+ *
+ * - `initializing` — `init()` has not yet completed.
+ * - `connected` — SSE is live (or the SDK is running in datadir/datafile mode).
+ * - `disconnected` — neither SSE nor the fallback poller is currently delivering
+ *   updates (e.g. SSE errored but the fallback grace timer has not elapsed, or
+ *   `close()` was called).
+ * - `falling_back` — the Layer 2 HTTP fallback poller is the active update channel.
+ *
+ * Diagnostic only — see the README for why this MUST NOT be wired into a
+ * Kubernetes liveness probe.
+ */
+export type ConnectionState = "connected" | "disconnected" | "falling_back" | "initializing";
+
 // ---- Value Types ----
 
 export type ValueType =

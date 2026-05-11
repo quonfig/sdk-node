@@ -4,6 +4,7 @@ import { readFileSync } from "fs";
 import type {
   ConfigEnvelope,
   ConfigTypeString,
+  ConnectionState,
   Contexts,
   ContextUploadMode,
   Evaluation,
@@ -223,6 +224,9 @@ export class Quonfig {
   private fallbackPollerEngaged: boolean = false;
   private fallbackEngageTimer?: ReturnType<typeof setTimeout>;
   private sseEverConnected: boolean = false;
+  private lastSSEState?: SSEConnectionState;
+  private lastSuccessfulRefreshAt?: Date;
+  private closed: boolean = false;
   private telemetryReporter?: TelemetryReporter;
   private instanceHash: string;
   private environmentId: string = "";
@@ -671,6 +675,44 @@ export class Quonfig {
   }
 
   /**
+   * Wall-clock time of the most recent envelope install, from any source (SSE
+   * push, fallback poll, or initial fetch / datadir load).
+   *
+   * Returns `undefined` if no envelope has been installed yet.
+   *
+   * **Diagnostic only.** Do NOT wire this into a Kubernetes liveness probe —
+   * a transient network blip will trip any freshness threshold and cause a
+   * rolling restart cascade. See the README "Diagnostic health signals"
+   * section.
+   */
+  lastSuccessfulRefresh(): Date | undefined {
+    return this.lastSuccessfulRefreshAt;
+  }
+
+  /**
+   * Current aggregate connection state for this client.
+   *
+   * - `initializing` — `init()` has not yet completed.
+   * - `connected` — SSE is live, or the SDK is running from a local
+   *   datadir/datafile and has loaded its envelope.
+   * - `disconnected` — no channel is currently delivering updates (SSE has
+   *   errored but the fallback grace timer has not elapsed yet, or `close()`
+   *   has been called).
+   * - `falling_back` — the Layer 2 HTTP fallback poller is the active update
+   *   channel.
+   *
+   * **Diagnostic only.** Do NOT wire this into a Kubernetes liveness probe —
+   * see the README "Diagnostic health signals" section.
+   */
+  connectionState(): ConnectionState {
+    if (this.closed) return "disconnected";
+    if (!this.initialized) return "initializing";
+    if (this.fallbackPollerEngaged) return "falling_back";
+    if (this.sseConnection && this.lastSSEState !== "connected") return "disconnected";
+    return "connected";
+  }
+
+  /**
    * Create a BoundQuonfig with the given context baked in.
    *
    * With a callback, invokes `fn` with the BoundQuonfig and returns its result
@@ -726,6 +768,8 @@ export class Quonfig {
       this.telemetryReporter.stop();
       this.telemetryReporter = undefined;
     }
+
+    this.closed = true;
   }
 
   // ---- Private methods ----
@@ -995,9 +1039,18 @@ export class Quonfig {
 
   private loadLocalData(): void {
     const data = this.loadLocalEnvelope();
+    this.installEnvelope(data);
+  }
 
-    this.store.update(data);
-    this.environmentId = data.meta.environment;
+  /**
+   * Apply a freshly received envelope to the store, advance the environment id,
+   * record the wall-clock refresh time (surfaced via {@link Quonfig.lastSuccessfulRefresh}),
+   * and notify the user's `onConfigUpdate` callback.
+   */
+  private installEnvelope(envelope: ConfigEnvelope): void {
+    this.store.update(envelope);
+    this.environmentId = envelope.meta.environment;
+    this.lastSuccessfulRefreshAt = new Date();
     this.invokeOnConfigUpdate();
   }
 
@@ -1040,9 +1093,7 @@ export class Quonfig {
     }
 
     if (result.envelope) {
-      this.store.update(result.envelope);
-      this.environmentId = result.envelope.meta.environment;
-      this.invokeOnConfigUpdate();
+      this.installEnvelope(result.envelope);
     }
   }
 
@@ -1053,9 +1104,7 @@ export class Quonfig {
       readDeadlineMs: this.sseReadDeadlineMs,
     });
     this.sseConnection.start((envelope: ConfigEnvelope) => {
-      this.store.update(envelope);
-      this.environmentId = envelope.meta.environment;
-      this.invokeOnConfigUpdate();
+      this.installEnvelope(envelope);
     });
   }
 
@@ -1070,6 +1119,8 @@ export class Quonfig {
    *   grace timer; if still not reconnected when it fires, engage fallback.
    */
   private handleSSEStateChange(state: SSEConnectionState): void {
+    this.lastSSEState = state;
+
     if (this.onSSEConnectionStateChange) {
       try {
         this.onSSEConnectionStateChange(state);
