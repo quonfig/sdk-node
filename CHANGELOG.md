@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- **SSE silent-stall fix (Layer 1, qfg-47c2.7).** The SDK now wraps the `eventsource` library's
+  underlying `fetch` with an `AbortController` whose deadline resets on every chunk. If no chunk
+  arrives within `sseReadDeadlineMs` (default **90s = 3x the 30s server heartbeat**), the socket is
+  dropped and the eventsource library reconnects. Previously the SDK relied on the OS TCP timeout
+  (often 2+ hours), so a silent server-side stall could go unnoticed for hours.
+- **Polling is now a fallback, not a parallel stream (Layer 2, qfg-47c2.7).** New options
+  `fallbackPollEnabled` (default `true`) and `fallbackPollIntervalMs` (default `60000`) configure an
+  HTTP poll that **only runs when SSE is unavailable** — either because the initial SSE connection
+  failed (DNS, TLS, HTTP error before any successful onopen) or because SSE has been disconnected
+  for >= 2x the poll interval (default 120s) without recovering. When SSE recovers (next successful
+  `connected` transition), the fallback poller stops. The previous `enablePolling` / `pollInterval`
+  options are deprecated and now map onto the new options with a deprecation warning; **the behavior
+  changes** — those options previously ran a parallel poller on top of SSE (double bandwidth, no
+  reconcile logic). Alpha-phase, no semver hold per resolved Q1 in
+  `project/plans/sdk-hardening-and-verification.md`.
+- **Boot log.** `init()` now emits a single info-level log line announcing the chosen update channel
+  (SSE-with-fallback / SSE-only / polling-only / none) so deployers can see the new default at
+  startup.
+- **Chaos harness wiring (qfg-47c2.7).** sdk-node now ships a chaos-test runner under `chaos/`,
+  gated behind `npm run test:chaos`, that drives the cross-SDK scenarios in
+  `integration-test-data/chaos/scenarios/` against the SDK via toxiproxy. Mirrors the sdk-go wiring
+  done in qfg-47c2.4.
+
 ## 0.0.27 - 2026-05-10
 
 - Expose `variant`, `errorMessage`, and `flagMetadata` on `EvaluationDetails`, plumbing internal

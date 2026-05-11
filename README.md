@@ -58,8 +58,10 @@ new Quonfig({
   telemetryUrl: "https://telemetry.quonfig.com",
                                  // Default derived from QUONFIG_DOMAIN.
   enableSSE: true,               // Real-time updates via SSE (default: true)
-  enablePolling: false,          // Polling fallback (default: false)
-  pollInterval: 60000,           // Polling interval in ms (default: 60000)
+  fallbackPollEnabled: true,     // Engage HTTP polling when SSE is unavailable (default: true)
+  fallbackPollIntervalMs: 60000, // Fallback poll interval in ms (default: 60000)
+  sseReadDeadlineMs: 90000,      // Drop SSE socket if no chunk arrives within this window
+                                 // (default 90000 = 3x the 30s server heartbeat).
   initTimeout: 10000,            // Init timeout in ms (default: 10000)
   onNoDefault: "error",          // "error" | "warn" | "ignore" (default: "error")
   globalContext: { ... },        // Context applied to all evaluations
@@ -94,7 +96,7 @@ they continue returning the last-known values during a disconnect.
 ### Reconnection behavior
 
 Reconnection is delegated entirely to the [`eventsource`](https://www.npmjs.com/package/eventsource)
-library (currently v2.x) and is **not** configurable from `@quonfig/node`. In v2.x the defaults are:
+library (currently v3.x). The SDK's defaults:
 
 - **Initial reconnect delay:** 1000ms
 - **Backoff:** none (constant delay; no exponential growth)
@@ -102,8 +104,27 @@ library (currently v2.x) and is **not** configurable from `@quonfig/node`. In v2
 - **Max retries:** unlimited — the library will retry indefinitely
 - **Server-driven delay:** the server can override the delay by sending a `retry: <ms>` field in any
   event (per the W3C EventSource spec)
+- **Read deadline (Layer 1, configurable via `sseReadDeadlineMs`):** the SDK wraps the underlying
+  `fetch` with an `AbortController` whose deadline resets on every chunk. If no chunk arrives within
+  the window (default 90s = 3x the 30s server heartbeat) the socket is dropped and the library
+  reconnects. Without this, a silent server-side stall would wait on the OS TCP timeout (often 2+
+  hrs).
 
-If you need different behavior, file an issue — we may add a configuration escape hatch.
+### HTTP fallback polling (Layer 2)
+
+When SSE is enabled (the default) and `fallbackPollEnabled: true` (the default), the SDK **only
+polls when SSE is unavailable**:
+
+- If the initial SSE connection fails (DNS, TLS, HTTP error before any successful onopen), the
+  fallback poller engages immediately so you keep receiving updates while the supervisor retries
+  SSE.
+- If SSE has been disconnected for >= 2x `fallbackPollIntervalMs` (default 120s) without recovering,
+  the fallback poller engages.
+- When SSE recovers (next successful `connected` transition), the fallback poller stops.
+
+This is a behavior change from earlier releases where `enablePolling: true` ran a parallel poller on
+top of SSE (double bandwidth, no reconcile). The old options now map onto the new ones with a
+deprecation warning.
 
 ### Observing connection health
 

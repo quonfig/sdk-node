@@ -28,7 +28,7 @@ import { Resolver } from "./resolver";
 import { ConfigDependencyResolver } from "./rawMatch";
 import { Transport, defaultApiUrls } from "./transport";
 import { computeReason, ReasonStatic, ReasonTargetingMatch, ReasonSplit } from "./reason";
-import { SSEConnection } from "./sse";
+import { SSEConnection, type EventSourceFactory } from "./sse";
 import { mergeContexts } from "./context";
 import { normalizeLogger, type NormalizedLogger } from "./sdkLogger";
 import { parseLevel, shouldLog } from "./logger";
@@ -41,7 +41,7 @@ import { ContextShapeCollector } from "./telemetry/contextShapes";
 import { ExampleContextCollector } from "./telemetry/exampleContexts";
 import { TelemetryReporter } from "./telemetry/reporter";
 
-const DEFAULT_POLL_INTERVAL = 60000;
+const DEFAULT_FALLBACK_POLL_INTERVAL_MS = 60000;
 const DEFAULT_INIT_TIMEOUT = 10000;
 const DEFAULT_LOG_LEVEL: LogLevelNumber = 5; // warn
 
@@ -197,8 +197,9 @@ export class Quonfig {
   private readonly apiUrls: string[];
   private readonly telemetryUrl?: string;
   private readonly enableSSE: boolean;
-  private readonly enablePolling: boolean;
-  private readonly pollInterval: number;
+  private readonly fallbackPollEnabled: boolean;
+  private readonly fallbackPollIntervalMs: number;
+  private readonly sseReadDeadlineMs?: number;
   private readonly namespace?: string;
   private readonly onNoDefault: OnNoDefault;
   private readonly globalContext: Contexts;
@@ -210,6 +211,7 @@ export class Quonfig {
   private readonly onSSEConnectionStateChange?: (state: SSEConnectionState) => void;
   private readonly loggerKey?: string;
   private readonly logger: NormalizedLogger;
+  private readonly testEventSourceFactory?: EventSourceFactory;
 
   private store: ConfigStore;
   private evaluator: Evaluator;
@@ -218,6 +220,9 @@ export class Quonfig {
   private transport: Transport;
   private sseConnection?: SSEConnection;
   private pollTimer?: ReturnType<typeof setTimeout>;
+  private fallbackPollerEngaged: boolean = false;
+  private fallbackEngageTimer?: ReturnType<typeof setTimeout>;
+  private sseEverConnected: boolean = false;
   private telemetryReporter?: TelemetryReporter;
   private instanceHash: string;
   private environmentId: string = "";
@@ -242,8 +247,32 @@ export class Quonfig {
     }
     this.telemetryUrl = options.telemetryUrl;
     this.enableSSE = options.enableSSE ?? true;
-    this.enablePolling = options.enablePolling ?? false;
-    this.pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
+    this.logger = normalizeLogger(options.logger);
+
+    // Map deprecated enablePolling/pollInterval onto the new fallback options.
+    // The behavior change (parallel → fallback-only) is intentional per the
+    // sdk-hardening plan; alpha phase, no semver hold (resolved Q1).
+    let fallbackEnabled: boolean;
+    let fallbackInterval: number;
+    if (options.enablePolling !== undefined) {
+      this.logger.warn(
+        "[quonfig] `enablePolling` is deprecated; use `fallbackPollEnabled`. The new option only polls when SSE is unavailable (was: parallel poll on top of SSE)."
+      );
+      fallbackEnabled = options.fallbackPollEnabled ?? options.enablePolling;
+    } else {
+      fallbackEnabled = options.fallbackPollEnabled ?? true;
+    }
+    if (options.pollInterval !== undefined) {
+      this.logger.warn("[quonfig] `pollInterval` is deprecated; use `fallbackPollIntervalMs`.");
+      fallbackInterval = options.fallbackPollIntervalMs ?? options.pollInterval;
+    } else {
+      fallbackInterval = options.fallbackPollIntervalMs ?? DEFAULT_FALLBACK_POLL_INTERVAL_MS;
+    }
+    this.fallbackPollEnabled = fallbackEnabled;
+    this.fallbackPollIntervalMs = fallbackInterval;
+    this.sseReadDeadlineMs = options.sseReadDeadlineMs;
+    this.testEventSourceFactory = (options as any).__testEventSourceFactory;
+
     this.namespace = options.namespace;
     this.onNoDefault = options.onNoDefault ?? "error";
     const devContextEnabled =
@@ -260,7 +289,6 @@ export class Quonfig {
     this.onConfigUpdate = options.onConfigUpdate;
     this.onSSEConnectionStateChange = options.onSSEConnectionStateChange;
     this.loggerKey = options.loggerKey;
-    this.logger = normalizeLogger(options.logger);
     this.instanceHash = randomUUID();
 
     // Initialize core components
@@ -314,18 +342,40 @@ export class Quonfig {
 
     this.initialized = true;
 
+    // Boot log: announce the chosen update mode so deployers can see the new
+    // SSE-with-fallback behavior at startup. Per qfg-47c2.7 acceptance.
+    this.logBootMode();
+
     // Start SSE for real-time updates
     if (this.enableSSE) {
       this.startSSE();
-    }
-
-    // Start polling if enabled
-    if (this.enablePolling) {
-      this.startPolling();
+    } else if (this.fallbackPollEnabled) {
+      // No SSE configured — Layer 2 acts as the *only* update channel.
+      this.engageFallbackPoller("sse-disabled");
     }
 
     // Start telemetry reporter
     this.startTelemetry();
+  }
+
+  private logBootMode(): void {
+    if (this.enableSSE && this.fallbackPollEnabled) {
+      this.logger.info(
+        `[quonfig] update channel: SSE (real-time) with HTTP fallback poll every ${this.fallbackPollIntervalMs}ms when SSE is unavailable`
+      );
+    } else if (this.enableSSE) {
+      this.logger.info(
+        "[quonfig] update channel: SSE only (fallback poll disabled — set fallbackPollEnabled=true for HTTP fallback during SSE outages)"
+      );
+    } else if (this.fallbackPollEnabled) {
+      this.logger.info(
+        `[quonfig] update channel: HTTP polling only (every ${this.fallbackPollIntervalMs}ms; SSE disabled)`
+      );
+    } else {
+      this.logger.info(
+        "[quonfig] update channel: NONE (both SSE and fallback poll are disabled — config will not refresh after init)"
+      );
+    }
   }
 
   /**
@@ -669,6 +719,8 @@ export class Quonfig {
       clearTimeout(this.pollTimer);
       this.pollTimer = undefined;
     }
+    this.cancelPendingFallbackEngage();
+    this.fallbackPollerEngaged = false;
 
     if (this.telemetryReporter) {
       this.telemetryReporter.stop();
@@ -946,7 +998,21 @@ export class Quonfig {
 
     this.store.update(data);
     this.environmentId = data.meta.environment;
-    this.onConfigUpdate?.();
+    this.invokeOnConfigUpdate();
+  }
+
+  /**
+   * Invoke the user's onConfigUpdate callback, catching any thrown error so
+   * an exception in user code does not crash the SDK supervisor (Tier 1
+   * supervisor contract Test 5; chaos scenario 10).
+   */
+  private invokeOnConfigUpdate(): void {
+    if (!this.onConfigUpdate) return;
+    try {
+      this.onConfigUpdate();
+    } catch (err) {
+      this.logger.error("[quonfig] onConfigUpdate callback threw:", err);
+    }
   }
 
   private loadLocalEnvelope(): ConfigEnvelope {
@@ -976,39 +1042,141 @@ export class Quonfig {
     if (result.envelope) {
       this.store.update(result.envelope);
       this.environmentId = result.envelope.meta.environment;
-      this.onConfigUpdate?.();
+      this.invokeOnConfigUpdate();
     }
   }
 
   private startSSE(): void {
     this.sseConnection = new SSEConnection(this.transport, this.logger, {
-      onConnectionStateChange: this.onSSEConnectionStateChange,
+      onConnectionStateChange: (state) => this.handleSSEStateChange(state),
+      eventSourceFactory: this.testEventSourceFactory,
+      readDeadlineMs: this.sseReadDeadlineMs,
     });
     this.sseConnection.start((envelope: ConfigEnvelope) => {
       this.store.update(envelope);
       this.environmentId = envelope.meta.environment;
-      this.onConfigUpdate?.();
+      this.invokeOnConfigUpdate();
     });
   }
 
-  private startPolling(): void {
+  /**
+   * Layer 2 supervisor: react to SSE lifecycle transitions.
+   *
+   * - First successful "connected" → mark sseEverConnected, clear any fallback.
+   * - Subsequent "connected" → clear any fallback (SSE recovered).
+   * - "error" before any "connected" → engage fallback immediately (initial-
+   *   connect failure: DNS, TLS, HTTP 5xx, etc.).
+   * - "error" after a successful "connected" → schedule a 2x-poll-interval
+   *   grace timer; if still not reconnected when it fires, engage fallback.
+   */
+  private handleSSEStateChange(state: SSEConnectionState): void {
+    if (this.onSSEConnectionStateChange) {
+      try {
+        this.onSSEConnectionStateChange(state);
+      } catch (err) {
+        this.logger.warn("onSSEConnectionStateChange callback threw:", err);
+      }
+    }
+
+    if (!this.fallbackPollEnabled) return;
+
+    switch (state) {
+      case "connected":
+        this.sseEverConnected = true;
+        this.cancelPendingFallbackEngage();
+        if (this.fallbackPollerEngaged) {
+          this.disengageFallbackPoller("sse-recovered");
+        }
+        break;
+      case "error":
+        if (!this.sseEverConnected) {
+          // Initial-connect failure — start polling now.
+          this.engageFallbackPoller("initial-sse-failure");
+        } else if (!this.fallbackPollerEngaged && !this.fallbackEngageTimer) {
+          // Connected → disconnected edge. Give the eventsource library
+          // 2x the poll interval to reconnect on its own (default 120s)
+          // before falling back to HTTP polling.
+          const grace = this.fallbackPollIntervalMs * 2;
+          this.fallbackEngageTimer = setTimeout(() => {
+            this.fallbackEngageTimer = undefined;
+            this.engageFallbackPoller("sse-disconnected-grace-elapsed");
+          }, grace);
+          if (
+            this.fallbackEngageTimer &&
+            typeof this.fallbackEngageTimer === "object" &&
+            "unref" in this.fallbackEngageTimer
+          ) {
+            (this.fallbackEngageTimer as any).unref();
+          }
+        }
+        break;
+      case "connecting":
+      case "disconnected":
+        // No-op for Layer 2: "connecting" is the lifecycle preamble before
+        // either "connected" or "error"; "disconnected" only fires on close().
+        break;
+    }
+  }
+
+  private cancelPendingFallbackEngage(): void {
+    if (this.fallbackEngageTimer) {
+      clearTimeout(this.fallbackEngageTimer);
+      this.fallbackEngageTimer = undefined;
+    }
+  }
+
+  /** Engage Layer 2 fallback polling. No-op if already engaged or disabled. */
+  private engageFallbackPoller(reason: string): void {
+    if (!this.fallbackPollEnabled || this.fallbackPollerEngaged) return;
+    this.fallbackPollerEngaged = true;
+    this.logger.warn(
+      `[quonfig] SSE unavailable (${reason}); engaging HTTP fallback poll every ${this.fallbackPollIntervalMs}ms`
+    );
+    this.startFallbackPolling();
+  }
+
+  /** Stop Layer 2 fallback polling. No-op if not engaged. */
+  private disengageFallbackPoller(reason: string): void {
+    if (!this.fallbackPollerEngaged) return;
+    this.fallbackPollerEngaged = false;
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+    this.logger.info(`[quonfig] HTTP fallback poll disengaged (${reason})`);
+  }
+
+  private startFallbackPolling(): void {
     const poll = (): void => {
+      // If we were disengaged while a poll was in flight, abandon scheduling.
+      if (!this.fallbackPollerEngaged) return;
       this.fetchAndInstall()
         .catch((err) => {
-          this.logger.warn("Polling error:", err);
+          this.logger.warn("Fallback poll error:", err);
         })
         .finally(() => {
-          this.pollTimer = setTimeout(poll, this.pollInterval);
+          if (!this.fallbackPollerEngaged) return;
+          this.pollTimer = setTimeout(poll, this.fallbackPollIntervalMs);
           if (this.pollTimer && typeof this.pollTimer === "object" && "unref" in this.pollTimer) {
             this.pollTimer.unref();
           }
         });
     };
 
-    this.pollTimer = setTimeout(poll, this.pollInterval);
+    this.pollTimer = setTimeout(poll, this.fallbackPollIntervalMs);
     if (this.pollTimer && typeof this.pollTimer === "object" && "unref" in this.pollTimer) {
       this.pollTimer.unref();
     }
+  }
+
+  /**
+   * Internal accessor for the chaos harness and test suite — `true` when the
+   * Layer 2 HTTP fallback poller is currently scheduled. NOT part of the
+   * public API; the documented `connectionState()` accessor lands in
+   * qfg-47c2.14.
+   */
+  fallbackPollerActive(): boolean {
+    return this.fallbackPollerEngaged;
   }
 
   private startTelemetry(): void {
