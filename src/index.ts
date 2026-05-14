@@ -35,6 +35,7 @@ export type {
   EvaluationReason,
   EvaluationErrorCode,
   RawMatch,
+  ConnectionState,
   SSEConnectionState,
   RawConfigWithDependencies,
   RawDependency,
