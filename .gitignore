@@ -2,4 +2,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+
+# Local chaos harness artifacts (built by scripts/run-chaos.sh)
 .chaos-api-delivery
+chaos-*.log

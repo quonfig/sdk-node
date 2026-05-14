@@ -32,6 +32,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:chaos": "scripts/run-chaos.sh",
+    "chaos": "vitest run --config chaos/vitest.config.ts",
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build",
     "prettier": "prettier . -l",
