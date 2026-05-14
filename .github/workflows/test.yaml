@@ -12,7 +12,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ["20.9.0", "22", "24"]
+        # Lowest entry tracks the package.json engines.node floor. Bumped
+        # 20.9.0 -> 20.12.0 because vitest 4 (devDependency, test-only) uses
+        # node:util's styleText, added in Node 20.12. The published
+        # engines.node >=20.9.0 floor is unaffected — SDK consumers do not
+        # depend on vitest.
+        node-version: ["20.12.0", "22", "24"]
     steps:
       - name: Checkout sdk-node
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
