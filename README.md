@@ -19,7 +19,7 @@ const quonfig = new Quonfig({ sdkKey: "your-sdk-key" });
 await quonfig.init();
 
 // Feature flags
-if (quonfig.isFeatureEnabled("new-dashboard")) {
+if (quonfig.isEnabled("new-dashboard")) {
   // show new dashboard
 }
 
@@ -37,11 +37,15 @@ const userClient = quonfig.inContext({
   user: { key: "user-123", plan: "pro" },
 });
 userClient.get("feature-x");
-userClient.isFeatureEnabled("beta-feature");
+userClient.isEnabled("beta-feature");
 
 // Clean up when done
 quonfig.close();
 ```
+
+> **Migrating from earlier releases:** `isFeatureEnabled` is still available as a deprecated alias
+> of `isEnabled` — both behave identically. New code should prefer `isEnabled`, which matches
+> `@quonfig/javascript` and `@quonfig/react`.
 
 ## Options
 
@@ -54,8 +58,10 @@ new Quonfig({
   telemetryUrl: "https://telemetry.quonfig.com",
                                  // Default derived from QUONFIG_DOMAIN.
   enableSSE: true,               // Real-time updates via SSE (default: true)
-  enablePolling: false,          // Polling fallback (default: false)
-  pollInterval: 60000,           // Polling interval in ms (default: 60000)
+  fallbackPollEnabled: true,     // Engage HTTP polling when SSE is unavailable (default: true)
+  fallbackPollIntervalMs: 60000, // Fallback poll interval in ms (default: 60000)
+  sseReadDeadlineMs: 90000,      // Drop SSE socket if no chunk arrives within this window
+                                 // (default 90000 = 3x the 30s server heartbeat).
   initTimeout: 10000,            // Init timeout in ms (default: 10000)
   onNoDefault: "error",          // "error" | "warn" | "ignore" (default: "error")
   globalContext: { ... },        // Context applied to all evaluations
@@ -90,7 +96,7 @@ they continue returning the last-known values during a disconnect.
 ### Reconnection behavior
 
 Reconnection is delegated entirely to the [`eventsource`](https://www.npmjs.com/package/eventsource)
-library (currently v2.x) and is **not** configurable from `@quonfig/node`. In v2.x the defaults are:
+library (currently v3.x). The SDK's defaults:
 
 - **Initial reconnect delay:** 1000ms
 - **Backoff:** none (constant delay; no exponential growth)
@@ -98,8 +104,27 @@ library (currently v2.x) and is **not** configurable from `@quonfig/node`. In v2
 - **Max retries:** unlimited — the library will retry indefinitely
 - **Server-driven delay:** the server can override the delay by sending a `retry: <ms>` field in any
   event (per the W3C EventSource spec)
+- **Read deadline (Layer 1, configurable via `sseReadDeadlineMs`):** the SDK wraps the underlying
+  `fetch` with an `AbortController` whose deadline resets on every chunk. If no chunk arrives within
+  the window (default 90s = 3x the 30s server heartbeat) the socket is dropped and the library
+  reconnects. Without this, a silent server-side stall would wait on the OS TCP timeout (often 2+
+  hrs).
 
-If you need different behavior, file an issue — we may add a configuration escape hatch.
+### HTTP fallback polling (Layer 2)
+
+When SSE is enabled (the default) and `fallbackPollEnabled: true` (the default), the SDK **only
+polls when SSE is unavailable**:
+
+- If the initial SSE connection fails (DNS, TLS, HTTP error before any successful onopen), the
+  fallback poller engages immediately so you keep receiving updates while the supervisor retries
+  SSE.
+- If SSE has been disconnected for >= 2x `fallbackPollIntervalMs` (default 120s) without recovering,
+  the fallback poller engages.
+- When SSE recovers (next successful `connected` transition), the fallback poller stops.
+
+This is a behavior change from earlier releases where `enablePolling: true` ran a parallel poller on
+top of SSE (double bandwidth, no reconcile). The old options now map onto the new ones with a
+deprecation warning.
 
 ### Observing connection health
 
@@ -128,6 +153,31 @@ State semantics:
 
 The callback is fired only on transitions — duplicate consecutive states are suppressed. During a
 disconnect, `get*` calls keep returning the last-known config from the in-memory store.
+
+### Diagnostic health signals
+
+Two getters expose aggregate health for logging, dashboards, and ad-hoc debugging:
+
+```typescript
+quonfig.lastSuccessfulRefresh(); // Date | undefined — wall-clock time of the last installed envelope (any source).
+quonfig.connectionState();
+// "initializing" | "connected" | "disconnected" | "falling_back"
+```
+
+| State          | Meaning                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------- |
+| `initializing` | `init()` has not yet returned.                                                              |
+| `connected`    | SSE is live, or the SDK is running from a local `datadir`/`datafile`.                       |
+| `disconnected` | SSE has errored and the fallback grace timer has not elapsed, or `close()` has been called. |
+| `falling_back` | The Layer 2 HTTP fallback poller is the active update channel.                              |
+
+> Do not wire `lastSuccessfulRefresh()` or `connectionState()` directly into a Kubernetes liveness
+> probe. These signals are diagnostic, not pass/fail. A liveness probe based on SDK freshness will
+> amplify transient network blips into restart cascades.
+
+If you need a binary signal in your own observability stack, compose your own threshold from the two
+getters (e.g. "warn at 5 min stale, page at 15 min") and feed it into a metric or readiness probe —
+never a liveness probe.
 
 ## Dynamic log levels with Winston
 

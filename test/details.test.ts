@@ -179,4 +179,76 @@ describe("Quonfig *Details API", () => {
       expect(details.reason).toBe("TARGETING_MATCH");
     });
   });
+
+  describe("variant + flagMetadata (qfg-9dbl)", () => {
+    it("STATIC: variant='static', flagMetadata has configId/configType/environment, no rule/weighted indexes", () => {
+      const details = quonfig.getBoolDetails("always.true");
+      expect(details.variant).toBe("static");
+      expect(details.flagMetadata).toBeDefined();
+      const md = details.flagMetadata as Record<string, unknown>;
+      expect(typeof md.configId).toBe("string");
+      expect((md.configId as string).length).toBeGreaterThan(0);
+      expect(md.configType).toBe("FEATURE_FLAG");
+      expect(md.environment).toBe("Production");
+      expect(md.ruleIndex).toBeUndefined();
+      expect(md.weightedValueIndex).toBeUndefined();
+    });
+
+    it("TARGETING_MATCH: variant='targeting:0', flagMetadata.ruleIndex=0", () => {
+      const details = quonfig.getBoolDetails("of.targeting", {
+        user: { plan: "pro" },
+      });
+      expect(details.value).toBe(true);
+      expect(details.reason).toBe("TARGETING_MATCH");
+      expect(details.variant).toBe("targeting:0");
+      const md = details.flagMetadata as Record<string, unknown>;
+      expect(md.configId).toBe("18000000000000001");
+      expect(md.configType).toBe("CONFIG");
+      expect(md.ruleIndex).toBe(0);
+      expect(md.weightedValueIndex).toBeUndefined();
+    });
+
+    it("SPLIT: variant='split:<n>', flagMetadata.weightedValueIndex matches", () => {
+      // Try several user IDs until we land on a SPLIT (computeReason returns
+      // STATIC for index 0 — we want a non-zero bucket so variant='split:1'+).
+      let saw: { variant?: string; md?: Record<string, unknown> } | undefined;
+      for (let i = 0; i < 100; i++) {
+        const d = quonfig.getStringDetails("of.weighted", {
+          user: { id: `user-${i}` },
+        });
+        if (d.reason === "SPLIT") {
+          saw = { variant: d.variant, md: d.flagMetadata as Record<string, unknown> };
+          break;
+        }
+      }
+      expect(saw).toBeDefined();
+      expect(saw!.variant).toMatch(/^split:[0-9]+$/);
+      expect(saw!.md!.weightedValueIndex).toBe(Number(saw!.variant!.split(":")[1]));
+      // ruleIndex is also present for SPLIT
+      expect(typeof saw!.md!.ruleIndex).toBe("number");
+      expect(saw!.md!.configType).toBe("CONFIG");
+    });
+
+    it("ERROR FLAG_NOT_FOUND: variant='default', errorMessage set, no flagMetadata details", () => {
+      const details = quonfig.getBoolDetails("does.not.exist");
+      expect(details.reason).toBe("ERROR");
+      expect(details.errorCode).toBe("FLAG_NOT_FOUND");
+      expect(details.variant).toBe("default");
+      expect(details.errorMessage).toBeDefined();
+      expect(typeof details.errorMessage).toBe("string");
+    });
+
+    it("ERROR TYPE_MISMATCH: variant='default', errorMessage set", () => {
+      const details = quonfig.getBoolDetails("brand.new.string");
+      expect(details.reason).toBe("ERROR");
+      expect(details.errorCode).toBe("TYPE_MISMATCH");
+      expect(details.variant).toBe("default");
+      expect(details.errorMessage).toBeDefined();
+    });
+
+    it("success: errorMessage is omitted (undefined)", () => {
+      const details = quonfig.getBoolDetails("always.true");
+      expect(details.errorMessage).toBeUndefined();
+    });
+  });
 });
