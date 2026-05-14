@@ -14,6 +14,11 @@ jobs:
     uses: ./.github/workflows/chaos.yaml
     with:
       mode: full
+    # chaos.yaml checks out the private quonfig/api-delivery repo using
+    # secrets.QUONFIG_REPO_TOKEN. Reusable workflows do not inherit caller
+    # secrets unless passed explicitly, so without this the api-delivery
+    # checkout fails and the chaos gate (and every release) is red.
+    secrets: inherit
 
   check-version:
     runs-on: ubuntu-latest
