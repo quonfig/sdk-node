@@ -6,6 +6,21 @@ import type { Logger } from "./sdkLogger";
  */
 export type SSEConnectionState = "connecting" | "connected" | "error" | "disconnected";
 
+/**
+ * Aggregate connection state surfaced via {@link Quonfig.connectionState}.
+ *
+ * - `initializing` — `init()` has not yet completed.
+ * - `connected` — SSE is live (or the SDK is running in datadir/datafile mode).
+ * - `disconnected` — neither SSE nor the fallback poller is currently delivering
+ *   updates (e.g. SSE errored but the fallback grace timer has not elapsed, or
+ *   `close()` was called).
+ * - `falling_back` — the Layer 2 HTTP fallback poller is the active update channel.
+ *
+ * Diagnostic only — see the README for why this MUST NOT be wired into a
+ * Kubernetes liveness probe.
+ */
+export type ConnectionState = "connected" | "disconnected" | "falling_back" | "initializing";
+
 // ---- Value Types ----
 
 export type ValueType =
@@ -185,7 +200,37 @@ export interface QuonfigOptions {
    */
   telemetryUrl?: string;
   enableSSE?: boolean;
+  /**
+   * Enable HTTP polling as a *fallback* when SSE is unavailable. Defaults to
+   * `true`. The poller only runs when:
+   *   1. SSE is configured but the initial connection fails (DNS, TLS, HTTP
+   *      error before any successful onopen), OR
+   *   2. SSE has been disconnected and unable to reconnect for >= 2x
+   *      `fallbackPollIntervalMs` (default 120s).
+   * When SSE recovers (next successful onopen), the fallback poller stops.
+   * Set to `false` to disable the fallback entirely.
+   */
+  fallbackPollEnabled?: boolean;
+  /** Interval between fallback-poll fetches in ms. Default 60000 (60s). */
+  fallbackPollIntervalMs?: number;
+  /**
+   * Read deadline for the SSE stream in ms. The SDK wraps the underlying
+   * `fetch` with an `AbortController` that resets on each chunk; if no chunk
+   * arrives within this window the socket is dropped and the eventsource
+   * library reconnects. Default 90000 (3x the 30s server heartbeat).
+   */
+  sseReadDeadlineMs?: number;
+  /**
+   * @deprecated Use `fallbackPollEnabled` instead. The old name configured a
+   * parallel poller that ran alongside SSE; the new option configures a
+   * fallback that only runs when SSE is unavailable. Mapping is automatic
+   * with a deprecation warning.
+   */
   enablePolling?: boolean;
+  /**
+   * @deprecated Use `fallbackPollIntervalMs` instead. Mapping is automatic
+   * with a deprecation warning.
+   */
   pollInterval?: number;
   namespace?: string;
   globalContext?: Contexts;
