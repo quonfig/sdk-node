@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.0.28 - 2026-05-14
 
 - **SSE silent-stall fix (Layer 1, qfg-47c2.7).** The SDK now wraps the `eventsource` library's
   underlying `fetch` with an `AbortController` whose deadline resets on every chunk. If no chunk
@@ -20,10 +20,26 @@
 - **Boot log.** `init()` now emits a single info-level log line announcing the chosen update channel
   (SSE-with-fallback / SSE-only / polling-only / none) so deployers can see the new default at
   startup.
-- **Chaos harness wiring (qfg-47c2.7).** sdk-node now ships a chaos-test runner under `chaos/`,
-  gated behind `npm run test:chaos`, that drives the cross-SDK scenarios in
-  `integration-test-data/chaos/scenarios/` against the SDK via toxiproxy. Mirrors the sdk-go wiring
-  done in qfg-47c2.4.
+- **Health getters (qfg-47c2.14).** New public methods `lastSuccessfulRefresh()` and
+  `connectionState()` expose diagnostic state for composing custom freshness checks. The aggregate
+  `ConnectionState` type (`initializing` / `connected` / `disconnected` / `falling_back`) is now
+  exported. Diagnostic only — see the README on why these must not be wired into a k8s liveness
+  probe.
+- **datadir: exclude `schemas/` and reject empty-key files (qfg-2inx).** Files under a workspace's
+  `schemas/` directory are no longer loaded as configs, and a config file whose key is empty is
+  rejected with a clear error instead of being silently mis-keyed.
+- **Chaos harness (qfg-47c2.7, qfg-47c2.29, qfg-47c2.32, qfg-mzg2).** sdk-node ships a chaos-test
+  runner under `chaos/` (invoked via `npm run test:chaos` / `npm run chaos`) that drives the
+  cross-SDK scenarios in `integration-test-data/chaos/scenarios/` against the SDK via toxiproxy.
+  Scenario 07 switched to proxy-disable instead of the `limit_data` toxic; the runner identifies its
+  session to the shared chaos lock; and `scripts/run-chaos.sh` boots api-delivery + toxiproxy and
+  tears them down on exit. The chaos smoke suite now runs on every push and PR and gates the release
+  workflow.
+- **Dependencies.** `eventsource` `^3.0.0` → `^4.1.0`; dev deps `typescript` `^5.3.0` → `^6.0.3`
+  (tsconfig gains `types: ["node"]` + `ignoreDeprecations: "6.0"` for the TS 6 lib/baseUrl changes),
+  `vitest` `^1.0.0` → `^4.1.6` (CI test-matrix floor raised to Node 20.19.0 for vitest 4's rolldown
+  binding), `pino` `9.14.0` → `10.3.1`, `@types/node` `^20.11.0` → `^25.6.0`. CI actions
+  `actions/checkout` → v6.0.2 and `actions/setup-node` → v6.4.0.
 
 ## 0.0.27 - 2026-05-10
 
