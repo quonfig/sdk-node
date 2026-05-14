@@ -12,7 +12,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ["20.9.0", "22", "24"]
+        # Lowest entry is the floor that the test toolchain runs on, not the
+        # published engines.node floor. vitest 4 (devDependency, test-only)
+        # pulls in rolldown, whose native binding @rolldown/binding-linux-x64-gnu
+        # declares engines.node ^20.19.0 — on anything lower npm skips the
+        # optional binding and vitest fails to start. 20.19.0 is the lowest
+        # Node that runs the vitest 4 toolchain. The published
+        # engines.node >=20.9.0 floor is unaffected — SDK consumers do not
+        # depend on vitest or rolldown.
+        node-version: ["20.19.0", "22", "24"]
     steps:
       - name: Checkout sdk-node
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
