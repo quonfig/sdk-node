@@ -63,7 +63,7 @@
     "node": ">=20.9.0"
   },
   "dependencies": {
-    "eventsource": "^3.0.0",
+    "eventsource": "^4.1.0",
     "murmurhash": "^2.0.1"
   },
   "peerDependencies": {
