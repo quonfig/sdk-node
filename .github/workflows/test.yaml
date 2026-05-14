@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ["18", "20", "22", "24"]
+        node-version: ["20.9.0", "22", "24"]
     steps:
       - name: Checkout sdk-node
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -24,7 +24,10 @@ jobs:
         with:
           repository: quonfig/integration-test-data
           path: integration-test-data
-          ref: main
+          # Pinned to a tag (not main) so a typo in shared YAML can't
+          # break every SDK's CI at once. Bump to a newer tag when
+          # adopting new test cases. See integration-test-data/RELEASING.md.
+          ref: v2026.05.13
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:

@@ -35,6 +35,7 @@ export type {
   EvaluationReason,
   EvaluationErrorCode,
   RawMatch,
+  ConnectionState,
   SSEConnectionState,
   RawConfigWithDependencies,
   RawDependency,
@@ -114,6 +115,8 @@ export {
   OP_PROP_SEMVER_GREATER_THAN,
   OP_IN_SEG,
   OP_NOT_IN_SEG,
+  OP_IS_PRESENT,
+  OP_IS_NOT_PRESENT,
 } from "./operators";
 export type { SegmentResolver } from "./operators";
 

@@ -585,6 +585,107 @@ describe("enabled", () => {
     expect(__actual).toBe(false);
   });
 
+  it("returns true for IS_PRESENT rule when the given prop is a non-empty string", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-present",
+      mergeContexts({ user: { id: "abc" } } as Contexts)
+    );
+    expect(__actual).toBe(true);
+  });
+
+  it("returns true for IS_PRESENT rule when the given prop is an empty string", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-present",
+      mergeContexts({ user: { id: "" } } as Contexts)
+    );
+    expect(__actual).toBe(true);
+  });
+
+  it("returns true for IS_PRESENT rule when the given prop is the integer zero", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-present",
+      mergeContexts({ user: { id: 0 } } as Contexts)
+    );
+    expect(__actual).toBe(true);
+  });
+
+  it("returns true for IS_PRESENT rule when the given prop is boolean false", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-present",
+      mergeContexts({ user: { id: false } } as Contexts)
+    );
+    expect(__actual).toBe(true);
+  });
+
+  it("returns false for IS_PRESENT rule when the given prop is null", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-present",
+      mergeContexts({ user: { id: undefined } } as Contexts)
+    );
+    expect(__actual).toBe(false);
+  });
+
+  it("returns false for IS_PRESENT rule when the given prop key is missing from the context", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-present",
+      mergeContexts({ user: { name: "bob" } } as Contexts)
+    );
+    expect(__actual).toBe(false);
+  });
+
+  it("returns false for IS_PRESENT rule when no contexts are provided at all", () => {
+    const __actual = enabledCase("feature-flag.is-present", {});
+    expect(__actual).toBe(false);
+  });
+
+  it("returns false for IS_NOT_PRESENT rule when the given prop is a non-empty string", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-not-present",
+      mergeContexts({ user: { id: "abc" } } as Contexts)
+    );
+    expect(__actual).toBe(false);
+  });
+
+  it("returns true for IS_NOT_PRESENT rule when the given prop is null", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-not-present",
+      mergeContexts({ user: { id: undefined } } as Contexts)
+    );
+    expect(__actual).toBe(true);
+  });
+
+  it("returns true for IS_NOT_PRESENT rule when the given prop key is missing from the context", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-not-present",
+      mergeContexts({ user: { name: "bob" } } as Contexts)
+    );
+    expect(__actual).toBe(true);
+  });
+
+  it("returns true for IS_PRESENT rule on a nested path when the nested prop is set", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-present-nested",
+      mergeContexts({ organization: { domain: "example.com" } } as Contexts)
+    );
+    expect(__actual).toBe(true);
+  });
+
+  it("returns false for IS_PRESENT rule on a nested path when the nested key is missing but the parent context exists", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-present-nested",
+      mergeContexts({ organization: { name: "Acme Inc" } } as Contexts)
+    );
+    expect(__actual).toBe(false);
+  });
+
+  it("returns false for IS_PRESENT rule on a nested path when the parent context is entirely absent", () => {
+    const __actual = enabledCase(
+      "feature-flag.is-present-nested",
+      mergeContexts({ user: { id: "abc" } } as Contexts)
+    );
+    expect(__actual).toBe(false);
+  });
+
   it("returns true for PROP_SEMVER_EQUAL rule when the given prop equals the version", () => {
     const __actual = enabledCase(
       "feature-flag.semver-equal",
