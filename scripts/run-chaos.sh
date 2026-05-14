@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
-# Run the cross-SDK chaos harness against sdk-node (qfg-47c2.7).
+# Run the cross-SDK chaos harness against sdk-node (qfg-mzg2).
 #
 # 1. Boots the shared toxiproxy launcher (../integration-test-data/chaos/start-chaos.sh).
 # 2. Launches api-delivery in fixture mode on $CHAOS_API_DELIVERY_PORT.
 # 3. Reconfigures the seeded toxiproxy SSE/HTTP proxies to forward to that api-delivery.
-# 4. Runs `vitest run chaos/run-chaos.test.ts`.
-# 5. Tears everything down on exit.
+# 4. Runs `npm run chaos` (vitest against chaos/*.test.ts).
+# 5. Tears everything down on exit (success or failure).
 #
-# Mirrors sdk-go/scripts/run-chaos.sh so every SDK has identical boot semantics.
+# Mirrors sdk-go/scripts/run-chaos.sh, sdk-python/scripts/run-chaos.sh, and
+# sdk-ruby/scripts/run-chaos.sh so every SDK has identical boot semantics.
 #
 # Env knobs (override on the command line):
 #   CHAOS_API_DELIVERY_PORT  port for the locally-spawned api-delivery (default 6550)
@@ -84,4 +85,4 @@ CHAOS_UPSTREAM_HOST=host.docker.internal \
 echo "==> running chaos scenarios"
 cd "$SDK_DIR"
 CHAOS_API_DELIVERY_URL="http://127.0.0.1:$API_PORT" \
-  npx vitest run --config chaos/vitest.config.ts
+  npm run chaos -- "$@"

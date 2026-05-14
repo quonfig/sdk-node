@@ -6,9 +6,18 @@ jobs:
   test:
     uses: ./.github/workflows/test.yaml
 
+  # Chaos harness gates publish — see .github/workflows/chaos.yaml.
+  # Full suite (every scenario incl. 11-null-hypothesis, ~48 min) runs
+  # before any version bump can ship. Surfaced by the 2026-05-13
+  # reliability audit.
+  chaos:
+    uses: ./.github/workflows/chaos.yaml
+    with:
+      mode: full
+
   check-version:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, chaos]
     outputs:
       version-changed: ${{ steps.check.outputs.changed }}
       current-version: ${{ steps.check.outputs.current-version }}
