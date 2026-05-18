@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.0.29 - 2026-05-18
+
+- **Telemetry off by default in fully-local mode.** When the SDK is initialized with `datadir` (or
+  `datafile`) and **no** `sdkKey`, the telemetry reporter no longer starts. Previously, an
+  open-source / no-account consumer pointed at a local Quonfig workspace would still queue
+  evaluation summaries and attempt to POST them to `telemetry.quonfig.com` on every `close()` — a
+  guaranteed failure with no destination workspace to attribute the data to. The dogfood path
+  (datadir/datafile + sdkKey, used by `app-quonfig` / `api-telemetry` to self-report) is unchanged:
+  if a key is present, the reporter still starts. Surfaced while writing the
+  `docs.quonfig.com/docs/tutorials/nextjs-typescript-local` tutorial; new regression test asserts
+  `postTelemetry` is never called when a datafile is loaded without an sdkKey.
+
 ## 0.0.28 - 2026-05-14
 
 - **SSE silent-stall fix (Layer 1, qfg-47c2.7).** The SDK now wraps the `eventsource` library's

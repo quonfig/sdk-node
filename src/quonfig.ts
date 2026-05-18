@@ -1231,6 +1231,13 @@ export class Quonfig {
   }
 
   private startTelemetry(): void {
+    // No-account local mode: when the SDK was constructed with only datadir/
+    // datafile and no sdkKey, there's nowhere to post telemetry and no
+    // workspace to attribute it to. Skip the reporter entirely so an
+    // offline/open-source consumer doesn't generate failed POST attempts to
+    // telemetry.quonfig.com on every eval.
+    if (!this.sdkKey) return;
+
     const anyEnabled =
       this.evaluationSummaries.isEnabled() ||
       this.contextShapes.isEnabled() ||

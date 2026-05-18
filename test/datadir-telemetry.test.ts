@@ -66,4 +66,55 @@ describe("telemetry reporter starts in datadir mode", () => {
 
     vi.restoreAllMocks();
   });
+
+  /**
+   * Open-source / no-account path: when the SDK is initialized with only a
+   * datafile/datadir and NO sdkKey, there's no workspace to attribute
+   * telemetry to. The reporter must not even start — otherwise the eval
+   * collectors fill up and every close() generates a failed POST attempt to
+   * telemetry.quonfig.com. Surfaced while writing the "fully local Next.js"
+   * tutorial; if you delete the !this.sdkKey gate in startTelemetry, this
+   * test catches it.
+   */
+  it("does NOT start the telemetry reporter when datafile mode is used without an sdkKey", async () => {
+    const rule = (value: string) => ({
+      criteria: [{ operator: "ALWAYS_TRUE" }],
+      value: { type: "string", value },
+    });
+    const envelope: ConfigEnvelope = {
+      meta: { version: "test-version", environment: "Production" },
+      configs: [
+        {
+          id: "cfg-1",
+          key: "welcome-message",
+          type: "config",
+          valueType: "string",
+          sendToClientSdk: false,
+          default: { rules: [rule("hello")] },
+          environment: { id: "Production", rules: [rule("hola")] },
+        } as any,
+      ],
+    };
+
+    const postTelemetrySpy = vi
+      .spyOn(Transport.prototype, "postTelemetry")
+      .mockResolvedValue(undefined);
+
+    const quonfig = new Quonfig({
+      // No sdkKey — datafile is the only credential-equivalent.
+      datafile: envelope,
+      enableSSE: false,
+      enablePolling: false,
+    });
+
+    await quonfig.init();
+    expect(quonfig.getString("welcome-message")).toBe("hola");
+
+    // Eval was recorded but reporter never started → close() must not flush
+    // a POST attempt. The previous behavior was a failed/silent POST per close.
+    await quonfig.close();
+    expect(postTelemetrySpy).not.toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+  });
 });
