@@ -67,6 +67,8 @@ new Quonfig({
   globalContext: { ... },        // Context applied to all evaluations
   datadir: "./workspace-data",   // Load local workspace directories instead of API
   datafile: "./config.json",     // Legacy local envelope path
+  dataDirAutoReload: false,      // Opt in to fs.watch-based re-read in datadir mode (default: false)
+  dataDirAutoReloadDebounceMs: 200, // Debounce window for the watcher (default: 200)
 });
 ```
 
@@ -178,6 +180,82 @@ quonfig.connectionState();
 If you need a binary signal in your own observability stack, compose your own threshold from the two
 getters (e.g. "warn at 5 min stale, page at 15 min") and feed it into a metric or readiness probe —
 never a liveness probe.
+
+## Datadir mode: auto-reload on file changes
+
+When you initialize the SDK with `datadir: "./path"`, configs are loaded once from disk at `init()`
+time. Opt in to `dataDirAutoReload` to have the SDK watch the directory and re-read the envelope
+whenever files change — an editor save, a `git pull`, or a build step.
+
+```typescript
+import { Quonfig } from "@quonfig/node";
+
+const quonfig = new Quonfig({
+  datadir: "./workspace-data",
+  environment: "development",
+  dataDirAutoReload: true, // off by default — must be opted in
+  onConfigUpdate: () => {
+    console.log("Quonfig configs reloaded from disk");
+  },
+});
+await quonfig.init();
+
+// Edit a file under ./workspace-data and onConfigUpdate fires within ~200ms.
+
+// On shutdown, close() stops the watcher and clears any pending debounce timer.
+quonfig.close();
+```
+
+### When to enable
+
+- Local development with the datadir checked out from git.
+- Self-hosted servers that `git pull` the datadir on a schedule.
+- CI jobs that mutate the datadir between assertions.
+
+### When NOT to enable
+
+- **Read-only / immutable filesystems** (some containers, AWS Lambda, scratch images). Watch
+  registration may fail; the SDK degrades gracefully (logs the error and continues serving the
+  envelope it loaded at `init()` time) but you're paying for nothing.
+- **Build-time-embedded workflows** where the datadir is bundled into the artifact and never changes
+  at runtime. Watching wastes a file descriptor and a libuv handle.
+- **Production paths where reload timing matters** — e.g. you'd rather pin the envelope you shipped
+  with and roll forward through a redeploy than have it shift under traffic.
+
+Default is `false`; datadir mode is silent until you opt in.
+
+### Behavior contract
+
+- **Parse-then-swap.** If the new envelope fails to parse (truncated write, mid-`git pull` state,
+  invalid JSON), the SDK logs the error and **keeps serving the previous envelope**.
+  `onConfigUpdate` is _not_ fired on parse failure — only on a successful swap.
+- **Debounced.** Bursts of filesystem events (atomic-rename editor saves, `git pull` touching dozens
+  of files) coalesce into a single re-read. Default window: **200ms** — long enough to absorb the
+  3–5 events typical editors emit in <50ms, short enough that interactive edits feel immediate. Tune
+  via `dataDirAutoReloadDebounceMs` if you need a different window.
+- **Graceful degrade.** If watch registration fails (read-only fs, immutable container, EMFILE), the
+  SDK logs and continues without watching — it does **not** throw from `init()`.
+- **Symlinks.** The watcher resolves `datadir` to its real path at start time. Editing the file the
+  symlink points at _is_ detected; atomic flips that retarget the link itself are **not**.
+- **Shutdown.** `quonfig.close()` stops the watcher and clears any pending debounce timer. There is
+  no separate handle to manage — the watcher lifecycle is tied to the client.
+
+### Tuning the debounce window
+
+```typescript
+new Quonfig({
+  datadir: "./workspace-data",
+  dataDirAutoReload: true,
+  dataDirAutoReloadDebounceMs: 1000, // wait a full second after the last event
+});
+```
+
+The default (200ms) is tuned for interactive editing. Raise it if you have a noisy producer
+(continuously regenerating files) and you'd rather see one reload per second than per save. Lower it
+only if you've measured that 200ms is meaningfully too slow for your use case.
+
+See the [open-source / local how-to](https://docs.quonfig.com/docs/how-tos/open-source-local) for
+the cross-SDK story (sdk-node, sdk-go, sdk-ruby, sdk-python, sdk-java).
 
 ## Dynamic log levels with Winston
 
