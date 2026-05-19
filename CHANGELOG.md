@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.31 - 2026-05-19
+
+- **Remove dead `collectLoggerCounts` option from `InitOptions` (qfg-phab).** The field was declared
+  on `InitOptions` but never referenced anywhere in the SDK — a leftover from earlier work that
+  silently accepted user input and did nothing. **Typing-level breaking change**: TypeScript callers
+  passing `collectLoggerCounts: true | false` will now get a type error. No runtime behavior change;
+  the field had no effect either before or after this release. JavaScript callers are unaffected.
+
 ## 0.0.30 - 2026-05-19
 
 - **Opt-in datadir auto-reload (qfg-mol-0kr, qfg-zx3y.1).** New `dataDirAutoReload` option (default
