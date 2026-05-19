@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.0.30 - 2026-05-19
+
+- **Opt-in datadir auto-reload (qfg-mol-0kr, qfg-zx3y.1).** New `dataDirAutoReload` option (default
+  `false`) makes the SDK watch the configured `datadir` via Node's built-in
+  `fs.watch({recursive: true})` and re-read the envelope when files change on disk (editor save,
+  `git pull`, build step). On a successful re-read the SDK fires the existing `onConfigUpdate`
+  callback — no parallel notification path. Behavior contract: **parse-then-swap** (on JSON parse
+  error the previous envelope keeps serving reads and the callback does not fire); **debounced** via
+  `dataDirAutoReloadDebounceMs` (default 200ms) to coalesce atomic-rename editor bursts and git-pull
+  churn into a single reload; **graceful degrade** — if watch registration fails (read-only fs,
+  immutable container) the SDK logs and continues without watching rather than throwing;
+  **symlinks** are resolved to their real path at start time (editing the file the link points at is
+  detected, atomic flips of the link itself are not); `close()` stops the watcher and clears any
+  pending debounce timer. No new runtime dependencies. Datadir mode stays silent until callers opt
+  in. README documents when to enable vs. when not to (build-time-embedded artifacts, read-only fs,
+  prod paths where reload timing matters).
+
 ## 0.0.29 - 2026-05-18
 
 - **Telemetry off by default in fully-local mode.** When the SDK is initialized with `datadir` (or
