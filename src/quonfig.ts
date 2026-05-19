@@ -35,6 +35,7 @@ import { normalizeLogger, type NormalizedLogger } from "./sdkLogger";
 import { parseLevel, shouldLog } from "./logger";
 import { durationToMilliseconds } from "./duration";
 import { loadEnvelopeFromDatadir } from "./datadir";
+import { DatadirWatcher } from "./datadirWatcher";
 import { loadQuonfigUserContext } from "./devContext";
 
 import { EvaluationSummaryCollector } from "./telemetry/evaluationSummaries";
@@ -45,6 +46,7 @@ import { TelemetryReporter } from "./telemetry/reporter";
 const DEFAULT_FALLBACK_POLL_INTERVAL_MS = 60000;
 const DEFAULT_INIT_TIMEOUT = 10000;
 const DEFAULT_LOG_LEVEL: LogLevelNumber = 5; // warn
+const DEFAULT_DATADIR_AUTORELOAD_DEBOUNCE_MS = 200;
 
 /** Caller-side type token used by the *Details API for type-mismatch detection. */
 type RequestedType = "bool" | "string" | "number" | "string_list" | "json";
@@ -208,6 +210,9 @@ export class Quonfig {
   private readonly datadir?: string;
   private readonly datafile?: string | object;
   private readonly requestedEnvironment: string;
+  private readonly dataDirAutoReload: boolean;
+  private readonly dataDirAutoReloadDebounceMs: number;
+  private datadirWatcher?: DatadirWatcher;
   private readonly onConfigUpdate?: () => void;
   private readonly onSSEConnectionStateChange?: (state: SSEConnectionState) => void;
   private readonly loggerKey?: string;
@@ -290,6 +295,9 @@ export class Quonfig {
     this.datafile = options.datafile;
     // Environment: explicit option supersedes QUONFIG_ENVIRONMENT env var
     this.requestedEnvironment = options.environment || process.env.QUONFIG_ENVIRONMENT || "";
+    this.dataDirAutoReload = options.dataDirAutoReload ?? false;
+    this.dataDirAutoReloadDebounceMs =
+      options.dataDirAutoReloadDebounceMs ?? DEFAULT_DATADIR_AUTORELOAD_DEBOUNCE_MS;
     this.onConfigUpdate = options.onConfigUpdate;
     this.onSSEConnectionStateChange = options.onSSEConnectionStateChange;
     this.loggerKey = options.loggerKey;
@@ -327,6 +335,9 @@ export class Quonfig {
     if (this.datadir || this.datafile) {
       this.loadLocalData();
       this.initialized = true;
+      if (this.datadir && this.dataDirAutoReload) {
+        this.startDatadirWatcher();
+      }
       this.startTelemetry();
       return;
     }
@@ -757,6 +768,11 @@ export class Quonfig {
       this.sseConnection = undefined;
     }
 
+    if (this.datadirWatcher) {
+      this.datadirWatcher.close();
+      this.datadirWatcher = undefined;
+    }
+
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
       this.pollTimer = undefined;
@@ -1040,6 +1056,47 @@ export class Quonfig {
   private loadLocalData(): void {
     const data = this.loadLocalEnvelope();
     this.installEnvelope(data);
+  }
+
+  /**
+   * Wire up filesystem watching for `datadir` when `dataDirAutoReload` is on.
+   * On registration failure (read-only fs, immutable container) we log and
+   * continue without watching — the SDK keeps serving the envelope captured
+   * at init() time rather than throwing.
+   */
+  private startDatadirWatcher(): void {
+    if (!this.datadir) return;
+    const watcher = new DatadirWatcher({
+      datadir: this.datadir,
+      debounceMs: this.dataDirAutoReloadDebounceMs,
+      onChange: () => this.reloadDatadir(),
+      onError: (err) => {
+        this.logger.warn("[quonfig] datadir watcher error:", err);
+      },
+    });
+    if (!watcher.start()) {
+      this.logger.warn(
+        "[quonfig] dataDirAutoReload requested but watcher registration failed; continuing without auto-reload"
+      );
+      return;
+    }
+    this.datadirWatcher = watcher;
+  }
+
+  /**
+   * Re-read the datadir into a fresh envelope and atomically install it. Parse
+   * errors (mid-write JSON, garbage file) are logged and swallowed: the
+   * previous envelope stays in the store and `onConfigUpdate` does NOT fire.
+   */
+  private reloadDatadir(): void {
+    if (this.closed) return;
+    if (!this.datadir) return;
+    try {
+      const envelope = loadEnvelopeFromDatadir(this.datadir, this.requestedEnvironment);
+      this.installEnvelope(envelope);
+    } catch (err) {
+      this.logger.warn("[quonfig] datadir reload failed; keeping previous envelope:", err);
+    }
   }
 
   /**

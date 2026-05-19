@@ -243,6 +243,37 @@ export interface QuonfigOptions {
   datafile?: string | object;
   /** Environment name to use in datadir mode. Supersedes the QUONFIG_ENVIRONMENT env var. */
   environment?: string;
+  /**
+   * Opt in to live filesystem watching in datadir mode. When `true` and a
+   * `datadir` is set, the SDK watches the directory and re-reads the envelope
+   * via the existing loader whenever files change on disk (editor save, git
+   * pull, build step). A successful swap fires `onConfigUpdate` exactly as
+   * SSE/poll updates do.
+   *
+   * Default `false` — datadir mode is silent until you opt in.
+   *
+   * Behavior contract:
+   *   - **Parse-then-swap**: on parse error the previous envelope continues to
+   *     serve reads and the error is logged. `onConfigUpdate` is NOT fired.
+   *   - **Debounced**: bursts of fs events (atomic-rename saves, git pull
+   *     touching dozens of files) are coalesced into a single reload via
+   *     {@link QuonfigOptions.dataDirAutoReloadDebounceMs}.
+   *   - **Graceful degrade**: if watch registration fails (read-only fs,
+   *     immutable container), the SDK logs and continues without watching
+   *     rather than throwing.
+   *   - **Symlinks**: the watcher resolves `datadir` to its real path at start
+   *     time; atomic symlink flips that retarget the link are NOT detected.
+   *   - **Cleanup**: `close()` stops the watcher and clears any pending
+   *     debounce timer.
+   */
+  dataDirAutoReload?: boolean;
+  /**
+   * Debounce window in ms for {@link QuonfigOptions.dataDirAutoReload}. Default
+   * 200 — long enough to coalesce typical editor atomic-rename bursts (3-5
+   * events in <50ms) and git-pull churn, short enough that interactive edits
+   * feel immediate. Has no effect when `dataDirAutoReload` is `false`.
+   */
+  dataDirAutoReloadDebounceMs?: number;
   /** Called whenever the config store is updated (SSE push, poll, or initial load). Use this to react to live config changes. */
   onConfigUpdate?: () => void;
   /**
