@@ -236,7 +236,6 @@ export interface QuonfigOptions {
   globalContext?: Contexts;
   onNoDefault?: OnNoDefault;
   collectEvaluationSummaries?: boolean;
-  collectLoggerCounts?: boolean;
   contextUploadMode?: ContextUploadMode;
   initTimeout?: number;
   datadir?: string;
