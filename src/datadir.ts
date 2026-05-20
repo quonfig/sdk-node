@@ -28,6 +28,11 @@ export function loadEnvelopeFromDatadir(datadir: string, environment: string): C
 
     for (const filename of filenames) {
       const raw = JSON.parse(readFileSync(join(dir, filename), "utf-8")) as WorkspaceConfigDocument;
+      // Config files store int/double values as JSON strings on disk
+      // (`{"type":"int","value":"123"}`). Coerce them to real numbers at load
+      // time so the loaded envelope matches what api-delivery/sdk-go emit over
+      // the wire. See project/plans/datadir-serve-sdk-coerce-consistency.md.
+      coerceNumericValues(raw);
       // Defense-in-depth: a doc with no `key` isn't a Quonfig Config (e.g. a
       // misplaced JSON Schema). Reject rather than emit an empty-key stub —
       // matches api-delivery loader.go (qfg-uzsl).
@@ -86,6 +91,45 @@ function toConfigResponse(raw: WorkspaceConfigDocument, environmentId: string): 
     default: raw.default ?? { rules: [] },
     environment,
   };
+}
+
+/**
+ * Recursively walk a raw parsed config document and coerce every int/double
+ * Value node from a JSON string to a real number.
+ *
+ * A Value node is any object carrying a `type` of `"int"` or `"double"` and a
+ * string `value`. Walking generically (rather than enumerating known call
+ * sites) covers `default.rules[].value`, `environment.rules[].value`,
+ * `criteria[].valueToMatch`, `weightedValues[].value`, and `variants[]`
+ * uniformly — matching sdk-go's `Value.UnmarshalJSON`.
+ *
+ * On parse failure (`NaN`), the original string is left untouched —
+ * passthrough, never throw. Matches the cli's `coerceNumeric`.
+ */
+function coerceNumericValues(node: unknown): void {
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      coerceNumericValues(item);
+    }
+    return;
+  }
+
+  if (node === null || typeof node !== "object") {
+    return;
+  }
+
+  const obj = node as Record<string, unknown>;
+
+  if (typeof obj.value === "string" && (obj.type === "int" || obj.type === "double")) {
+    const parsed = obj.type === "int" ? parseInt(obj.value, 10) : parseFloat(obj.value);
+    if (!Number.isNaN(parsed)) {
+      obj.value = parsed;
+    }
+  }
+
+  for (const key of Object.keys(obj)) {
+    coerceNumericValues(obj[key]);
+  }
 }
 
 function effectiveSendToClientSdk(

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Datadir loader coerces int/double config values to numbers at load time (qfg-38sf.8).** Config
+  files store `int` and `double` value fields as JSON strings on disk
+  (`{"type":"int","value":"123"}`). The datadir loader (`src/datadir.ts`) now walks the raw parsed
+  config document and coerces every int/double Value node — anywhere in the doc (`default.rules`,
+  `environment.rules`, `criteria`, `weightedValues`, `variants`) — from a string to a real number
+  via `parseInt`/`parseFloat`. On parse failure the original string is left untouched (passthrough,
+  no throw). This makes the loaded envelope carry real numbers regardless of who consumes it,
+  matching the canonical behavior of `api-delivery` and `sdk-go`, whose loaders already coerce at
+  load. The downstream `Resolver.unwrapValue` coercion stays in place as defense-in-depth. No public
+  API change.
+
 ## 0.0.31 - 2026-05-19
 
 - **Remove dead `collectLoggerCounts` option from `InitOptions` (qfg-phab).** The field was declared
