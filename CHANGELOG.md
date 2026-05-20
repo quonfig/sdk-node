@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.0.32 - 2026-05-20
 
 - **Datadir loader coerces int/double config values to numbers at load time (qfg-38sf.8).** Config
   files store `int` and `double` value fields as JSON strings on disk
