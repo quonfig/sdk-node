@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.33 - 2026-05-21
+
+- **CI/dependency maintenance release — no functional SDK change.** Pins `integration-test-data` to
+  `v2026.05.20` and guards the build against stale generated tests (#14); skips the Chaos CI job on
+  Dependabot PRs so dependency bumps don't gate on it (`5e69c38`); and applies three Dependabot
+  bumps — `actions/setup-go` 5.6.0 → 6.4.0 (#10), `actions/upload-artifact` 4.6.2 → 7.0.1 (#11), and
+  the `@types/node` dev dependency 25.6.0 → 25.9.1 (#12). No public API or runtime behavior change.
+
 ## 0.0.32 - 2026-05-20
 
 - **Datadir loader coerces int/double config values to numbers at load time (qfg-38sf.8).** Config
