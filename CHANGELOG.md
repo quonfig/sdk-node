@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.0.34 - 2026-05-28
 
 - **Add `withContext`; deprecate `inContext` (qfg-pccq, sdk-1.0-unification).** `Quonfig` and
   `BoundQuonfig` now expose `withContext(ctx)` and `withContext(ctx, fn)` with identical semantics
