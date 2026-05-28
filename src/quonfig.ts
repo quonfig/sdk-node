@@ -177,11 +177,19 @@ export class BoundQuonfig {
     return this.client.keys();
   }
 
-  inContext(contexts: Contexts): BoundQuonfig;
-  inContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
-  inContext<T>(contexts: Contexts, fn?: (rf: BoundQuonfig) => T): BoundQuonfig | T {
+  withContext(contexts: Contexts): BoundQuonfig;
+  withContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
+  withContext<T>(contexts: Contexts, fn?: (rf: BoundQuonfig) => T): BoundQuonfig | T {
     const bound = new BoundQuonfig(this.client, mergeContexts(this.boundContexts, contexts));
     return fn ? fn(bound) : bound;
+  }
+
+  /** @deprecated Use {@link BoundQuonfig.withContext} instead. Kept through 1.0.0 for backwards compatibility with the Prefab-fork lineage; removed in 2.0.0. */
+  inContext(contexts: Contexts): BoundQuonfig;
+  /** @deprecated Use {@link BoundQuonfig.withContext} instead. Kept through 1.0.0 for backwards compatibility with the Prefab-fork lineage; removed in 2.0.0. */
+  inContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
+  inContext<T>(contexts: Contexts, fn?: (rf: BoundQuonfig) => T): BoundQuonfig | T {
+    return fn ? this.withContext(contexts, fn) : this.withContext(contexts);
   }
 }
 
@@ -730,11 +738,19 @@ export class Quonfig {
    * (including Promises), so callers can scope work to a context without
    * leaking the bound client.
    */
-  inContext(contexts: Contexts): BoundQuonfig;
-  inContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
-  inContext<T>(contexts: Contexts, fn?: (rf: BoundQuonfig) => T): BoundQuonfig | T {
+  withContext(contexts: Contexts): BoundQuonfig;
+  withContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
+  withContext<T>(contexts: Contexts, fn?: (rf: BoundQuonfig) => T): BoundQuonfig | T {
     const bound = new BoundQuonfig(this, mergeContexts(this.globalContext, contexts));
     return fn ? fn(bound) : bound;
+  }
+
+  /** @deprecated Use {@link Quonfig.withContext} instead. Kept through 1.0.0 for backwards compatibility with the Prefab-fork lineage; removed in 2.0.0. */
+  inContext(contexts: Contexts): BoundQuonfig;
+  /** @deprecated Use {@link Quonfig.withContext} instead. Kept through 1.0.0 for backwards compatibility with the Prefab-fork lineage; removed in 2.0.0. */
+  inContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
+  inContext<T>(contexts: Contexts, fn?: (rf: BoundQuonfig) => T): BoundQuonfig | T {
+    return fn ? this.withContext(contexts, fn) : this.withContext(contexts);
   }
 
   /**

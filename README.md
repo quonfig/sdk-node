@@ -33,7 +33,7 @@ const value = quonfig.get("homepage-hero", {
 });
 
 // Bound context for repeated lookups
-const userClient = quonfig.inContext({
+const userClient = quonfig.withContext({
   user: { key: "user-123", plan: "pro" },
 });
 userClient.get("feature-x");
@@ -45,7 +45,9 @@ quonfig.close();
 
 > **Migrating from earlier releases:** `isFeatureEnabled` is still available as a deprecated alias
 > of `isEnabled` — both behave identically. New code should prefer `isEnabled`, which matches
-> `@quonfig/javascript` and `@quonfig/react`.
+> `@quonfig/javascript` and `@quonfig/react`. `inContext` is likewise a deprecated alias for
+> `withContext` — both behave identically; `withContext` is the canonical name across all Quonfig
+> SDKs and `inContext` will be removed in 2.0.0.
 
 ## Options
 

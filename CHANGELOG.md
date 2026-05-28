@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Add `withContext`; deprecate `inContext` (qfg-pccq, sdk-1.0-unification).** `Quonfig` and
+  `BoundQuonfig` now expose `withContext(ctx)` and `withContext(ctx, fn)` with identical semantics
+  to `inContext`. `withContext` is the canonical implementation across all Quonfig SDKs; `inContext`
+  is now a thin forwarder marked with JSDoc `@deprecated`. **No runtime warning** — the Prefab-fork
+  lineage means there is heavy existing `inContext` usage and a server-boot log line per call would
+  be noise. The `inContext` shim is retained through 1.0.0 and removed in 2.0.0. No behavior change
+  for existing callers.
+
 ## 0.0.33 - 2026-05-21
 
 - **CI/dependency maintenance release — no functional SDK change.** Pins `integration-test-data` to
