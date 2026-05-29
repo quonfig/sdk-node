@@ -9,6 +9,15 @@ export interface FetchResult {
 
 const DEFAULT_DOMAIN = "quonfig.com";
 
+/**
+ * Hard cap on how long a telemetry POST may block. Telemetry is non-critical
+ * background work, but `close()`/`flush()` await it, so an unbounded fetch to a
+ * slow or unreachable endpoint can stall shutdown indefinitely (observed as
+ * intermittent afterEach hook timeouts on slow CI runners — qfg-i2ar). Abort
+ * the request after this window and treat it as a non-fatal telemetry failure.
+ */
+const TELEMETRY_POST_TIMEOUT_MS = 3000;
+
 export type DomainOptions = { domain?: string };
 
 /**
@@ -186,11 +195,21 @@ export class Transport {
       "Content-Type": "application/json",
     });
 
-    const response = await fetch(`${this.telemetryBaseUrl}/api/v1/telemetry/`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(data),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.telemetryBaseUrl}/api/v1/telemetry/`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(data),
+        // Bound the request so a hung endpoint can't stall close()/flush().
+        signal: AbortSignal.timeout(TELEMETRY_POST_TIMEOUT_MS),
+      });
+    } catch (err) {
+      // Telemetry failures — including the timeout abort and network errors —
+      // are non-fatal; log and move on so the shutdown path never hangs.
+      this.logger.warn(`Telemetry POST failed: ${err}`);
+      return;
+    }
 
     if (!response.ok) {
       // Telemetry failures are non-fatal; just log

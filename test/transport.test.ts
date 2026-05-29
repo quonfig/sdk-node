@@ -85,3 +85,33 @@ describe("Transport fetch URL — cache-buster gating", () => {
     expect(capturedUrls[0]).toBe(capturedUrls[1]);
   });
 });
+
+describe("Transport.postTelemetry — abort-on-timeout", () => {
+  it("passes an AbortSignal so a hung telemetry endpoint cannot stall close()", async () => {
+    let capturedSignal: AbortSignal | null | undefined;
+    // Simulate a server that never responds: the only way this fetch settles
+    // is via the abort signal. Without the timeout signal the promise hangs,
+    // which is exactly the close()/afterEach flake we're fixing.
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      capturedSignal = (init as RequestInit | undefined)?.signal;
+      return new Promise((_resolve, reject) => {
+        const signal = (init as RequestInit | undefined)?.signal;
+        if (signal) {
+          signal.addEventListener("abort", () =>
+            reject(new DOMException("The operation was aborted", "AbortError"))
+          );
+        }
+      });
+    });
+
+    const transport = new Transport(["https://api.example.com"], "test-key");
+
+    // Must resolve promptly even though the endpoint never responds — the
+    // timeout aborts the request and postTelemetry swallows the abort.
+    await expect(
+      transport.postTelemetry({ instanceHash: "h", events: [] })
+    ).resolves.toBeUndefined();
+
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+  }, 15000);
+});
