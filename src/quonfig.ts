@@ -303,6 +303,15 @@ export class Quonfig {
     this.datafile = options.datafile;
     // Environment: explicit option supersedes QUONFIG_ENVIRONMENT env var
     this.requestedEnvironment = options.environment || process.env.QUONFIG_ENVIRONMENT || "";
+    // In delivery (SDK-key) mode the active environment is determined by the
+    // SDK key via the server's meta.environment, so an environment pin is
+    // silently ignored. Warn once at construction so the misconfiguration is
+    // visible. The pin only applies when loading from a local data dir/file.
+    if (this.requestedEnvironment && !this.datadir && !this.datafile) {
+      this.logger.warn(
+        `[quonfig] environment '${this.requestedEnvironment}' was set but the client is in delivery (SDK-key) mode; the active environment is determined by the SDK key, so this setting is ignored (it applies only when loading from a local data dir)`
+      );
+    }
     this.dataDirAutoReload = options.dataDirAutoReload ?? false;
     this.dataDirAutoReloadDebounceMs =
       options.dataDirAutoReloadDebounceMs ?? DEFAULT_DATADIR_AUTORELOAD_DEBOUNCE_MS;
