@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.35 - 2026-05-29
+
+- **Warn when an environment pin is set in delivery (SDK-key) mode (qfg-pinh).** When the SDK runs
+  against api-delivery with an SDK key, the environment is determined by the key, so the
+  `environment` option (or `QUONFIG_ENVIRONMENT`) is ignored. The SDK now logs a one-time WARN in
+  that case so the ignored pin is visible rather than silently dropped. Evaluation behavior is
+  unchanged — the pin was already correctly ignored; this only surfaces it. Ships with the
+  regenerated delivery-wire test gate covering the decided contract.
+
 ## 0.0.34 - 2026-05-28
 
 - **Add `withContext`; deprecate `inContext` (qfg-pccq, sdk-1.0-unification).** `Quonfig` and
