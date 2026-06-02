@@ -27,8 +27,10 @@
     "dist"
   ],
   "scripts": {
+    "prepare": "node scripts/generate-version.mjs",
     "prebuild": "node scripts/generate-version.mjs",
     "build": "rm -rf dist/ && npx tsup",
+    "pretest": "node scripts/generate-version.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:chaos": "scripts/run-chaos.sh",
