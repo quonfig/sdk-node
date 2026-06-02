@@ -292,8 +292,16 @@ export class Quonfig {
 
     this.namespace = options.namespace;
     this.onNoDefault = options.onNoDefault ?? "error";
-    const devContextEnabled =
-      options.enableQuonfigUserContext === true || process.env.QUONFIG_DEV_CONTEXT === "true";
+    // Default ON, gated only by the presence of the token file (the loader
+    // no-ops without it, so this is dead in prod). Precedence: explicit
+    // option ?? QUONFIG_DEV_CONTEXT env ?? true.
+    const envDevContext =
+      process.env.QUONFIG_DEV_CONTEXT === "true"
+        ? true
+        : process.env.QUONFIG_DEV_CONTEXT === "false"
+          ? false
+          : undefined;
+    const devContextEnabled = options.enableQuonfigUserContext ?? envDevContext ?? true;
     const devContext = devContextEnabled
       ? loadQuonfigUserContext(this.apiUrls, options.logger)
       : undefined;

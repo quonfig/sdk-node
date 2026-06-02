@@ -66,7 +66,25 @@ describe("Quonfig dev-context injection", () => {
     });
   });
 
-  it("no-op when option disabled and no env var", async () => {
+  it("injects by DEFAULT with no opt-in when token file exists", async () => {
+    // The flip: default-on, gated only by the token file's presence.
+    writeFileSync(
+      join(tmpHome, ".quonfig", "tokens.json"),
+      JSON.stringify({ userEmail: "bob@foo.com" })
+    );
+
+    const q = new Quonfig({
+      sdkKey: "test",
+      datafile: emptyEnvelope(),
+    });
+    await q.init();
+
+    expect(readGlobalContext(q)).toEqual({
+      "quonfig-user": { email: "bob@foo.com" },
+    });
+  });
+
+  it("default-on merges injected dev-context alongside customer globalContext", async () => {
     writeFileSync(
       join(tmpHome, ".quonfig", "tokens.json"),
       JSON.stringify({ userEmail: "bob@foo.com" })
@@ -79,7 +97,62 @@ describe("Quonfig dev-context injection", () => {
     });
     await q.init();
 
+    expect(readGlobalContext(q)).toEqual({
+      user: { plan: "pro" },
+      "quonfig-user": { email: "bob@foo.com" },
+    });
+  });
+
+  it("explicit enableQuonfigUserContext:false disables despite token file", async () => {
+    writeFileSync(
+      join(tmpHome, ".quonfig", "tokens.json"),
+      JSON.stringify({ userEmail: "bob@foo.com" })
+    );
+
+    const q = new Quonfig({
+      sdkKey: "test",
+      datafile: emptyEnvelope(),
+      enableQuonfigUserContext: false,
+      globalContext: { user: { plan: "pro" } },
+    });
+    await q.init();
+
     expect(readGlobalContext(q)).toEqual({ user: { plan: "pro" } });
+  });
+
+  it("QUONFIG_DEV_CONTEXT=false disables despite token file", async () => {
+    writeFileSync(
+      join(tmpHome, ".quonfig", "tokens.json"),
+      JSON.stringify({ userEmail: "bob@foo.com" })
+    );
+    vi.stubEnv("QUONFIG_DEV_CONTEXT", "false");
+
+    const q = new Quonfig({
+      sdkKey: "test",
+      datafile: emptyEnvelope(),
+    });
+    await q.init();
+
+    expect(readGlobalContext(q)).toEqual({});
+  });
+
+  it("explicit option:true overrides QUONFIG_DEV_CONTEXT=false", async () => {
+    writeFileSync(
+      join(tmpHome, ".quonfig", "tokens.json"),
+      JSON.stringify({ userEmail: "bob@foo.com" })
+    );
+    vi.stubEnv("QUONFIG_DEV_CONTEXT", "false");
+
+    const q = new Quonfig({
+      sdkKey: "test",
+      datafile: emptyEnvelope(),
+      enableQuonfigUserContext: true,
+    });
+    await q.init();
+
+    expect(readGlobalContext(q)).toEqual({
+      "quonfig-user": { email: "bob@foo.com" },
+    });
   });
 
   it("no-op when option enabled but file missing", async () => {

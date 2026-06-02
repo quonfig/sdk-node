@@ -284,15 +284,21 @@ export interface QuonfigOptions {
    */
   onSSEConnectionStateChange?: (state: SSEConnectionState) => void;
   /**
-   * When true (or when env var `QUONFIG_DEV_CONTEXT=true`), the SDK reads
-   * `~/.quonfig/tokens.json` (written by `qfg login`) on construction and
-   * injects `{ "quonfig-user": { email: <userEmail> } }` into globalContext.
+   * When enabled, the SDK reads `~/.quonfig/tokens.json` (written by
+   * `qfg login`) on construction and injects
+   * `{ "quonfig-user": { email: <userEmail> } }` into globalContext.
    *
-   * Default OFF. The injected attribute is dev-only by construction: production
-   * servers never have the tokens file, so rules keyed on `quonfig-user.email`
-   * are dead code in prod. Customer-supplied globalContext keys win on collision.
+   * Default ON, gated only by the presence of the tokens file. The injected
+   * attribute is dev-only by construction: production servers never have the
+   * tokens file, so rules keyed on `quonfig-user.email` are dead code in prod
+   * and the loader no-ops there. Customer-supplied globalContext keys win on
+   * collision.
+   *
+   * Tri-state precedence: this explicit option (if set) wins, else the
+   * `QUONFIG_DEV_CONTEXT` env var (`"true"`/`"false"`), else `true`. Set this
+   * to `false` (or `QUONFIG_DEV_CONTEXT=false`) to opt out.
    */
-  enableQuonfigUserContext?: boolean;
+  enableQuonfigUserContext?: boolean | null;
   /**
    * Config key used by the `shouldLog({loggerPath, ...})` convenience overload.
    *
