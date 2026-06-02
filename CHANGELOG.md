@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.37 - 2026-06-02
+
+- **Restore `updateIfStalerThan(durationMs)` for serverless / lambda use (qfg-q612).** Inlines a
+  conditional refresh when the in-memory envelope is older than `durationMs`, otherwise no-ops.
+  Intended to be called at the top of each request in environments where background timers (SSE,
+  fallback poll) are paused while the container is frozen. Returns the in-flight `Promise<void>`
+  when a fetch is started, `undefined` when still fresh / already refreshing / running from datadir
+  or datafile / closed. Concurrent calls coalesce onto the same in-flight promise. Method existed in
+  the original Reforge sdk-node and was lost during the Quonfig rewrite.
+
 ## 0.0.36 - 2026-06-02
 
 - **Dev-context injection is now default-on (qfg-bw7g.2).** `enableQuonfigUserContext` is now a

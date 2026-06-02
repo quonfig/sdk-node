@@ -239,6 +239,7 @@ export class Quonfig {
   private sseEverConnected: boolean = false;
   private lastSSEState?: SSEConnectionState;
   private lastSuccessfulRefreshAt?: Date;
+  private inFlightRefresh?: Promise<void>;
   private closed: boolean = false;
   private telemetryReporter?: TelemetryReporter;
   private instanceHash: string;
@@ -723,6 +724,37 @@ export class Quonfig {
    */
   lastSuccessfulRefresh(): Date | undefined {
     return this.lastSuccessfulRefreshAt;
+  }
+
+  /**
+   * Conditionally refresh the in-memory envelope from api-delivery, but only
+   * if the last successful refresh is older than `durationMs`. Intended for
+   * serverless / lambda environments where background timers are paused
+   * while the container is frozen — call this at the top of each request to
+   * bound staleness without doing a network round-trip on every invocation.
+   *
+   * Returns the in-flight refresh `Promise<void>` when a fetch is started, or
+   * `undefined` when no fetch was needed (still fresh, already refreshing,
+   * running from datadir/datafile, or `close()` has been called). Concurrent
+   * calls coalesce onto the same in-flight promise.
+   *
+   * The returned promise rejects if the underlying HTTP fetch fails; callers
+   * that don't await it (fire-and-forget) should attach `.catch()` to avoid
+   * an unhandled-rejection warning.
+   */
+  updateIfStalerThan(durationMs: number): Promise<void> | undefined {
+    if (this.closed) return undefined;
+    if (this.datadir || this.datafile) return undefined;
+    if (this.inFlightRefresh) return this.inFlightRefresh;
+    const last = this.lastSuccessfulRefreshAt?.getTime();
+    if (last === undefined) return undefined;
+    if (Date.now() - last < durationMs) return undefined;
+
+    const p = this.fetchAndInstall().finally(() => {
+      this.inFlightRefresh = undefined;
+    });
+    this.inFlightRefresh = p;
+    return p;
   }
 
   /**
