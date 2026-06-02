@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.36 - 2026-06-02
+
+- **Dev-context injection is now default-on (qfg-bw7g.2).** `enableQuonfigUserContext` is now a
+  tri-state (`boolean | null`); when left unset it defaults to **on**, gated solely by the presence
+  of `~/.quonfig/tokens.json`. The loader no-ops without that file, so this stays inert in
+  production (no token file there). Precedence: explicit `enableQuonfigUserContext` option ??
+  `QUONFIG_DEV_CONTEXT` env (`true`/`false`) ?? `true`. Set `enableQuonfigUserContext: false` or
+  `QUONFIG_DEV_CONTEXT=false` to opt out. Existing callers that passed `true` are unaffected.
+- **Bound the telemetry POST with a timeout so `close()` can't hang (qfg-i2ar).** A slow or stalled
+  telemetry endpoint could previously block shutdown; the final flush is now time-bounded.
+
 ## 0.0.35 - 2026-05-29
 
 - **Warn when an environment pin is set in delivery (SDK-key) mode (qfg-pinh).** When the SDK runs
