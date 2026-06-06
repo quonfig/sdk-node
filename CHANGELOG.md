@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0 - 2026-06-06
+
+- **Stable 1.0.0 release.** The Quonfig Node SDK is now declared stable. No API or behavior changes
+  from 0.0.37 — this is a coordinated 1.0.0 version stamp across the entire Quonfig SDK family.
+
 ## 0.0.37 - 2026-06-02
 
 - **Restore `updateIfStalerThan(durationMs)` for serverless / lambda use (qfg-q612).** Inlines a
