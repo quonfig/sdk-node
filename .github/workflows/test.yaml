@@ -23,12 +23,12 @@ jobs:
         node-version: ["20.19.0", "22", "24"]
     steps:
       - name: Checkout sdk-node
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           path: sdk-node
 
       - name: Checkout integration-test-data
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: quonfig/integration-test-data
           path: integration-test-data
