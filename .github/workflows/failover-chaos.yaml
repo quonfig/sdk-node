@@ -49,11 +49,11 @@ jobs:
         with:
           repository: quonfig/integration-test-data
           path: integration-test-data
-          # Tracks main: the scenarios-failover/ + scenarios-ordering/ corpus
-          # this job drives only exists on main and is not yet in a tag (the
-          # tag chaos.yaml pins, v2026.05.13, predates it). Pin to a tag once the
-          # corpus is rev'd into one.
-          ref: v2026.06.19
+          # Pin to the reframed corpus tag that carries the hedge ordering
+          # scenarios: o01 (fast primary wins, secondary never contacted),
+          # o03 (heal forward), and the new o05 (slow older primary loses to a
+          # fast newer secondary). (qfg-7h5d.1.14)
+          ref: v2026.06.19.1
 
       - name: Checkout api-delivery
         # api-delivery is private; the default GITHUB_TOKEN cannot read it. A PAT
@@ -87,11 +87,12 @@ jobs:
 
       - name: Run failover + ordering chaos rigs
         working-directory: sdk-node
-        # o01-secondary-newer needs cross-leg max-wins (qfg-7h5d.1.14); not built
-        # yet. The wrapper defaults CHAOS_SKIP to "o01"; set explicitly so the
-        # gate is visible here. Drop it once o01 can go green.
+        # The parallel-failover hedge (qfg-7h5d.1.14) makes o01 (fast primary
+        # wins / cold standby), o03 (heal forward), and o05 (slow older primary
+        # loses) all green, so nothing is skipped — clear CHAOS_SKIP. The wrapper
+        # also clears its own default.
         env:
-          CHAOS_SKIP: o01,o03
+          CHAOS_SKIP: ""
         run: ./scripts/run-failover-chaos.sh
 
       - name: Upload chaos logs on failure

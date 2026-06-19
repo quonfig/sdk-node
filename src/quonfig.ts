@@ -27,7 +27,7 @@ import { ConfigStore } from "./store";
 import { Evaluator } from "./evaluator";
 import { Resolver } from "./resolver";
 import { ConfigDependencyResolver } from "./rawMatch";
-import { Transport, defaultApiUrls } from "./transport";
+import { Transport, defaultApiUrls, type LegResult } from "./transport";
 import { computeReason, ReasonStatic, ReasonTargetingMatch, ReasonSplit } from "./reason";
 import { SSEConnection, type EventSourceFactory } from "./sse";
 import { mergeContexts } from "./context";
@@ -357,6 +357,34 @@ export class Quonfig {
         throw new Error("[quonfig] configFetchTimeoutMs must be a positive number of milliseconds");
       }
       this.transport.fetchTimeoutMs = options.configFetchTimeoutMs;
+    }
+
+    // Parallel-failover hedge knobs (qfg-7h5d.1.14). Additive; the defaults sit
+    // between a healthy sub-second primary and the default 10s initTimeout, so
+    // existing callers need not set them. Set before any fetch runs.
+    if (options.configFetchHedgeDelayMs !== undefined) {
+      if (options.configFetchHedgeDelayMs <= 0) {
+        throw new Error(
+          "[quonfig] configFetchHedgeDelayMs must be a positive number of milliseconds"
+        );
+      }
+      this.transport.hedgeDelayMs = options.configFetchHedgeDelayMs;
+    }
+    if (options.configFetchHedgeAbortMs !== undefined) {
+      if (options.configFetchHedgeAbortMs <= 0) {
+        throw new Error(
+          "[quonfig] configFetchHedgeAbortMs must be a positive number of milliseconds"
+        );
+      }
+      this.transport.hedgeAbortMs = options.configFetchHedgeAbortMs;
+    }
+    // The hedge abort must be below initTimeout, or the init-path heal leg is
+    // clipped and a late-but-newer primary can't heal forward before init gives
+    // up. Warn rather than throw — it's a tuning smell, not a hard error.
+    if (this.initTimeout > 0 && this.initTimeout <= this.transport.hedgeAbortMs) {
+      this.logger.warn(
+        `[quonfig] initTimeout (${this.initTimeout}ms) <= config-fetch hedge abort (${this.transport.hedgeAbortMs}ms); the init-path heal-forward leg may be clipped — raise initTimeout or lower configFetchHedgeAbortMs`
+      );
     }
 
     // Initialize telemetry collectors
@@ -1309,23 +1337,86 @@ export class Quonfig {
     throw new Error("Invalid local configuration: expected datadir or datafile");
   }
 
+  /**
+   * Drive one parallel-failover hedge cycle and install whatever arrives through
+   * the reject-older guard (qfg-7h5d.1.14). The transport fires the primary leg
+   * first and, only if it is slow or errors, the secondary in parallel; each leg
+   * is delivered here as it settles and installed if it advances the held
+   * generation, so watermark-max falls out — higher generation wins, a late older
+   * payload never regresses, a late newer payload heals forward.
+   *
+   * Concurrent hedge cycles (a manual refresh racing the fallback poller, say)
+   * are SAFE and intentionally NOT coalesced: each leg uses its own per-URL ETag
+   * slot, every install is serialized through the synchronous shouldInstall +
+   * installEnvelope step (so an equal-or-older payload is a no-op and the install
+   * count can't double), and each leg is bounded by the hedge abort. Coalescing
+   * here would make a manual refresh silently no-op whenever a background fetch
+   * is in flight, which violates the refresh contract.
+   *
+   * Resolves on the FIRST successful install (so init latches ready promptly);
+   * the remaining legs keep draining in the background so a late-but-newer leg
+   * heals forward after. If every fired leg fails, rejects with the last error so
+   * init applies its failure semantics; an all-304 cycle is a no-op success.
+   */
   private async fetchAndInstall(): Promise<void> {
-    const result = await this.transport.fetchConfigs();
+    let installedOnce = false;
+    let fired = 0;
+    let failures = 0;
+    let lastError: Error | undefined;
+    let resolveFirstInstall!: () => void;
+    let rejectAllFailed!: (err: Error) => void;
+    const firstInstall = new Promise<void>((resolve, reject) => {
+      resolveFirstInstall = resolve;
+      rejectAllFailed = reject;
+    });
 
-    if (result.notChanged) {
-      return;
-    }
+    // Install one settled leg through the reject-older guard. Node is
+    // single-threaded, so shouldInstall + installEnvelope run as one atomic step
+    // against every other install path (SSE, datadir, a concurrent hedge).
+    const onLeg = (leg: LegResult): void => {
+      fired++;
+      if (leg.error) {
+        failures++;
+        lastError = leg.error;
+        return;
+      }
+      const res = leg.result!;
+      if (res.notChanged || !res.envelope) return;
+      if (this.shouldInstall(res.envelope)) {
+        this.installEnvelope(res.envelope);
+        // Snapshot the leg that actually installed so resolvedFrom() reflects
+        // the upstream holding the config; a rejected older leg never flips it.
+        // markActiveLeg keeps getActiveBaseUrlIndex()/SSE consistent.
+        this.resolvedFromIndex = leg.sourceIndex;
+        // SSE stays pinned to the primary stream regardless of which HTTP leg
+        // won (f05); track the base-url index for resolvedFrom() but not the
+        // stream.
+        this.transport.markActiveLeg(leg.sourceIndex, false);
+        if (!installedOnce) {
+          installedOnce = true;
+          resolveFirstInstall();
+        }
+      }
+    };
 
-    // Reject-older guard (qfg-7h5d.1.7): a poll, failover, or fallback-poll
-    // fetch installs only if it advances the held generation. Without this, a
-    // failover to an older secondary regresses an established client. The very
-    // first fetch is always installed (fresh client), so init never lands here
-    // rejected with nothing held. resolvedFromIndex is snapshotted only when we
-    // actually install, so a rejected older leg does not flip resolvedFrom().
-    if (result.envelope && this.shouldInstall(result.envelope)) {
-      this.installEnvelope(result.envelope);
-      this.resolvedFromIndex = this.transport.getActiveBaseUrlIndex();
-    }
+    // Drain every fired leg in the background. The first successful install
+    // resolves `firstInstall` (via onLeg) so the await below returns promptly;
+    // later legs keep installing — a late-but-newer leg heals forward even after
+    // this method's caller (init) has moved on. Once all legs settle with nothing
+    // installed, resolve (all-304 no-op) or reject (every leg failed).
+    const allSettled = this.transport.fetchConfigsHedged(onLeg).then(() => {
+      if (installedOnce) return;
+      if (fired > 0 && failures === fired) {
+        rejectAllFailed(lastError ?? new Error("All API URLs failed"));
+      } else {
+        resolveFirstInstall();
+      }
+    });
+    // Never let the background drain surface as an unhandled rejection; its
+    // outcome is funneled into `firstInstall`, which the caller awaits.
+    allSettled.catch(() => {});
+
+    await firstInstall;
   }
 
   private startSSE(): void {

@@ -434,8 +434,8 @@ describe("Quonfig datadir", () => {
     };
 
     const fetchSpy = vi
-      .spyOn(Transport.prototype, "fetchConfigs")
-      .mockResolvedValue({ envelope, notChanged: false });
+      .spyOn(Transport.prototype, "fetchFromUrlAt")
+      .mockResolvedValue({ result: { envelope, notChanged: false }, sourceIndex: 0 });
     const postTelemetrySpy = vi
       .spyOn(Transport.prototype, "postTelemetry")
       .mockResolvedValue(undefined);

@@ -70,9 +70,12 @@ describe("Quonfig.connectionState()", () => {
   });
 
   it("transitions to 'connected' after successful SSE onopen", async () => {
-    vi.spyOn(Transport.prototype, "fetchConfigs").mockResolvedValue({
-      envelope: envelope("v1"),
-      notChanged: false,
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
+      result: {
+        envelope: envelope("v1"),
+        notChanged: false,
+      },
+      sourceIndex: 0,
     });
 
     const fakeOut: { value: FakeEventSource | null } = { value: null };
@@ -99,9 +102,12 @@ describe("Quonfig.connectionState()", () => {
   });
 
   it("transitions 'connected' -> 'disconnected' -> 'falling_back' -> 'connected' through the supervisor lifecycle", async () => {
-    vi.spyOn(Transport.prototype, "fetchConfigs").mockResolvedValue({
-      envelope: envelope("v1"),
-      notChanged: false,
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
+      result: {
+        envelope: envelope("v1"),
+        notChanged: false,
+      },
+      sourceIndex: 0,
     });
 
     const fakeOut: { value: FakeEventSource | null } = { value: null };
@@ -136,9 +142,12 @@ describe("Quonfig.connectionState()", () => {
   });
 
   it("reports 'falling_back' immediately when the initial SSE connection fails", async () => {
-    vi.spyOn(Transport.prototype, "fetchConfigs").mockResolvedValue({
-      envelope: envelope("v1"),
-      notChanged: false,
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
+      result: {
+        envelope: envelope("v1"),
+        notChanged: false,
+      },
+      sourceIndex: 0,
     });
 
     const fakeOut: { value: FakeEventSource | null } = { value: null };
@@ -162,9 +171,12 @@ describe("Quonfig.connectionState()", () => {
   });
 
   it("returns 'disconnected' after close()", async () => {
-    vi.spyOn(Transport.prototype, "fetchConfigs").mockResolvedValue({
-      envelope: envelope("v1"),
-      notChanged: false,
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
+      result: {
+        envelope: envelope("v1"),
+        notChanged: false,
+      },
+      sourceIndex: 0,
     });
 
     const fakeOut: { value: FakeEventSource | null } = { value: null };
@@ -203,9 +215,12 @@ describe("Quonfig.lastSuccessfulRefresh()", () => {
 
   it("returns a Date close to wall-clock time after init() installs the initial envelope", async () => {
     vi.useRealTimers();
-    vi.spyOn(Transport.prototype, "fetchConfigs").mockResolvedValue({
-      envelope: envelope("v1"),
-      notChanged: false,
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
+      result: {
+        envelope: envelope("v1"),
+        notChanged: false,
+      },
+      sourceIndex: 0,
     });
 
     const fakeOut: { value: FakeEventSource | null } = { value: null };
@@ -231,9 +246,15 @@ describe("Quonfig.lastSuccessfulRefresh()", () => {
   });
 
   it("advances when the fallback poller installs a new envelope", async () => {
-    vi.spyOn(Transport.prototype, "fetchConfigs")
-      .mockResolvedValueOnce({ envelope: envelope("v1"), notChanged: false })
-      .mockResolvedValue({ envelope: envelope("v2"), notChanged: false });
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt")
+      .mockResolvedValueOnce({
+        result: { envelope: envelope("v1"), notChanged: false },
+        sourceIndex: 0,
+      })
+      .mockResolvedValue({
+        result: { envelope: envelope("v2"), notChanged: false },
+        sourceIndex: 0,
+      });
 
     const fakeOut: { value: FakeEventSource | null } = { value: null };
     const quonfig = new Quonfig({

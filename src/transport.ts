@@ -7,6 +7,18 @@ export interface FetchResult {
   notChanged: boolean;
 }
 
+/**
+ * One hedged leg's outcome, delivered to the caller as it settles. Exactly one
+ * `LegResult` is emitted per fired leg; `sourceIndex` identifies the leg
+ * (0 = primary, 1 = secondary). `error` is set when the leg failed (network
+ * error, timeout/abort, non-2xx); otherwise `result` carries the outcome.
+ */
+export interface LegResult {
+  result?: FetchResult;
+  error?: Error;
+  sourceIndex: number;
+}
+
 const DEFAULT_DOMAIN = "quonfig.com";
 
 /**
@@ -26,6 +38,27 @@ const TELEMETRY_POST_TIMEOUT_MS = 3000;
  * long-lived SSE stream, which keeps its own read deadline.
  */
 export const DEFAULT_CONFIG_FETCH_TIMEOUT_MS = 3000;
+
+/**
+ * Default hedge delay (qfg-7h5d.1.14). How long the hedged config-fetch waits
+ * for the primary leg before ALSO firing the secondary in parallel (it does not
+ * cancel the primary). ~1s is below a realistic slow-but-alive primary's worst
+ * case yet far enough below the per-leg abort that a healthy sub-second primary
+ * is NEVER hedged — the secondary stays a cold standby and a healthy system adds
+ * zero secondary load. Tunable via `configFetchHedgeDelayMs`.
+ */
+export const DEFAULT_CONFIG_FETCH_HEDGE_DELAY_MS = 1000;
+
+/**
+ * Default per-leg hard-abort deadline on the hedged path (qfg-7h5d.1.14). MUST
+ * exceed the longest healable primary latency so a late-but-newer primary heals
+ * forward (rather than aborting), and SHOULD be < `initTimeout` so the init-path
+ * heal leg is not clipped (the client logs a warning at construction otherwise).
+ * The chaos o03/o05 rigs slow the primary by ~3s, which sits between the 1s
+ * delay and this 6s abort, so the late primary is delivered (not aborted) and
+ * the reject-older path is exercised. Tunable via `configFetchHedgeAbortMs`.
+ */
+export const DEFAULT_CONFIG_FETCH_HEDGE_ABORT_MS = 6000;
 
 export type DomainOptions = { domain?: string };
 
@@ -89,7 +122,14 @@ export class Transport {
   private telemetryBaseUrl: string;
   private sdkKey: string;
   private logger: NormalizedLogger;
-  private etag: string = "";
+  /**
+   * ETag cache is PER-LEG: `etags[i]` is the last ETag seen from `baseUrls[i]`.
+   * The hedge runs both legs concurrently, so a single shared ETag would let a
+   * 304 from one leg mask the other (and even on a single-threaded event loop two
+   * overlapping refresh promises could interleave a stale `If-None-Match`). Each
+   * leg reads/writes only its own slot. (qfg-7h5d.1.14)
+   */
+  private etags: string[];
   /**
    * Index into `baseUrls` of the leg that last succeeded for `fetchConfigs`
    * (0 = primary, >0 = a secondary reached via failover). Lets the client report
@@ -97,14 +137,28 @@ export class Transport {
    */
   private activeBaseUrlIndex: number = 0;
   /**
-   * Per-URL deadline (ms) for a single `fetchConfigs` attempt. Each leg in the
-   * failover loop gets its own `AbortSignal.timeout(fetchTimeoutMs)`, so a hung
-   * upstream aborts fast and leaves budget to reach the next leg inside the
-   * caller's overall deadline (e.g. `initTimeout`). Defaults to
-   * DEFAULT_CONFIG_FETCH_TIMEOUT_MS; the client overwrites it from
-   * `configFetchTimeoutMs` at construction. (qfg-7h5d.1.7)
+   * Per-URL deadline (ms) for a single attempt on the SEQUENTIAL `fetchConfigs`
+   * path (unchanged semantics). Each leg in the failover loop gets its own
+   * `AbortSignal.timeout(fetchTimeoutMs)`, so a hung upstream aborts fast and
+   * leaves budget to reach the next leg inside the caller's overall deadline
+   * (e.g. `initTimeout`). Defaults to DEFAULT_CONFIG_FETCH_TIMEOUT_MS; the client
+   * overwrites it from `configFetchTimeoutMs` at construction. The hedged path
+   * uses `hedgeAbortMs` instead. (qfg-7h5d.1.7)
    */
   fetchTimeoutMs: number = DEFAULT_CONFIG_FETCH_TIMEOUT_MS;
+  /**
+   * How long the hedge waits for the primary leg before ALSO firing the
+   * secondary in parallel (it does not cancel the primary). Defaults to
+   * DEFAULT_CONFIG_FETCH_HEDGE_DELAY_MS; the client overwrites it from
+   * `configFetchHedgeDelayMs`. (qfg-7h5d.1.14)
+   */
+  hedgeDelayMs: number = DEFAULT_CONFIG_FETCH_HEDGE_DELAY_MS;
+  /**
+   * Per-leg hard-abort deadline on the hedged path. Defaults to
+   * DEFAULT_CONFIG_FETCH_HEDGE_ABORT_MS; the client overwrites it from
+   * `configFetchHedgeAbortMs`. (qfg-7h5d.1.14)
+   */
+  hedgeAbortMs: number = DEFAULT_CONFIG_FETCH_HEDGE_ABORT_MS;
   /**
    * Test-only override. When set, `getSSEUrl()` returns this value verbatim
    * instead of deriving it from apiUrls. Used to let tests point SSE at a
@@ -121,6 +175,7 @@ export class Transport {
   ) {
     this.baseUrls = baseUrls.map((u) => u.replace(/\/$/, ""));
     this.streamUrls = this.baseUrls.map((u) => deriveStreamUrl(u));
+    this.etags = new Array(this.baseUrls.length).fill("");
     this.activeBaseUrl = this.baseUrls[0];
     this.activeStreamUrl = this.streamUrls[0];
     // Resolution order: explicit telemetryUrl > options.domain > QUONFIG_DOMAIN > default.
@@ -153,74 +208,190 @@ export class Transport {
   }
 
   /**
-   * Fetch configs from GET /api/v2/configs with ETag caching.
+   * Fetch GET /api/v2/configs from `baseUrls[i]`, using ONLY that leg's ETag slot
+   * (`etags[i]`), bounded by its own `abortMs` deadline. Fully reads/decodes the
+   * body before resolving, so the leg is self-contained. Never throws — every
+   * outcome (success, 304, network error, non-2xx, abort) resolves to a
+   * `LegResult` carrying `sourceIndex=i`. The shared `activeBaseUrl*` fields are
+   * NOT mutated here: the hedge fires two legs and the caller (client) decides
+   * which one installs, then snapshots its `sourceIndex` for `resolvedFrom()`.
+   * (qfg-7h5d.1.14)
+   */
+  private async fetchFromUrlAt(i: number, abortMs: number): Promise<LegResult> {
+    const baseUrl = this.baseUrls[i];
+    try {
+      const headers = this.getHeaders();
+      // Per-leg ETag: read only this leg's slot so a 304 from the other leg can
+      // never mask this one, and two overlapping hedge cycles can't interleave a
+      // stale If-None-Match across legs. (qfg-7h5d.1.14)
+      const etag = this.etags[i];
+      if (etag) {
+        headers["If-None-Match"] = etag;
+      }
+
+      // In Next.js dev mode the patched fetch deduplicates by URL across a
+      // request lifetime, which can cause stale config to be served even after
+      // a server-side change.  Gate the cache-bust param to development so
+      // production consumers don't defeat upstream HTTP / CDN caches.
+      const isDev = process.env.NODE_ENV === "development";
+      const configUrl = isDev
+        ? `${baseUrl}/api/v2/configs?_=${Date.now()}`
+        : `${baseUrl}/api/v2/configs`;
+      const fetchInit: RequestInit & { cache?: string } = {
+        method: "GET",
+        headers,
+        // Bound this single leg so a hung upstream (accepts the connection but
+        // never responds) aborts after abortMs instead of running forever. The
+        // signal stays active through the body read, so a slow body is bounded
+        // too. The abort surfaces as a rejected fetch, caught below.
+        signal: AbortSignal.timeout(abortMs),
+      };
+      if (isDev) {
+        fetchInit.cache = "no-store";
+      }
+      const response = await fetch(configUrl, fetchInit as RequestInit);
+
+      if (response.status === 304) {
+        return { result: { notChanged: true }, sourceIndex: i };
+      }
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(`Unexpected status ${response.status} from ${baseUrl}: ${body}`);
+      }
+
+      const newEtag = response.headers.get("ETag");
+      if (newEtag) {
+        this.etags[i] = newEtag;
+      }
+
+      const envelope = (await response.json()) as ConfigEnvelope;
+      return { result: { envelope, notChanged: false }, sourceIndex: i };
+    } catch (err) {
+      return { error: err instanceof Error ? err : new Error(String(err)), sourceIndex: i };
+    }
+  }
+
+  /**
+   * Record which leg last produced a config, so `getActiveBaseUrlIndex()` (and,
+   * on the sequential path, `getSSEUrl()`) reflect it.
    *
-   * Tries each base URL in order. Returns the first successful result.
-   * Returns `{ notChanged: true }` if the server responds with 304.
+   * `trackStream` distinguishes the two callers:
+   *   - The SEQUENTIAL `fetchConfigs` path passes `true` — its historic behavior,
+   *     so the fallback poller's SSE reconnect tracks the leg it last reached.
+   *   - The HEDGED install path passes `false` — SSE is pinned to the PRIMARY
+   *     stream and never fails over (the chaos suite asserts this in f05), so a
+   *     hedged secondary install advances the base-url index (for `resolvedFrom`)
+   *     but leaves the active stream on the primary. (qfg-7h5d.1.14)
+   */
+  markActiveLeg(i: number, trackStream: boolean): void {
+    if (i < 0 || i >= this.baseUrls.length) return;
+    this.activeBaseUrlIndex = i;
+    this.activeBaseUrl = this.baseUrls[i];
+    if (trackStream) {
+      this.activeStreamUrl = this.streamUrls[i];
+    }
+  }
+
+  /**
+   * Sequential config fetch: try each base URL in order, returning the first
+   * successful result. Retained for any non-hedged caller; the init/refresh
+   * install path uses {@link Transport.fetchConfigsHedged}. Returns
+   * `{ notChanged: true }` on 304. Uses the per-leg ETag slots and the
+   * per-attempt `fetchTimeoutMs` deadline (unchanged semantics).
    */
   async fetchConfigs(): Promise<FetchResult> {
     let lastError: Error | undefined;
-
     for (let i = 0; i < this.baseUrls.length; i++) {
-      const baseUrl = this.baseUrls[i];
-      try {
-        const headers = this.getHeaders();
-        if (this.etag) {
-          headers["If-None-Match"] = this.etag;
-        }
-
-        // In Next.js dev mode the patched fetch deduplicates by URL across a
-        // request lifetime, which can cause stale config to be served even after
-        // a server-side change.  Gate the cache-bust param to development so
-        // production consumers don't defeat upstream HTTP / CDN caches.
-        const isDev = process.env.NODE_ENV === "development";
-        const configUrl = isDev
-          ? `${baseUrl}/api/v2/configs?_=${Date.now()}`
-          : `${baseUrl}/api/v2/configs`;
-        const fetchInit: RequestInit & { cache?: string } = {
-          method: "GET",
-          headers,
-          // Bound this single attempt so a hung leg (accepts the connection but
-          // never responds) aborts after fetchTimeoutMs instead of blocking on
-          // the caller's overall budget, starving the next leg. The signal stays
-          // active through the body read, so a slow body is bounded too. The
-          // abort surfaces as a rejected fetch, caught below → next URL is tried.
-          // (qfg-7h5d.1.7)
-          signal: AbortSignal.timeout(this.fetchTimeoutMs),
-        };
-        if (isDev) {
-          fetchInit.cache = "no-store";
-        }
-        const response = await fetch(configUrl, fetchInit as RequestInit);
-
-        if (response.status === 304) {
-          this.activeBaseUrl = baseUrl;
-          this.activeStreamUrl = this.streamUrls[i];
-          this.activeBaseUrlIndex = i;
-          return { notChanged: true };
-        }
-
-        if (!response.ok) {
-          const body = await response.text().catch(() => "");
-          throw new Error(`Unexpected status ${response.status} from ${baseUrl}: ${body}`);
-        }
-
-        const etag = response.headers.get("ETag");
-        if (etag) {
-          this.etag = etag;
-        }
-
-        this.activeBaseUrl = baseUrl;
-        this.activeStreamUrl = this.streamUrls[i];
-        this.activeBaseUrlIndex = i;
-        const envelope = (await response.json()) as ConfigEnvelope;
-        return { envelope, notChanged: false };
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
+      const lr = await this.fetchFromUrlAt(i, this.fetchTimeoutMs);
+      if (lr.error) {
+        lastError = lr.error;
+        continue;
       }
+      // Sequential path keeps its historic side effect of marking the winning
+      // leg active (the fallback poller relies on it), stream included.
+      this.markActiveLeg(i, true);
+      return lr.result!;
+    }
+    throw lastError ?? new Error("All API URLs failed");
+  }
+
+  /**
+   * Parallel-failover hedge (qfg-7h5d.1.14). Fires the PRIMARY leg (index 0)
+   * first and, only if it has not settled within `hedgeDelayMs` OR errors fast,
+   * ALSO fires the SECONDARY leg (index 1) in parallel — without cancelling the
+   * primary. A fast healthy primary means the secondary is NEVER contacted (cold
+   * standby). Each fired leg runs under its own `hedgeAbortMs` deadline and its
+   * own ETag slot.
+   *
+   * `onLeg` is invoked exactly once per fired leg, in arrival order, as soon as
+   * that leg settles. The returned promise resolves once every fired leg has
+   * settled (so the caller can rely on "all legs done" for the both-fail path).
+   * The caller installs each successful leg through the reject-older guard so
+   * watermark-max falls out (higher generation wins; a late older payload never
+   * regresses; a late newer payload heals forward) with no source ranking.
+   */
+  async fetchConfigsHedged(onLeg: (leg: LegResult) => void): Promise<void> {
+    const hedgeDelay =
+      this.hedgeDelayMs > 0 ? this.hedgeDelayMs : DEFAULT_CONFIG_FETCH_HEDGE_DELAY_MS;
+    const hedgeAbort =
+      this.hedgeAbortMs > 0 ? this.hedgeAbortMs : DEFAULT_CONFIG_FETCH_HEDGE_ABORT_MS;
+    const hasSecondary = this.baseUrls.length > 1;
+
+    const pending: Promise<void>[] = [];
+    // At-most-once latch so the secondary fires exactly once and NEVER after a
+    // fast primary win. Mirrors the sdk-go `secondaryFired` CAS; on a single
+    // thread a boolean check-then-set is atomic so no real CAS is needed.
+    let secondaryDecided = false;
+
+    const fireLeg = (i: number): void => {
+      pending.push(
+        this.fetchFromUrlAt(i, hedgeAbort).then((leg) => {
+          onLeg(leg);
+        })
+      );
+    };
+
+    const fireSecondary = (): void => {
+      if (!hasSecondary || secondaryDecided) return;
+      secondaryDecided = true;
+      fireLeg(1);
+    };
+
+    // Fire the primary and track its settle so the hedge can decide on a fast
+    // error (hedge now) vs a fast success/304 (never hedge).
+    let primaryError: Error | undefined;
+    let primarySettled = false;
+    const primaryDone = this.fetchFromUrlAt(0, hedgeAbort).then((leg) => {
+      primarySettled = true;
+      primaryError = leg.error;
+      onLeg(leg);
+    });
+    pending.push(primaryDone);
+
+    // Race the primary against the hedge-delay timer.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const delayElapsed = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, hedgeDelay);
+    });
+    await Promise.race([primaryDone, delayElapsed]);
+    if (timer) clearTimeout(timer);
+
+    if (primarySettled) {
+      // Primary settled before (or right at) the hedge delay.
+      if (primaryError) {
+        fireSecondary(); // fast error -> hedge now
+      } else {
+        secondaryDecided = true; // fast success/304 -> never hedge (cold standby)
+      }
+    } else {
+      // Primary still in flight after the hedge delay -> hedge in parallel.
+      fireSecondary();
     }
 
-    throw lastError ?? new Error("All API URLs failed");
+    // Wait for every fired leg (primary always; secondary if fired) to settle so
+    // the caller's both-fail / heal-forward accounting is complete.
+    await Promise.all(pending);
   }
 
   /**

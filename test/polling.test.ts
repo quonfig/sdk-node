@@ -43,9 +43,9 @@ describe("Quonfig polling", () => {
     const second = envelopeWithFlag("v2", true);
 
     const fetchSpy = vi
-      .spyOn(Transport.prototype, "fetchConfigs")
-      .mockResolvedValueOnce({ envelope: first, notChanged: false })
-      .mockResolvedValueOnce({ envelope: second, notChanged: false });
+      .spyOn(Transport.prototype, "fetchFromUrlAt")
+      .mockResolvedValueOnce({ result: { envelope: first, notChanged: false }, sourceIndex: 0 })
+      .mockResolvedValueOnce({ result: { envelope: second, notChanged: false }, sourceIndex: 0 });
 
     const quonfig = new Quonfig({
       sdkKey: "test-sdk-key",

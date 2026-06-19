@@ -8,9 +8,13 @@
  *     the SDK must fail the HTTP config fetch over to the secondary and keep
  *     serving, fast (well inside initTimeout). SSE is asserted NOT to repoint.
  *
- *   scenarios-ordering/ (o01-o04) — TWO fixture upstreams pinned to divergent
- *     Meta.generations. The SDK must end up holding the higher generation and an
- *     established client must never regress to an older one.
+ *   scenarios-ordering/ (o01-o05) — TWO fixture upstreams pinned to divergent
+ *     Meta.generations. Under the parallel-failover hedge (qfg-7h5d.1.14) a fast
+ *     primary wins and the secondary is never contacted (o01 cold standby), a
+ *     slow newer primary heals forward off a fast older secondary (o03), and a
+ *     slow older primary loses to a fast newer secondary without regressing the
+ *     late older payload (o05). An established client never regresses to an
+ *     older generation (o02); a same-generation second leg is a no-op (o04).
  *
  * Only toxiproxy needs to be running (boot it with run-failover-chaos.sh, which
  * needs no --with-upstream). Each runner spawns its own api-delivery fixture
@@ -23,10 +27,10 @@
  *     primary starves the secondary until initTimeout. Green with qfg-7h5d.1.7.
  *   - o02 (secondary older) is RED without the reject-older install guard — a
  *     failover fetch of the older secondary regresses the held generation.
- *
- * o01-secondary-newer is intentionally skipped here (and via CHAOS_SKIP in CI):
- * it needs cross-leg max-wins, which is out of the §5f reject-older scope and not
- * yet built (sibling bead, mirrors the sdk-go pilot's deferral).
+ *   - o05 (slow older primary loses to a fast newer secondary) and o01 (fast
+ *     primary cold-standby) are RED on the pre-hedge sequential transport; the
+ *     parallel-failover hedge (qfg-7h5d.1.14) makes them green. The unit-level
+ *     proof lives in test/hedge.test.ts (per-leg request counter).
  */
 
 import { spawn, type ChildProcess } from "node:child_process";

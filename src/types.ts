@@ -253,6 +253,26 @@ export interface QuonfigOptions {
    * does not touch the long-lived SSE stream. (qfg-7h5d.1.7)
    */
   configFetchTimeoutMs?: number;
+  /**
+   * Hedge delay (ms) on the parallel-failover config-fetch path: how long to
+   * wait for the primary leg before ALSO firing the secondary in parallel
+   * (without cancelling the primary). A fast healthy primary answers well inside
+   * this window, so the secondary is never contacted (cold standby, zero extra
+   * load). Default 1000ms. Additive and backward-compatible. Bounds the HTTP
+   * config path only; it does not touch the long-lived SSE stream.
+   * (qfg-7h5d.1.14)
+   */
+  configFetchHedgeDelayMs?: number;
+  /**
+   * Per-leg hard-abort deadline (ms) on the parallel-failover config-fetch path.
+   * Each hedged leg is bounded by this. It must exceed the longest healable
+   * primary latency so a late-but-newer primary heals forward (rather than being
+   * aborted), and should be less than `initTimeout` so the init-path heal leg is
+   * not clipped — the SDK logs a one-time warning at construction if
+   * `initTimeout <= configFetchHedgeAbortMs`. Default 6000ms. Additive and
+   * backward-compatible. (qfg-7h5d.1.14)
+   */
+  configFetchHedgeAbortMs?: number;
   namespace?: string;
   globalContext?: Contexts;
   onNoDefault?: OnNoDefault;

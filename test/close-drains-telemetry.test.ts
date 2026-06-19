@@ -32,9 +32,12 @@ describe("close() drains telemetry (qfg-vrfm)", () => {
       ],
     };
 
-    vi.spyOn(Transport.prototype, "fetchConfigs").mockResolvedValue({
-      envelope,
-      notChanged: false,
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
+      result: {
+        envelope,
+        notChanged: false,
+      },
+      sourceIndex: 0,
     });
     const postTelemetrySpy = vi
       .spyOn(Transport.prototype, "postTelemetry")

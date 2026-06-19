@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.1.0 - 2026-06-19
+
+- **Parallel-failover hedge on the HTTP config-fetch path (qfg-7h5d.1.14).** The init/refresh config
+  fetch is now a parallel hedge instead of a sequential primary→secondary failover. The primary
+  upstream is fired first; if it answers within the hedge delay (~1s) it wins and the **secondary is
+  never contacted** (cold standby, zero extra load on a healthy system). Only if the primary is slow
+  past the hedge delay **or** errors fast does the SDK **also** fire the secondary **in parallel**
+  (the primary is not cancelled). Whatever arrives is installed through the existing reject-older
+  guard, so watermark-max falls out: the higher `meta.generation` wins, a late older payload never
+  regresses an established client, and a late newer payload heals forward. `ready()` latches on the
+  first successful install; a late-but-newer leg heals forward afterward. SSE is untouched — it
+  never fails over and stays pinned to the primary stream.
+- **Two new additive options.** `configFetchHedgeDelayMs` (default 1000) tunes how long to wait for
+  the primary before also firing the secondary in parallel. `configFetchHedgeAbortMs` (default 6000)
+  is the per-leg hard-abort deadline; it must exceed the longest healable primary latency (so a
+  late-but-newer primary heals forward rather than aborting) and should be below `initTimeout` (the
+  SDK logs a one-time warning at construction if `initTimeout <= configFetchHedgeAbortMs`). The
+  existing `configFetchTimeoutMs` is unchanged — it still governs the sequential fetch path.
+- **Backward-compatible behavioral notes.** This is a backward-compatible **minor** release;
+  existing callers need not set anything. Three observable differences in a fast-both topology:
+  - `resolvedFrom()` may now return `"primary"` where 1.0.0 returned `"secondary"` — a fast healthy
+    primary wins even when the secondary holds a higher generation, because the hedge never contacts
+    the secondary.
+  - An extra post-`ready()` config-update callback (`onConfigUpdate`) may fire on heal-forward when
+    a late newer leg lands after the first install.
+  - ETags are now tracked **per leg** (each upstream has its own `If-None-Match` slot) so a 304 from
+    one leg can never mask the other and two in-flight legs cannot race a shared ETag.
+
 ## 1.0.0 - 2026-06-06
 
 - **Stable 1.0.0 release.** The Quonfig Node SDK is now declared stable. No API or behavior changes

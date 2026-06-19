@@ -107,9 +107,12 @@ describe("Quonfig.withContext callback overload", () => {
     const postTelemetrySpy = vi
       .spyOn(Transport.prototype, "postTelemetry")
       .mockResolvedValue(undefined);
-    vi.spyOn(Transport.prototype, "fetchConfigs").mockResolvedValue({
-      envelope: envelope([planRuleConfig()]),
-      notChanged: false,
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
+      result: {
+        envelope: envelope([planRuleConfig()]),
+        notChanged: false,
+      },
+      sourceIndex: 0,
     });
 
     const q = new Quonfig({

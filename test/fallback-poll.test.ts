@@ -62,9 +62,9 @@ describe("Quonfig — Layer 2 fallback poller", () => {
     const polled = envelopeWithFlag("v2", true);
 
     const fetchSpy = vi
-      .spyOn(Transport.prototype, "fetchConfigs")
-      .mockResolvedValueOnce({ envelope: initial, notChanged: false })
-      .mockResolvedValue({ envelope: polled, notChanged: false });
+      .spyOn(Transport.prototype, "fetchFromUrlAt")
+      .mockResolvedValueOnce({ result: { envelope: initial, notChanged: false }, sourceIndex: 0 })
+      .mockResolvedValue({ result: { envelope: polled, notChanged: false }, sourceIndex: 0 });
 
     const fakeOut: { value: FakeEventSource | null } = { value: null };
     const states: SSEConnectionState[] = [];
@@ -106,9 +106,9 @@ describe("Quonfig — Layer 2 fallback poller", () => {
     const polled = envelopeWithFlag("v2", true);
 
     const fetchSpy = vi
-      .spyOn(Transport.prototype, "fetchConfigs")
-      .mockResolvedValueOnce({ envelope: initial, notChanged: false })
-      .mockResolvedValue({ envelope: polled, notChanged: false });
+      .spyOn(Transport.prototype, "fetchFromUrlAt")
+      .mockResolvedValueOnce({ result: { envelope: initial, notChanged: false }, sourceIndex: 0 })
+      .mockResolvedValue({ result: { envelope: polled, notChanged: false }, sourceIndex: 0 });
 
     const fakeOut: { value: FakeEventSource | null } = { value: null };
     const quonfig = new Quonfig({
@@ -150,9 +150,12 @@ describe("Quonfig — Layer 2 fallback poller", () => {
 
   it("does not start the fallback poller when SSE is healthy", async () => {
     const initial = envelopeWithFlag("v1", false);
-    vi.spyOn(Transport.prototype, "fetchConfigs").mockResolvedValue({
-      envelope: initial,
-      notChanged: false,
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
+      result: {
+        envelope: initial,
+        notChanged: false,
+      },
+      sourceIndex: 0,
     });
 
     const fakeOut: { value: FakeEventSource | null } = { value: null };
@@ -179,9 +182,12 @@ describe("Quonfig — Layer 2 fallback poller", () => {
   it("maps deprecated enablePolling/pollInterval to fallback options with a warning", async () => {
     const warnings: string[] = [];
     const initial = envelopeWithFlag("v1", false);
-    vi.spyOn(Transport.prototype, "fetchConfigs").mockResolvedValue({
-      envelope: initial,
-      notChanged: false,
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
+      result: {
+        envelope: initial,
+        notChanged: false,
+      },
+      sourceIndex: 0,
     });
 
     const fakeOut: { value: FakeEventSource | null } = { value: null };
@@ -216,9 +222,12 @@ describe("Quonfig — Layer 2 fallback poller", () => {
   it("emits a startup log line announcing the polling mode", async () => {
     const infos: string[] = [];
     const initial = envelopeWithFlag("v1", false);
-    vi.spyOn(Transport.prototype, "fetchConfigs").mockResolvedValue({
-      envelope: initial,
-      notChanged: false,
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
+      result: {
+        envelope: initial,
+        notChanged: false,
+      },
+      sourceIndex: 0,
     });
 
     const fakeOut: { value: FakeEventSource | null } = { value: null };

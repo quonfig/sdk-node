@@ -15,8 +15,8 @@
 #
 # Env knobs:
 #   CHAOS_ONLY   comma list of scenario numbers to run, e.g. "f02,o02"
-#   CHAOS_SKIP   comma list of scenario numbers to skip (default "o01" — needs
-#                cross-leg max-wins, out of the §5f reject-older scope, not built)
+#   CHAOS_SKIP   comma list of scenario numbers to skip (default none — the
+#                parallel-failover hedge makes the full o01-o05 suite green)
 #   CHAOS_POLL_MS  expectation poll interval (default 200)
 #
 # Examples:
@@ -42,9 +42,11 @@ fi
 export QUONFIG_CHAOS_SESSION="${QUONFIG_CHAOS_SESSION:-sdk-node-failover-$$-$(date +%s)}"
 export QUONFIG_CHAOS_OWNER_PID=$$
 
-# o01-secondary-newer needs cross-leg max-wins (sibling bead) — skip by default,
-# mirroring the sdk-go pilot's CHAOS_SKIP. Override CHAOS_SKIP to include it.
-export CHAOS_SKIP="${CHAOS_SKIP:-o01}"
+# The parallel-failover hedge (qfg-7h5d.1.14) makes the full ordering suite
+# (o01-o05) green, so nothing is skipped by default. Set CHAOS_SKIP to a
+# comma list to skip specific scenarios. We use ${CHAOS_SKIP-} (not :-) so an
+# explicitly-set empty value from the workflow stays empty.
+export CHAOS_SKIP="${CHAOS_SKIP-}"
 
 cleanup_done=0
 cleanup() {
