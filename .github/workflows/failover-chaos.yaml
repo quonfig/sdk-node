@@ -53,7 +53,7 @@ jobs:
           # this job drives only exists on main and is not yet in a tag (the
           # tag chaos.yaml pins, v2026.05.13, predates it). Pin to a tag once the
           # corpus is rev'd into one.
-          ref: main
+          ref: v2026.06.19
 
       - name: Checkout api-delivery
         # api-delivery is private; the default GITHUB_TOKEN cannot read it. A PAT
