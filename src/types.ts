@@ -121,6 +121,15 @@ export interface Meta {
   version: string;
   environment: string;
   workspaceId?: string;
+  /**
+   * Monotonic, per-branch commit counter (api-delivery emits `git rev-list
+   * --count HEAD` alongside the unordered SHA in `version`). A higher
+   * generation is strictly newer, so the canonical-ordering install guard can
+   * compare two snapshots and keep an established client from regressing to an
+   * older payload (qfg-7h5d.1.7). Optional: servers that predate the watermark
+   * omit it, in which case it reads as `undefined` and is treated as 0.
+   */
+  generation?: number;
 }
 
 export interface ConfigEnvelope {
@@ -232,6 +241,18 @@ export interface QuonfigOptions {
    * with a deprecation warning.
    */
   pollInterval?: number;
+  /**
+   * Per-URL deadline (ms) for a single config-fetch attempt. Applies uniformly
+   * to the initial fetch and to every fallback-poll fetch: each base URL in the
+   * failover list gets its own timeout, so when one leg hangs (accepts the
+   * connection but never responds) the attempt aborts after this window and the
+   * next leg (e.g. the secondary) is reached inside the overall `initTimeout`
+   * instead of being starved until it. Default 3000ms. Additive and
+   * backward-compatible — the default already makes a hung upstream fail over,
+   * so existing callers need not set it. Bounds the HTTP config path only; it
+   * does not touch the long-lived SSE stream. (qfg-7h5d.1.7)
+   */
+  configFetchTimeoutMs?: number;
   namespace?: string;
   globalContext?: Contexts;
   onNoDefault?: OnNoDefault;

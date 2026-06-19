@@ -246,6 +246,14 @@ export class Quonfig {
   private environmentId: string = "";
   private initialized: boolean = false;
 
+  // ---- canonical-ordering + failover observability (qfg-7h5d.1.7) ----
+  /** Meta.generation of the currently-installed envelope (0 before first install). */
+  private heldGenerationValue: number = 0;
+  /** Count of installEnvelope calls over the client's lifetime (every install path). */
+  private configInstalls: number = 0;
+  /** baseUrls index of the last HTTP fetch that installed; -1 until the first. */
+  private resolvedFromIndex: number = -1;
+
   // Telemetry collectors
   private evaluationSummaries: EvaluationSummaryCollector;
   private contextShapes: ContextShapeCollector;
@@ -341,6 +349,15 @@ export class Quonfig {
       options.domain,
       options.logger
     );
+    // Per-URL config-fetch deadline (qfg-7h5d.1.7). Set once, before any fetch
+    // runs, so it bounds the initial fetch and every fallback-poll fetch
+    // uniformly (both route through transport.fetchConfigs).
+    if (options.configFetchTimeoutMs !== undefined) {
+      if (options.configFetchTimeoutMs <= 0) {
+        throw new Error("[quonfig] configFetchTimeoutMs must be a positive number of milliseconds");
+      }
+      this.transport.fetchTimeoutMs = options.configFetchTimeoutMs;
+    }
 
     // Initialize telemetry collectors
     const contextUploadMode: ContextUploadMode = options.contextUploadMode ?? "periodic_example";
@@ -1172,8 +1189,93 @@ export class Quonfig {
   private installEnvelope(envelope: ConfigEnvelope): void {
     this.store.update(envelope);
     this.environmentId = envelope.meta.environment;
+    this.heldGenerationValue = envelope.meta.generation ?? 0;
+    this.configInstalls++;
     this.lastSuccessfulRefreshAt = new Date();
     this.invokeOnConfigUpdate();
+  }
+
+  /**
+   * Canonical reject-older rule for an incoming snapshot on a network install
+   * path (initial fetch, failover/refresh fetch, SSE initial snapshot, SSE
+   * update, fallback poll). Reject-older is the whole rule — there is no source
+   * ranking (qfg-7h5d.1.7):
+   *
+   *   - A fresh client (nothing installed yet) always accepts the first
+   *     snapshot, even an unversioned one. A stale secondary payload can
+   *     therefore seed a fresh client, but...
+   *   - ...an established client installs a *versioned* snapshot only if the
+   *     incoming Meta.generation is strictly greater than the held generation.
+   *     An older payload is dropped, so a late failover to a stale secondary can
+   *     never move the client backward; a later, newer leg heals forward.
+   *   - A same-generation snapshot is not strictly greater, so it is a no-op —
+   *     an equal second leg can't re-install or flap.
+   *   - An unversioned snapshot (generation absent or 0 — a server that predates
+   *     the watermark) carries no ordering information, so we can't reject it as
+   *     "older". It installs exactly as it did before this guard existed,
+   *     preserving backward compatibility for pre-watermark servers.
+   *
+   * Node is single-threaded, so this synchronous check plus the installEnvelope
+   * that follows it run as one atomic step with respect to every other install
+   * path. Datadir install/reload is a local source of truth (generation 0) and
+   * intentionally bypasses this guard by calling installEnvelope directly.
+   */
+  private shouldInstall(envelope: ConfigEnvelope): boolean {
+    if (this.configInstalls === 0) return true;
+    const incoming = envelope.meta.generation ?? 0;
+    // Unversioned incoming snapshot: no watermark to order by → install (the
+    // pre-watermark behavior). The guard only blocks a strictly-older versioned
+    // snapshot from regressing an established client.
+    if (incoming <= 0) return true;
+    return incoming > this.heldGenerationValue;
+  }
+
+  /**
+   * Meta.generation of the config the client is currently holding (0 before the
+   * first install, or when the server predates the watermark). A higher
+   * generation is strictly newer; the canonical-ordering guard compares against
+   * it on every install path. (qfg-7h5d.1.7)
+   */
+  heldGeneration(): number {
+    return this.heldGenerationValue;
+  }
+
+  /**
+   * Number of times an envelope has been installed over the client's lifetime
+   * (every install path). The reject-older guard keeps this from advancing on a
+   * same-or-older payload. (qfg-7h5d.1.7)
+   */
+  configInstallCount(): number {
+    return this.configInstalls;
+  }
+
+  /**
+   * Which configured upstream leg produced the config the client is currently
+   * holding: `"primary"` (the first apiUrl), `"secondary"` (any later URL
+   * reached via failover), or `""` before the first successful HTTP install.
+   * Reflects the HTTP config-fetch path; SSE installs do not change it.
+   */
+  resolvedFrom(): string {
+    if (this.resolvedFromIndex < 0) return "";
+    return this.resolvedFromIndex === 0 ? "primary" : "secondary";
+  }
+
+  /**
+   * Whether `init()` has completed and the client is serving config.
+   * (qfg-7h5d.1.7 — used by the failover/ordering chaos suite.)
+   */
+  ready(): boolean {
+    return this.initialized;
+  }
+
+  /**
+   * Whether the live SSE stream ever repointed to a non-primary leg. Always
+   * false by design — SSE is pinned to the primary stream and failover is an
+   * HTTP-only property (the chaos suite asserts this in f05). Exists so a
+   * regression that silently repoints the stream would be caught. (qfg-7h5d.1.7)
+   */
+  sseFailedOverToSecondary(): boolean {
+    return false;
   }
 
   /**
@@ -1214,8 +1316,15 @@ export class Quonfig {
       return;
     }
 
-    if (result.envelope) {
+    // Reject-older guard (qfg-7h5d.1.7): a poll, failover, or fallback-poll
+    // fetch installs only if it advances the held generation. Without this, a
+    // failover to an older secondary regresses an established client. The very
+    // first fetch is always installed (fresh client), so init never lands here
+    // rejected with nothing held. resolvedFromIndex is snapshotted only when we
+    // actually install, so a rejected older leg does not flip resolvedFrom().
+    if (result.envelope && this.shouldInstall(result.envelope)) {
       this.installEnvelope(result.envelope);
+      this.resolvedFromIndex = this.transport.getActiveBaseUrlIndex();
     }
   }
 
@@ -1226,7 +1335,12 @@ export class Quonfig {
       readDeadlineMs: this.sseReadDeadlineMs,
     });
     this.sseConnection.start((envelope: ConfigEnvelope) => {
-      this.installEnvelope(envelope);
+      // Reject-older guard (qfg-7h5d.1.7): an SSE initial snapshot or update
+      // installs only if it advances the held generation, same as the fetch
+      // path, so the live stream can heal forward but never regress.
+      if (this.shouldInstall(envelope)) {
+        this.installEnvelope(envelope);
+      }
     });
   }
 

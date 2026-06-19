@@ -35,6 +35,8 @@
     "test:watch": "vitest",
     "test:chaos": "scripts/run-chaos.sh",
     "chaos": "vitest run --config chaos/vitest.config.ts",
+    "test:chaos:failover": "scripts/run-failover-chaos.sh",
+    "chaos:failover": "vitest run --config chaos/vitest.failover.config.ts",
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build",
     "prettier": "prettier . -l",

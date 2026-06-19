@@ -18,6 +18,15 @@ const DEFAULT_DOMAIN = "quonfig.com";
  */
 const TELEMETRY_POST_TIMEOUT_MS = 3000;
 
+/**
+ * Default per-URL config-fetch deadline (qfg-7h5d.1.7). ~3s is short enough that
+ * a hung primary fails over to the secondary well inside a default 10s
+ * `initTimeout`, yet long enough to tolerate a slow-but-healthy upstream. This
+ * is a per-attempt deadline on the HTTP config path only — it does NOT touch the
+ * long-lived SSE stream, which keeps its own read deadline.
+ */
+export const DEFAULT_CONFIG_FETCH_TIMEOUT_MS = 3000;
+
 export type DomainOptions = { domain?: string };
 
 /**
@@ -81,6 +90,21 @@ export class Transport {
   private sdkKey: string;
   private logger: NormalizedLogger;
   private etag: string = "";
+  /**
+   * Index into `baseUrls` of the leg that last succeeded for `fetchConfigs`
+   * (0 = primary, >0 = a secondary reached via failover). Lets the client report
+   * which leg it resolved off (`resolvedFrom()`). Starts at 0 (primary).
+   */
+  private activeBaseUrlIndex: number = 0;
+  /**
+   * Per-URL deadline (ms) for a single `fetchConfigs` attempt. Each leg in the
+   * failover loop gets its own `AbortSignal.timeout(fetchTimeoutMs)`, so a hung
+   * upstream aborts fast and leaves budget to reach the next leg inside the
+   * caller's overall deadline (e.g. `initTimeout`). Defaults to
+   * DEFAULT_CONFIG_FETCH_TIMEOUT_MS; the client overwrites it from
+   * `configFetchTimeoutMs` at construction. (qfg-7h5d.1.7)
+   */
+  fetchTimeoutMs: number = DEFAULT_CONFIG_FETCH_TIMEOUT_MS;
   /**
    * Test-only override. When set, `getSSEUrl()` returns this value verbatim
    * instead of deriving it from apiUrls. Used to let tests point SSE at a
@@ -153,7 +177,17 @@ export class Transport {
         const configUrl = isDev
           ? `${baseUrl}/api/v2/configs?_=${Date.now()}`
           : `${baseUrl}/api/v2/configs`;
-        const fetchInit: RequestInit & { cache?: string } = { method: "GET", headers };
+        const fetchInit: RequestInit & { cache?: string } = {
+          method: "GET",
+          headers,
+          // Bound this single attempt so a hung leg (accepts the connection but
+          // never responds) aborts after fetchTimeoutMs instead of blocking on
+          // the caller's overall budget, starving the next leg. The signal stays
+          // active through the body read, so a slow body is bounded too. The
+          // abort surfaces as a rejected fetch, caught below → next URL is tried.
+          // (qfg-7h5d.1.7)
+          signal: AbortSignal.timeout(this.fetchTimeoutMs),
+        };
         if (isDev) {
           fetchInit.cache = "no-store";
         }
@@ -162,6 +196,7 @@ export class Transport {
         if (response.status === 304) {
           this.activeBaseUrl = baseUrl;
           this.activeStreamUrl = this.streamUrls[i];
+          this.activeBaseUrlIndex = i;
           return { notChanged: true };
         }
 
@@ -177,6 +212,7 @@ export class Transport {
 
         this.activeBaseUrl = baseUrl;
         this.activeStreamUrl = this.streamUrls[i];
+        this.activeBaseUrlIndex = i;
         const envelope = (await response.json()) as ConfigEnvelope;
         return { envelope, notChanged: false };
       } catch (err) {
@@ -216,6 +252,15 @@ export class Transport {
       const body = await response.text().catch(() => "");
       this.logger.warn(`Telemetry POST failed: ${response.status} ${body}`);
     }
+  }
+
+  /**
+   * Index into the configured base-URL list of the leg that last succeeded for
+   * `fetchConfigs` — 0 for the primary, >0 for a secondary reached via failover.
+   * The client snapshots this at install time to report `resolvedFrom()`.
+   */
+  getActiveBaseUrlIndex(): number {
+    return this.activeBaseUrlIndex;
   }
 
   /**
