@@ -77,7 +77,7 @@ function makeHedgeClient(primaryUrl: string, secondaryUrl: string): Quonfig {
     contextUploadMode: "none",
     onNoDefault: "ignore",
     initTimeout: 8000,
-    // Keep the default hedge timings (delay ~1s, abort ~6s); the slow upstreams
+    // Keep the default hedge timings (delay ~2s, abort ~6s); the slow upstreams
     // below sit at ~2.5s, between delay and abort, so the hedge fires and the
     // late leg still lands (not aborted).
   });

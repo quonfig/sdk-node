@@ -42,19 +42,19 @@ export const DEFAULT_CONFIG_FETCH_TIMEOUT_MS = 3000;
 /**
  * Default hedge delay (qfg-7h5d.1.14). How long the hedged config-fetch waits
  * for the primary leg before ALSO firing the secondary in parallel (it does not
- * cancel the primary). ~1s is below a realistic slow-but-alive primary's worst
+ * cancel the primary). ~2s is below a realistic slow-but-alive primary's worst
  * case yet far enough below the per-leg abort that a healthy sub-second primary
  * is NEVER hedged — the secondary stays a cold standby and a healthy system adds
  * zero secondary load. Tunable via `configFetchHedgeDelayMs`.
  */
-export const DEFAULT_CONFIG_FETCH_HEDGE_DELAY_MS = 1000;
+export const DEFAULT_CONFIG_FETCH_HEDGE_DELAY_MS = 2000;
 
 /**
  * Default per-leg hard-abort deadline on the hedged path (qfg-7h5d.1.14). MUST
  * exceed the longest healable primary latency so a late-but-newer primary heals
  * forward (rather than aborting), and SHOULD be < `initTimeout` so the init-path
  * heal leg is not clipped (the client logs a warning at construction otherwise).
- * The chaos o03/o05 rigs slow the primary by ~3s, which sits between the 1s
+ * The chaos o03/o05 rigs slow the primary by ~3s, which sits between the 2s
  * delay and this 6s abort, so the late primary is delivered (not aborted) and
  * the reject-older path is exercised. Tunable via `configFetchHedgeAbortMs`.
  */

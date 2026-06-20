@@ -4,7 +4,7 @@
 
 - **Parallel-failover hedge on the HTTP config-fetch path (qfg-7h5d.1.14).** The init/refresh config
   fetch is now a parallel hedge instead of a sequential primary→secondary failover. The primary
-  upstream is fired first; if it answers within the hedge delay (~1s) it wins and the **secondary is
+  upstream is fired first; if it answers within the hedge delay (~2s) it wins and the **secondary is
   never contacted** (cold standby, zero extra load on a healthy system). Only if the primary is slow
   past the hedge delay **or** errors fast does the SDK **also** fire the secondary **in parallel**
   (the primary is not cancelled). Whatever arrives is installed through the existing reject-older
@@ -12,7 +12,7 @@
   regresses an established client, and a late newer payload heals forward. `ready()` latches on the
   first successful install; a late-but-newer leg heals forward afterward. SSE is untouched — it
   never fails over and stays pinned to the primary stream.
-- **Two new additive options.** `configFetchHedgeDelayMs` (default 1000) tunes how long to wait for
+- **Two new additive options.** `configFetchHedgeDelayMs` (default 2000) tunes how long to wait for
   the primary before also firing the secondary in parallel. `configFetchHedgeAbortMs` (default 6000)
   is the per-leg hard-abort deadline; it must exceed the longest healable primary latency (so a
   late-but-newer primary heals forward rather than aborting) and should be below `initTimeout` (the

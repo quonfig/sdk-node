@@ -258,7 +258,7 @@ export interface QuonfigOptions {
    * wait for the primary leg before ALSO firing the secondary in parallel
    * (without cancelling the primary). A fast healthy primary answers well inside
    * this window, so the secondary is never contacted (cold standby, zero extra
-   * load). Default 1000ms. Additive and backward-compatible. Bounds the HTTP
+   * load). Default 2000ms. Additive and backward-compatible. Bounds the HTTP
    * config path only; it does not touch the long-lived SSE stream.
    * (qfg-7h5d.1.14)
    */
