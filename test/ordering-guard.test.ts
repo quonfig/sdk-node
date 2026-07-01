@@ -95,6 +95,54 @@ describe("reject-older install guard (o02 secondary-older)", () => {
   });
 });
 
+describe("install-guard carve-out: established client installs an unversioned snapshot (gen <= 0)", () => {
+  it("an established client at gen 42 installs an incoming gen<=0 payload instead of freezing", async () => {
+    // The server starts on a real positive generation, then flips to
+    // unversioned payloads. Distinct ETags per phase so the bumped body is
+    // never masked as a 304 by the transport's per-leg If-None-Match slot.
+    let body = envelopeJSON(42);
+    let etag = '"gen-42"';
+
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { ETag: etag, "Content-Type": "application/json" });
+      res.end(body);
+    });
+    const url = await listen(server);
+
+    const client = makeClient([url]);
+    try {
+      await client.init();
+      // Established on a real positive generation.
+      expect(client.heldGeneration()).toBe(42);
+      const establishedInstalls = client.configInstallCount();
+      expect(establishedInstalls).toBeGreaterThan(0);
+
+      // An unversioned snapshot arrives (generation 0 — a server that predates
+      // the generation watermark). It carries no ordering info, so the guard
+      // must NOT reject it as "older": the established client installs it
+      // (held falls to 0, install count advances) rather than freezing on 42.
+      body = envelopeJSON(0);
+      etag = '"gen-0"';
+      await refresh(client);
+      expect(client.configInstallCount()).toBe(establishedInstalls + 1);
+      expect(client.heldGeneration()).toBe(0);
+
+      // A payload with NO meta.generation field at all is equally unversioned
+      // (generation ?? 0 → 0) and also installs via the same carve-out.
+      body = JSON.stringify({
+        configs: [],
+        meta: { version: "no-generation", environment: "Production" },
+      });
+      etag = '"no-generation"';
+      await refresh(client);
+      expect(client.configInstallCount()).toBe(establishedInstalls + 2);
+      expect(client.heldGeneration()).toBe(0);
+    } finally {
+      await client.close().catch(() => {});
+    }
+  });
+});
+
 describe("install guard heals forward and seeds (o03/o04)", () => {
   it("seeds off the older snapshot, no-ops on same generation, heals forward to newer", async () => {
     let gen = 41; // fresh client seeds off the older snapshot first

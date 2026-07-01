@@ -1,7 +1,11 @@
 # Changelog
 
-## 1.1.0 - 2026-06-19
+## 1.1.0 - 2026-07-01
 
+- **Install-guard carve-out for unversioned snapshots.** A delivery payload whose `generation` is
+  absent or `<= 0` (e.g. from a server that predates the generation watermark) is installed by an
+  established client rather than rejected as older. Defensive back-compat guard — with servers that
+  emit true generations it never triggers.
 - **Parallel-failover hedge on the HTTP config-fetch path (qfg-7h5d.1.14).** The init/refresh config
   fetch is now a parallel hedge instead of a sequential primary→secondary failover. The primary
   upstream is fired first; if it answers within the hedge delay (~2s) it wins and the **secondary is
