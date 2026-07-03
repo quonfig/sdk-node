@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.1 - 2026-07-03
 
 - **SSE now survives non-200 responses (qfg-41nh.9).** The SDK owns SSE reconnection instead of
   delegating it to the `eventsource` package, which treats any non-200 response as terminal — a
