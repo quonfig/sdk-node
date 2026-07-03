@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **SSE now survives non-200 responses (qfg-41nh.9).** The SDK owns SSE reconnection instead of
+  delegating it to the `eventsource` package, which treats any non-200 response as terminal — a
+  single 502 from the edge during a deploy used to kill real-time updates for the process lifetime
+  (silently degrading to the 60s fallback poll). Every SSE failure now tears down and recreates the
+  connection with jittered exponential backoff (500ms doubling to a 30s cap, retrying forever),
+  matching sdk-go. This also replaces the previous constant ~3s reconnect delay on network failures.
+  The stream stays pinned to the primary stream URL; there is no rotation.
+- **Immediate fetch when the fallback poller engages after SSE loss (qfg-41nh.9).** When the Layer 2
+  HTTP poller engages after the 120s disconnect grace window, it now fetches immediately instead of
+  waiting a further full poll interval — first data after SSE loss arrives at ~120s (matching
+  sdk-go/java/net) instead of ~180s.
+
 ## 1.1.0 - 2026-07-01
 
 - **Install-guard carve-out for unversioned snapshots.** A delivery payload whose `generation` is
