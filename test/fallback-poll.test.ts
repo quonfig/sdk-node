@@ -148,6 +148,46 @@ describe("Quonfig — Layer 2 fallback poller", () => {
     expect(fetchSpy).toHaveBeenCalled();
   });
 
+  it("fires an immediate fetch when the poller engages after the disconnect grace window", async () => {
+    const initial = envelopeWithFlag("v1", false);
+    const polled = envelopeWithFlag("v2", true);
+
+    const fetchSpy = vi
+      .spyOn(Transport.prototype, "fetchFromUrlAt")
+      .mockResolvedValueOnce({ result: { envelope: initial, notChanged: false }, sourceIndex: 0 })
+      .mockResolvedValue({ result: { envelope: polled, notChanged: false }, sourceIndex: 0 });
+
+    const fakeOut: { value: FakeEventSource | null } = { value: null };
+    const quonfig = new Quonfig({
+      sdkKey: "test-sdk-key",
+      enableSSE: true,
+      fallbackPollEnabled: true,
+      fallbackPollIntervalMs: 60000,
+      collectEvaluationSummaries: false,
+      contextUploadMode: "none",
+      __testEventSourceFactory: makeEventSourceFactory(fakeOut),
+    } as any);
+
+    await quonfig.init();
+    await vi.advanceTimersByTimeAsync(10);
+    fakeOut.value!.onopen?.({}); // SSE successfully connected.
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // init fetch only
+
+    // Drop the connection, then let the 120s grace window elapse.
+    fakeOut.value!.onerror?.({ type: "error" });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect((quonfig as any).fallbackPollerActive()).toBe(true);
+
+    // By engage time the store is already ≥120s stale — the poller must fetch
+    // NOW, not after another full 60s interval (first data at ~120s after SSE
+    // loss, matching sdk-go's immediate fetch on engagement).
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(quonfig.isFeatureEnabled("build.dark-mode")).toBe(true);
+
+    await quonfig.close();
+  });
+
   it("does not start the fallback poller when SSE is healthy", async () => {
     const initial = envelopeWithFlag("v1", false);
     vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({

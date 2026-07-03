@@ -1471,13 +1471,14 @@ export class Quonfig {
           // Initial-connect failure — start polling now.
           this.engageFallbackPoller("initial-sse-failure");
         } else if (!this.fallbackPollerEngaged && !this.fallbackEngageTimer) {
-          // Connected → disconnected edge. Give the eventsource library
-          // 2x the poll interval to reconnect on its own (default 120s)
-          // before falling back to HTTP polling.
+          // Connected → disconnected edge. Give the SSE reconnect
+          // supervisor 2x the poll interval to re-establish the stream
+          // (default 120s) before falling back to HTTP polling.
           const grace = this.fallbackPollIntervalMs * 2;
           this.fallbackEngageTimer = setTimeout(() => {
             this.fallbackEngageTimer = undefined;
-            this.engageFallbackPoller("sse-disconnected-grace-elapsed");
+            // Immediate first poll: the store is already `grace` stale.
+            this.engageFallbackPoller("sse-disconnected-grace-elapsed", true);
           }, grace);
           if (
             this.fallbackEngageTimer &&
@@ -1503,14 +1504,23 @@ export class Quonfig {
     }
   }
 
-  /** Engage Layer 2 fallback polling. No-op if already engaged or disabled. */
-  private engageFallbackPoller(reason: string): void {
+  /**
+   * Engage Layer 2 fallback polling. No-op if already engaged or disabled.
+   *
+   * `immediateFirstPoll` fires a fetch right away instead of waiting a full
+   * poll interval. The grace-elapsed engage passes `true` — by then the store
+   * is already ≥120s stale, and waiting another 60s would put first data at
+   * ~180s after SSE loss vs ~120s in sdk-go/java/net (qfg-41nh.9). The
+   * boot-time engages (sse-disabled, initial-sse-failure) pass `false`
+   * because init() fetched moments earlier.
+   */
+  private engageFallbackPoller(reason: string, immediateFirstPoll = false): void {
     if (!this.fallbackPollEnabled || this.fallbackPollerEngaged) return;
     this.fallbackPollerEngaged = true;
     this.logger.warn(
       `[quonfig] SSE unavailable (${reason}); engaging HTTP fallback poll every ${this.fallbackPollIntervalMs}ms`
     );
-    this.startFallbackPolling();
+    this.startFallbackPolling(immediateFirstPoll);
   }
 
   /** Stop Layer 2 fallback polling. No-op if not engaged. */
@@ -1524,7 +1534,7 @@ export class Quonfig {
     this.logger.info(`[quonfig] HTTP fallback poll disengaged (${reason})`);
   }
 
-  private startFallbackPolling(): void {
+  private startFallbackPolling(immediateFirstPoll: boolean): void {
     const poll = (): void => {
       // If we were disengaged while a poll was in flight, abandon scheduling.
       if (!this.fallbackPollerEngaged) return;
@@ -1540,6 +1550,14 @@ export class Quonfig {
           }
         });
     };
+
+    if (immediateFirstPoll) {
+      // Immediate fetch on engagement so the first refresh doesn't wait
+      // another full interval — mirrors sdk-go's fallback_poller engage().
+      // `poll` schedules the next tick itself once the fetch settles.
+      poll();
+      return;
+    }
 
     this.pollTimer = setTimeout(poll, this.fallbackPollIntervalMs);
     if (this.pollTimer && typeof this.pollTimer === "object" && "unref" in this.pollTimer) {
