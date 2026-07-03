@@ -12,6 +12,8 @@ interface LiveSSEServer {
   emit: (envelope: ConfigEnvelope) => void;
   /** Forcibly close every active SSE response, simulating a network drop. */
   dropAll: () => void;
+  /** Respond to the next `count` SSE requests with the given status code. */
+  failNext: (count: number, status?: number) => void;
   /** Headers seen on each incoming SSE request, in arrival order. */
   observedHeaders: http.IncomingHttpHeaders[];
   close: () => Promise<void>;
@@ -22,10 +24,18 @@ function startSSEServer(): Promise<LiveSSEServer> {
     const clients: http.ServerResponse[] = [];
     const sockets = new Set<net.Socket>();
     const observedHeaders: http.IncomingHttpHeaders[] = [];
+    let failuresRemaining = 0;
+    let failureStatus = 502;
 
     const server = http.createServer((req, res) => {
       if (req.url?.startsWith("/api/v2/sse/config")) {
         observedHeaders.push(req.headers);
+        if (failuresRemaining > 0) {
+          failuresRemaining--;
+          res.writeHead(failureStatus, { "Content-Type": "text/plain" });
+          res.end("bad gateway");
+          return;
+        }
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -62,6 +72,10 @@ function startSSEServer(): Promise<LiveSSEServer> {
           for (const sock of sockets) sock.destroy();
           sockets.clear();
           clients.length = 0;
+        },
+        failNext: (count, status = 502) => {
+          failuresRemaining = count;
+          failureStatus = status;
         },
         close: () =>
           new Promise<void>((r) => {
@@ -136,6 +150,39 @@ describe("SSEConnection — live-server smoke test", () => {
     expect(states).toContain("disconnected");
     expect(received.map((e) => e.meta.version)).toContain("v1");
     expect(received.map((e) => e.meta.version)).toContain("v2");
+  }, 30_000);
+
+  it("recovers after a transient non-200 response (eventsource@4 goes CLOSED and never retries on its own)", async () => {
+    // One 502 from the edge — e.g. the Fly proxy during an api-delivery
+    // deploy. eventsource@4.1.0's failConnection sets readyState=CLOSED and
+    // scheduleReconnect early-returns on CLOSED, so without the SDK-owned
+    // recreate supervisor this kills SSE for the process lifetime
+    // (qfg-41nh.9).
+    srv.failNext(1, 502);
+
+    const transport = new Transport(["http://127.0.0.1"], "test-key");
+    (transport as any).__testStreamUrlOverride = `http://127.0.0.1:${srv.port}/api/v2/sse/config`;
+
+    const received: ConfigEnvelope[] = [];
+    const states: SSEConnectionState[] = [];
+    const sse = new SSEConnection(transport, undefined, {
+      onConnectionStateChange: (s) => states.push(s),
+    });
+
+    sse.start((env) => received.push(env));
+
+    // The 502 surfaces as an error...
+    await waitFor(() => states.includes("error"), 5000);
+
+    // ...and the SDK recreates the EventSource (first backoff sleep is
+    // ≤500ms) which then connects against the now-healthy server.
+    await waitFor(() => states.includes("connected"), 10_000);
+
+    // The recreated stream delivers events end-to-end.
+    srv.emit(envelope("v1"));
+    await waitFor(() => received.some((e) => e.meta.version === "v1"), 5000);
+
+    sse.close();
   }, 30_000);
 
   it("sends the SDK-key Basic auth header on the SSE request", async () => {
