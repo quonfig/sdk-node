@@ -59,9 +59,13 @@ describe("close() drains telemetry (qfg-vrfm)", () => {
     await quonfig.close();
 
     expect(postTelemetrySpy).toHaveBeenCalledTimes(1);
+    // arrayContaining (not an exact array): the same flush also carries the
+    // additive failover event (resolvedFromPrimary=1 from the HTTP init install,
+    // qfg-41nh.18). This test's contract is that the buffered eval summary is
+    // drained on close, so assert its presence without pinning the array length.
     expect(postTelemetrySpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        events: [
+        events: expect.arrayContaining([
           expect.objectContaining({
             summaries: expect.objectContaining({
               summaries: expect.arrayContaining([
@@ -69,7 +73,7 @@ describe("close() drains telemetry (qfg-vrfm)", () => {
               ]),
             }),
           }),
-        ],
+        ]),
       })
     );
 

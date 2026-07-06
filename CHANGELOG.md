@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Failover telemetry (qfg-41nh.18).** The SDK now folds failover-behavior counters into the
+  existing periodic telemetry flush so the failover dashboards can be built. A new `failover` event
+  reports, per flush window: `hedgeFired` (config-fetch cycles where the parallel hedge fired its
+  secondary leg), `guardRejected` (installs dropped by the reject-older ordering guard, on both the
+  HTTP fetch path and the SSE message path), and `resolvedFromPrimary` / `resolvedFromSecondary`
+  (which leg served each successful HTTP install; SSE/datadir installs are not counted). The event
+  is additive on the wire — an older telemetry backend strips the unknown field — and is emitted
+  only when at least one counter is non-zero, so a steady-state client streaming updates over SSE
+  sends nothing. It rides the existing telemetry opt-out (no sdk key, or every collector disabled,
+  disables it too). No new options or dependencies; near-zero overhead.
+
 ## 1.1.1 - 2026-07-03
 
 - **SSE now survives non-200 responses (qfg-41nh.9).** The SDK owns SSE reconnection instead of

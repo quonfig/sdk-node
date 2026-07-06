@@ -4,6 +4,7 @@ import { normalizeLogger, type Logger, type NormalizedLogger } from "../sdkLogge
 import type { EvaluationSummaryCollector } from "./evaluationSummaries";
 import type { ContextShapeCollector } from "./contextShapes";
 import type { ExampleContextCollector } from "./exampleContexts";
+import type { FailoverCollector } from "./failoverAggregator";
 
 /**
  * TelemetryReporter periodically drains collected telemetry data and sends it
@@ -15,6 +16,7 @@ export class TelemetryReporter {
   private evaluationSummaries: EvaluationSummaryCollector;
   private contextShapes: ContextShapeCollector;
   private exampleContexts: ExampleContextCollector;
+  private failover: FailoverCollector;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private initialDelay: number;
   private maxDelay: number;
@@ -28,6 +30,7 @@ export class TelemetryReporter {
     evaluationSummaries: EvaluationSummaryCollector;
     contextShapes: ContextShapeCollector;
     exampleContexts: ExampleContextCollector;
+    failover: FailoverCollector;
     initialDelay?: number;
     maxDelay?: number;
     logger?: Logger;
@@ -37,6 +40,7 @@ export class TelemetryReporter {
     this.evaluationSummaries = args.evaluationSummaries;
     this.contextShapes = args.contextShapes;
     this.exampleContexts = args.exampleContexts;
+    this.failover = args.failover;
     this.initialDelay = args.initialDelay ?? 8000;
     this.maxDelay = args.maxDelay ?? 600000;
     this.currentDelay = this.initialDelay;
@@ -99,6 +103,10 @@ export class TelemetryReporter {
     // Drain example contexts
     const examplesEvent = this.exampleContexts.drain();
     if (examplesEvent) events.push(examplesEvent);
+
+    // Drain failover counters (undefined unless the window saw failover activity)
+    const failoverEvent = this.failover.drain();
+    if (failoverEvent) events.push(failoverEvent);
 
     if (events.length === 0) return;
 

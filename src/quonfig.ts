@@ -41,6 +41,7 @@ import { loadQuonfigUserContext } from "./devContext";
 import { EvaluationSummaryCollector } from "./telemetry/evaluationSummaries";
 import { ContextShapeCollector } from "./telemetry/contextShapes";
 import { ExampleContextCollector } from "./telemetry/exampleContexts";
+import { FailoverCollector } from "./telemetry/failoverAggregator";
 import { TelemetryReporter } from "./telemetry/reporter";
 
 const DEFAULT_FALLBACK_POLL_INTERVAL_MS = 60000;
@@ -258,6 +259,13 @@ export class Quonfig {
   private evaluationSummaries: EvaluationSummaryCollector;
   private contextShapes: ContextShapeCollector;
   private exampleContexts: ExampleContextCollector;
+  /**
+   * Failover-behavior counters (hedge-fired / guard-rejected / resolved-from).
+   * Instantiated in the constructor so it exists before the initial fetch, and
+   * gated on the same telemetry opt-out as the reporter — the reporter drains it
+   * into the periodic flush only when telemetry is enabled. (qfg-41nh.18)
+   */
+  private failover: FailoverCollector;
 
   constructor(options: QuonfigOptions) {
     this.sdkKey = options.sdkKey ?? process.env.QUONFIG_BACKEND_SDK_KEY ?? "";
@@ -394,6 +402,25 @@ export class Quonfig {
     );
     this.contextShapes = new ContextShapeCollector(contextUploadMode);
     this.exampleContexts = new ExampleContextCollector(contextUploadMode);
+    // Failover counters ride any enabled telemetry stream regardless of the
+    // eval/context opt-outs, but a full telemetry opt-out disables them too.
+    this.failover = new FailoverCollector(this.isTelemetryEnabled());
+  }
+
+  /**
+   * Whether the telemetry reporter runs: an sdk key is present (a workspace to
+   * attribute to) AND at least one collector is enabled. Mirrors sdk-go's
+   * Options.TelemetryEnabled(); the single source of truth for both the failover
+   * collector's enabled state and whether {@link startTelemetry} starts the
+   * reporter. (qfg-41nh.18)
+   */
+  private isTelemetryEnabled(): boolean {
+    if (!this.sdkKey) return false;
+    return (
+      this.evaluationSummaries.isEnabled() ||
+      this.contextShapes.isEnabled() ||
+      this.exampleContexts.isEnabled()
+    );
   }
 
   /**
@@ -1388,6 +1415,9 @@ export class Quonfig {
         // the upstream holding the config; a rejected older leg never flips it.
         // markActiveLeg keeps getActiveBaseUrlIndex()/SSE consistent.
         this.resolvedFromIndex = leg.sourceIndex;
+        // Failover observability: record which leg (primary/secondary) served
+        // the config now held (qfg-41nh.18).
+        this.failover.recordResolvedFrom(leg.sourceIndex);
         // SSE stays pinned to the primary stream regardless of which HTTP leg
         // won (f05); track the base-url index for resolvedFrom() but not the
         // stream.
@@ -1396,6 +1426,11 @@ export class Quonfig {
           installedOnce = true;
           resolveFirstInstall();
         }
+      } else {
+        // 200 dropped by the reject-older guard (equal-or-older payload): the
+        // fetch succeeded, only the install was a no-op. Count the guard
+        // rejection for failover observability (qfg-41nh.18).
+        this.failover.recordGuardRejected();
       }
     };
 
@@ -1405,6 +1440,11 @@ export class Quonfig {
     // this method's caller (init) has moved on. Once all legs settle with nothing
     // installed, resolve (all-304 no-op) or reject (every leg failed).
     const allSettled = this.transport.fetchConfigsHedged(onLeg).then(() => {
+      // Failover observability: if more than the primary leg fired, the hedge
+      // fired its secondary leg this cycle (the primary was slow or errored).
+      // Recorded once per cycle regardless of which leg's payload won the guard
+      // (qfg-41nh.18).
+      if (fired > 1) this.failover.recordHedgeFired();
       if (installedOnce) return;
       if (fired > 0 && failures === fired) {
         rejectAllFailed(lastError ?? new Error("All API URLs failed"));
@@ -1431,6 +1471,12 @@ export class Quonfig {
       // path, so the live stream can heal forward but never regress.
       if (this.shouldInstall(envelope)) {
         this.installEnvelope(envelope);
+      } else {
+        // Guard-rejected SSE message (equal-or-older): the stream is live, so
+        // count the rejection for failover observability. SSE installs carry no
+        // HTTP leg, so resolved-from is intentionally not recorded here.
+        // (qfg-41nh.18)
+        this.failover.recordGuardRejected();
       }
     });
   }
@@ -1576,19 +1622,13 @@ export class Quonfig {
   }
 
   private startTelemetry(): void {
-    // No-account local mode: when the SDK was constructed with only datadir/
-    // datafile and no sdkKey, there's nowhere to post telemetry and no
-    // workspace to attribute it to. Skip the reporter entirely so an
-    // offline/open-source consumer doesn't generate failed POST attempts to
-    // telemetry.quonfig.com on every eval.
-    if (!this.sdkKey) return;
-
-    const anyEnabled =
-      this.evaluationSummaries.isEnabled() ||
-      this.contextShapes.isEnabled() ||
-      this.exampleContexts.isEnabled();
-
-    if (!anyEnabled) return;
+    // No-account local mode (only datadir/datafile, no sdkKey) has nowhere to
+    // post telemetry and no workspace to attribute it to, and a full collector
+    // opt-out means there's nothing to send — in both cases skip the reporter
+    // so an offline/open-source consumer doesn't generate failed POST attempts
+    // to telemetry.quonfig.com. The failover collector shares this exact gate,
+    // so when the reporter is skipped its record calls are no-ops.
+    if (!this.isTelemetryEnabled()) return;
 
     this.telemetryReporter = new TelemetryReporter({
       transport: this.transport,
@@ -1596,6 +1636,7 @@ export class Quonfig {
       evaluationSummaries: this.evaluationSummaries,
       contextShapes: this.contextShapes,
       exampleContexts: this.exampleContexts,
+      failover: this.failover,
       logger: this.logger,
     });
 

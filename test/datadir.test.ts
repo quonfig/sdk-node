@@ -454,10 +454,14 @@ describe("Quonfig datadir", () => {
     await quonfig.flush();
 
     expect(postTelemetrySpy).toHaveBeenCalledTimes(1);
+    // arrayContaining (not an exact array): the same flush also carries the
+    // additive failover event (resolvedFromPrimary=1 from the HTTP init install,
+    // qfg-41nh.18). The contract here is that the eval summary is posted on
+    // flush, so assert its presence without pinning the array length.
     expect(postTelemetrySpy).toHaveBeenCalledWith(
       expect.objectContaining({
         instanceHash: expect.any(String),
-        events: [
+        events: expect.arrayContaining([
           expect.objectContaining({
             summaries: expect.objectContaining({
               summaries: expect.arrayContaining([
@@ -467,7 +471,7 @@ describe("Quonfig datadir", () => {
               ]),
             }),
           }),
-        ],
+        ]),
       })
     );
 

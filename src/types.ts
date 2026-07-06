@@ -440,6 +440,24 @@ export interface ExampleContextEntry {
   };
 }
 
+/**
+ * Per-flush-window failover counters (qfg-41nh.18). Additive on the wire — an
+ * older api-telemetry strips the unknown `failover` field — and only sent when
+ * at least one counter is non-zero, so a healthy client emits nothing. The
+ * camelCase keys are the exact shape api-telemetry's Zod schema + the ClickHouse
+ * MV parse; they must match across every SDK. `start`/`end` are unix millis,
+ * matching the eval-summary window convention.
+ */
+export interface FailoverEvent {
+  start: number;
+  end: number;
+  hedgeFired: number;
+  guardRejected: number;
+  resolvedFromPrimary: number;
+  resolvedFromSecondary: number;
+  resolvedFromLkg: number;
+}
+
 export interface TelemetryEvent {
   summaries?: {
     start: number;
@@ -452,6 +470,7 @@ export interface TelemetryEvent {
   exampleContexts?: {
     examples: ExampleContextEntry[];
   };
+  failover?: FailoverEvent;
 }
 
 export interface TelemetryPayload {
