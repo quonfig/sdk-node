@@ -283,6 +283,18 @@ export class Quonfig {
     this.enableSSE = options.enableSSE ?? true;
     this.logger = normalizeLogger(options.logger);
 
+    // A single explicit apiUrls entry disables automatic failover. The default
+    // (and every QUONFIG_DOMAIN-derived) list carries both a primary and a
+    // secondary leg, and the SDK hedges/fails over between them. An explicit
+    // `apiUrls` replaces that list wholesale, so a one-entry override silently
+    // drops the secondary. Warn once at init; do NOT warn on the default or the
+    // two-URL derived list.
+    if (options.apiUrls !== undefined && this.apiUrls.length < 2) {
+      this.logger.warn(
+        "[quonfig] explicit apiUrls disables automatic failover to the secondary; pass both primary and secondary URLs to keep it"
+      );
+    }
+
     // Map deprecated enablePolling/pollInterval onto the new fallback options.
     // The behavior change (parallel → fallback-only) is intentional per the
     // sdk-hardening plan; alpha phase, no semver hold (resolved Q1).

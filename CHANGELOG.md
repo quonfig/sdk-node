@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Warning when an explicit `apiUrls` disables failover (qfg-41nh.26).** The default (and every
+  `QUONFIG_DOMAIN`-derived) `apiUrls` list carries a primary and a secondary leg, and the SDK
+  hedges/fails over between them. An explicit `apiUrls` with a single entry silently dropped the
+  secondary; the SDK now logs a one-line WARN at init pointing the caller at the fix (pass both a
+  primary and a secondary URL). Behavior is otherwise unchanged; no new dependencies. A new README
+  "Failover & QUONFIG_DOMAIN" section documents the `QUONFIG_DOMAIN` derivation and the failover
+  model.
 - **Failover telemetry (qfg-41nh.18).** The SDK now folds failover-behavior counters into the
   existing periodic telemetry flush so the failover dashboards can be built. A new `failover` event
   reports, per flush window: `hedgeFired` (config-fetch cycles where the parallel hedge fired its

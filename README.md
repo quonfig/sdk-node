@@ -90,6 +90,39 @@ Resolution order for URLs (highest wins):
    `https://telemetry.${DOMAIN}`).
 3. Hardcoded default `quonfig.com`.
 
+## Failover & QUONFIG_DOMAIN
+
+By default the SDK derives every hostname from `QUONFIG_DOMAIN` (default `quonfig.com`):
+
+```
+Role                       URL
+-------------------------  ---------------------------------------
+Config fetch (primary)     https://primary.quonfig.com
+SSE stream (primary)       https://stream.primary.quonfig.com
+Config fetch (secondary)   https://secondary.quonfig.com
+SSE stream (secondary)     https://stream.secondary.quonfig.com
+Telemetry                  https://telemetry.quonfig.com
+```
+
+Set `QUONFIG_DOMAIN` to move all of them together (e.g. `QUONFIG_DOMAIN=quonfig-staging.com`).
+**Automatic failover and hedging between the primary and the secondary are on by default** — the
+secondary runs on separate infrastructure, and the SDK fails over to it if the primary is
+unreachable and hedges to it if the primary is slow.
+
+The `apiUrls` option replaces the derived list wholesale. To keep automatic failover with custom
+URLs, **pass both a primary and a secondary URL**:
+
+```typescript
+new Quonfig({
+  sdkKey: "your-sdk-key",
+  apiUrls: ["https://primary.your-proxy.example", "https://secondary.your-proxy.example"],
+});
+```
+
+A single `apiUrls` entry disables failover, and the SDK logs a warning at init. See
+[Reliability](https://docs.quonfig.com/docs/explanations/architecture/resiliency) for the full
+model.
+
 ## SSE: real-time updates
 
 When `enableSSE: true` (the default), the SDK opens a Server-Sent Events stream to
