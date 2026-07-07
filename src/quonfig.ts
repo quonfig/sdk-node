@@ -796,10 +796,23 @@ export class Quonfig {
   }
 
   /**
-   * Wall-clock time of the most recent envelope install, from any source (SSE
-   * push, fallback poll, or initial fetch / datadir load).
+   * Wall-clock time of the most recent successful refresh — the last moment the
+   * SDK confirmed its config source was reachable and its held config current.
+   * This is a LIVENESS signal, not an install counter (qfg-41nh.11):
    *
-   * Returns `undefined` if no envelope has been installed yet.
+   * - any envelope install (initial fetch, SSE push, fallback poll, datadir
+   *   load/reload) advances it, and
+   * - so does an HTTP config fetch that completed successfully WITHOUT
+   *   installing — a 304 Not Modified, or a 200 the reject-older guard dropped
+   *   as equal-or-older — and a received-and-processed SSE message that was a
+   *   guard no-op. In all of those the source answered and the held config was
+   *   confirmed current.
+   *
+   * Transport errors never advance it. Returns `undefined` before the first
+   * successful refresh.
+   *
+   * Without this, a healthy long-lived client parked on 304s under-reports
+   * liveness — the stamp freezes even though every fetch succeeds.
    *
    * **Diagnostic only.** Do NOT wire this into a Kubernetes liveness probe —
    * a transient network blip will trip any freshness threshold and cause a
@@ -808,6 +821,18 @@ export class Quonfig {
    */
   lastSuccessfulRefresh(): Date | undefined {
     return this.lastSuccessfulRefreshAt;
+  }
+
+  /**
+   * Stamp "now" as the most recent successful refresh. Called by
+   * {@link Quonfig.installEnvelope} for installs (inline), and directly at the
+   * successful-but-NOT-installed sites: a 304, a 200 dropped by the
+   * reject-older guard, or a guard-no-op'd SSE message. Transport errors never
+   * call it. Callers on the fetch/SSE paths must stamp ONLY for the
+   * not-installed outcomes so an install never double-stamps. (qfg-41nh.11)
+   */
+  private recordSuccessfulRefresh(): void {
+    this.lastSuccessfulRefreshAt = new Date();
   }
 
   /**
@@ -1252,6 +1277,11 @@ export class Quonfig {
    * Apply a freshly received envelope to the store, advance the environment id,
    * record the wall-clock refresh time (surfaced via {@link Quonfig.lastSuccessfulRefresh}),
    * and notify the user's `onConfigUpdate` callback.
+   *
+   * Every install stamps `lastSuccessfulRefreshAt` here — callers on the
+   * fetch/SSE paths must therefore only stamp separately for
+   * successful-but-NOT-installed outcomes (a 304, or a guard-rejected payload),
+   * never both (qfg-41nh.11).
    */
   private installEnvelope(envelope: ConfigEnvelope): void {
     this.store.update(envelope);
@@ -1420,7 +1450,14 @@ export class Quonfig {
         return;
       }
       const res = leg.result!;
-      if (res.notChanged || !res.envelope) return;
+      if (res.notChanged) {
+        // 304 Not Modified: the leg answered and confirmed the held config is
+        // current — a successful refresh with nothing to install. Liveness
+        // advances even though no envelope was applied (qfg-41nh.11).
+        this.recordSuccessfulRefresh();
+        return;
+      }
+      if (!res.envelope) return;
       if (this.shouldInstall(res.envelope)) {
         this.installEnvelope(res.envelope);
         // Snapshot the leg that actually installed so resolvedFrom() reflects
@@ -1440,8 +1477,10 @@ export class Quonfig {
         }
       } else {
         // 200 dropped by the reject-older guard (equal-or-older payload): the
-        // fetch succeeded, only the install was a no-op. Count the guard
-        // rejection for failover observability (qfg-41nh.18).
+        // fetch succeeded, only the install was a no-op — so liveness still
+        // advances (qfg-41nh.11). Count the guard rejection for failover
+        // observability too (qfg-41nh.18).
+        this.recordSuccessfulRefresh();
         this.failover.recordGuardRejected();
       }
     };
@@ -1477,20 +1516,34 @@ export class Quonfig {
       eventSourceFactory: this.testEventSourceFactory,
       readDeadlineMs: this.sseReadDeadlineMs,
     });
-    this.sseConnection.start((envelope: ConfigEnvelope) => {
-      // Reject-older guard (qfg-7h5d.1.7): an SSE initial snapshot or update
-      // installs only if it advances the held generation, same as the fetch
-      // path, so the live stream can heal forward but never regress.
-      if (this.shouldInstall(envelope)) {
-        this.installEnvelope(envelope);
-      } else {
-        // Guard-rejected SSE message (equal-or-older): the stream is live, so
-        // count the rejection for failover observability. SSE installs carry no
-        // HTTP leg, so resolved-from is intentionally not recorded here.
-        // (qfg-41nh.18)
-        this.failover.recordGuardRejected();
-      }
-    });
+    this.sseConnection.start((envelope: ConfigEnvelope) => this.handleSSEEnvelope(envelope));
+  }
+
+  /**
+   * Sink for every received-and-parsed SSE config message (initial snapshot or
+   * update). Either it advances the held generation and installs, or the
+   * reject-older guard drops it as equal-or-older — but either way the message
+   * was received and processed, so the stream proved live and the held config
+   * current: it counts as a successful refresh (qfg-41nh.11). Connection-level
+   * SSE failures never reach here — they flow through onConnectionStateChange
+   * and do not stamp.
+   */
+  private handleSSEEnvelope(envelope: ConfigEnvelope): void {
+    // Reject-older guard (qfg-7h5d.1.7): an SSE initial snapshot or update
+    // installs only if it advances the held generation, same as the fetch
+    // path, so the live stream can heal forward but never regress.
+    if (this.shouldInstall(envelope)) {
+      // installEnvelope stamps lastSuccessfulRefreshAt itself.
+      this.installEnvelope(envelope);
+    } else {
+      // Guard-rejected SSE message (equal-or-older): nothing installs, but the
+      // message was received and processed, so liveness still advances
+      // (qfg-41nh.11). Count the rejection for failover observability too; SSE
+      // installs carry no HTTP leg, so resolved-from is not recorded here
+      // (qfg-41nh.18).
+      this.recordSuccessfulRefresh();
+      this.failover.recordGuardRejected();
+    }
   }
 
   /**
