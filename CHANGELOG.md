@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 - 2026-07-08
 
 - **`lastSuccessfulRefresh()` now tracks liveness, not just installs (qfg-41nh.11).** The stamp is a
   liveness signal — the last moment the SDK confirmed its config source reachable and its held
