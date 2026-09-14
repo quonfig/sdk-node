@@ -9,6 +9,7 @@ import { TelemetryReporter } from "../src/telemetry/reporter";
 import { EvaluationSummaryCollector } from "../src/telemetry/evaluationSummaries";
 import { ContextShapeCollector } from "../src/telemetry/contextShapes";
 import { ExampleContextCollector } from "../src/telemetry/exampleContexts";
+import type { ConfigEnvelope } from "../src/types";
 
 /**
  * Failover telemetry emission (qfg-41nh.18). Mirrors sdk-go's
@@ -262,6 +263,180 @@ describe("failover telemetry — client-level (qfg-41nh.18)", () => {
       expect(f.resolvedFromSecondary).toBe(1);
       expect(f.resolvedFromPrimary).toBe(0);
       expect(f.resolvedFromLkg).toBe(0);
+    } finally {
+      await client.close().catch(() => {});
+    }
+  });
+});
+
+// ---- Equal-generation re-delivery is NOT a guard rejection (qfg-rr5b) ----
+
+/**
+ * Only a STRICTLY older payload counts as guardRejected (Jeff's cross-SDK
+ * decision on qfg-rr5b, 2026-09-11). An EQUAL-generation re-delivery — an SSE
+ * reconnect resend, a cold-ETag poll, the fallback poller's engage-time fetch —
+ * is a silent no-op: still not installed, still advances liveness exactly where
+ * it did before, but NOT counted. `guardRejected` feeds the `sdk_failover`
+ * alerting signal, where it must mean "a leg tried to move us backwards".
+ */
+
+/** Drive the SSE envelope sink directly (the sink for every parsed SSE message). */
+function driveSSE(client: Quonfig, envelope: ConfigEnvelope): void {
+  (client as unknown as { handleSSEEnvelope(e: ConfigEnvelope): void }).handleSSEEnvelope(envelope);
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe("guardRejected counts strictly-older payloads only (qfg-rr5b)", () => {
+  it("does NOT count an equal-generation re-delivery on the HTTP fetch path, but still advances liveness", async () => {
+    // A fresh ETag on every response makes each fetch a full 200 at the SAME
+    // generation — the cold-ETag poll / fallback-poller engage-fetch shape.
+    let req = 0;
+    const server = http.createServer((_req, res) => {
+      req++;
+      res.writeHead(200, { ETag: `"gen-42-${req}"`, "Content-Type": "application/json" });
+      res.end(envelopeJSON(42));
+    });
+    const url = await listen(server);
+
+    const captured: any[] = [];
+    vi.spyOn(Transport.prototype, "postTelemetry").mockImplementation(async (p: any) => {
+      captured.push(p);
+    });
+
+    const client = makeClient([url]);
+    try {
+      await client.init();
+      expect(client.heldGeneration()).toBe(42);
+      const installs = client.configInstallCount();
+      const firstStamp = client.lastSuccessfulRefresh();
+      expect(firstStamp).toBeInstanceOf(Date);
+
+      // Two same-generation re-deliveries. Both are dropped by the guard.
+      await sleep(5);
+      await refresh(client);
+      await refresh(client);
+
+      // Not installed, held config unmoved...
+      expect(client.configInstallCount()).toBe(installs);
+      expect(client.heldGeneration()).toBe(42);
+      // ...but liveness still advanced, exactly as before (qfg-41nh.11).
+      expect(client.lastSuccessfulRefresh()!.getTime()).toBeGreaterThan(firstStamp!.getTime());
+
+      await client.flush();
+
+      const f = failoverFrom(captured);
+      expect(f).toBeDefined();
+      expect(f.resolvedFromPrimary).toBe(1); // the init install
+      expect(f.guardRejected).toBe(0);
+    } finally {
+      await client.close().catch(() => {});
+    }
+  });
+
+  it("does NOT count an equal-generation SSE re-delivery (reconnect resend), but still advances liveness", async () => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { ETag: '"gen-42"', "Content-Type": "application/json" });
+      res.end(envelopeJSON(42));
+    });
+    const url = await listen(server);
+
+    const captured: any[] = [];
+    vi.spyOn(Transport.prototype, "postTelemetry").mockImplementation(async (p: any) => {
+      captured.push(p);
+    });
+
+    const client = makeClient([url]);
+    try {
+      await client.init();
+      expect(client.heldGeneration()).toBe(42);
+      const installs = client.configInstallCount();
+      const firstStamp = client.lastSuccessfulRefresh();
+
+      // api-delivery's sendInitialConfig re-sends the current envelope on every
+      // connect, so every reconnect hands the client the generation it holds.
+      const env42 = JSON.parse(envelopeJSON(42)) as ConfigEnvelope;
+      await sleep(5);
+      driveSSE(client, env42);
+      driveSSE(client, env42);
+
+      expect(client.configInstallCount()).toBe(installs);
+      expect(client.heldGeneration()).toBe(42);
+      expect(client.lastSuccessfulRefresh()!.getTime()).toBeGreaterThan(firstStamp!.getTime());
+
+      await client.flush();
+
+      const f = failoverFrom(captured);
+      expect(f).toBeDefined();
+      expect(f.resolvedFromPrimary).toBe(1); // the init install; SSE records none
+      expect(f.guardRejected).toBe(0);
+    } finally {
+      await client.close().catch(() => {});
+    }
+  });
+
+  it("DOES count a strictly older SSE payload as guardRejected", async () => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { ETag: '"gen-42"', "Content-Type": "application/json" });
+      res.end(envelopeJSON(42));
+    });
+    const url = await listen(server);
+
+    const captured: any[] = [];
+    vi.spyOn(Transport.prototype, "postTelemetry").mockImplementation(async (p: any) => {
+      captured.push(p);
+    });
+
+    const client = makeClient([url]);
+    try {
+      await client.init();
+      expect(client.heldGeneration()).toBe(42);
+      const installs = client.configInstallCount();
+
+      // A stale stream tries to move the client backwards: that IS the thing
+      // guardRejected exists to alert on.
+      driveSSE(client, JSON.parse(envelopeJSON(41)) as ConfigEnvelope);
+
+      expect(client.configInstallCount()).toBe(installs);
+      expect(client.heldGeneration()).toBe(42);
+
+      await client.flush();
+
+      const f = failoverFrom(captured);
+      expect(f).toBeDefined();
+      expect(f.guardRejected).toBe(1);
+    } finally {
+      await client.close().catch(() => {});
+    }
+  });
+
+  it("never counts an unversioned (generation <= 0) snapshot — the carve-out installs it", async () => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { ETag: '"gen-42"', "Content-Type": "application/json" });
+      res.end(envelopeJSON(42));
+    });
+    const url = await listen(server);
+
+    const captured: any[] = [];
+    vi.spyOn(Transport.prototype, "postTelemetry").mockImplementation(async (p: any) => {
+      captured.push(p);
+    });
+
+    const client = makeClient([url]);
+    try {
+      await client.init();
+      const installs = client.configInstallCount();
+
+      // A pre-watermark server's snapshot carries no ordering information, so
+      // the guard can't call it older: it installs, and nothing is counted.
+      driveSSE(client, JSON.parse(envelopeJSON(0)) as ConfigEnvelope);
+      expect(client.configInstallCount()).toBe(installs + 1);
+
+      await client.flush();
+
+      const f = failoverFrom(captured);
+      expect(f).toBeDefined();
+      expect(f.guardRejected).toBe(0);
     } finally {
       await client.close().catch(() => {});
     }

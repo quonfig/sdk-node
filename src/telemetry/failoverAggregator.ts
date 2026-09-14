@@ -3,9 +3,9 @@ import type { TelemetryEvent } from "../types";
 /**
  * FailoverCollector accumulates failover-behavior counters over a flush window:
  * how many config-fetch cycles fired the hedge's secondary leg, how many
- * installs the reject-older ordering guard dropped, and which upstream leg
- * resolved each successful HTTP install. Every counter is additive and carries
- * no user data.
+ * strictly-older installs the reject-older ordering guard dropped (qfg-rr5b),
+ * and which upstream leg resolved each successful HTTP install. Every counter is
+ * additive and carries no user data.
  *
  * It mirrors sdk-go's internal/telemetry FailoverAggregator: the record methods
  * are called directly from the failover call sites (per config-refresh, not
@@ -53,8 +53,12 @@ export class FailoverCollector {
   }
 
   /**
-   * Record one install dropped by the reject-older ordering guard (an
-   * equal-or-older snapshot on any install path, HTTP or SSE).
+   * Record one install dropped by the reject-older ordering guard because the
+   * incoming snapshot was STRICTLY older than the held generation, on any
+   * install path (HTTP or SSE). An equal-generation re-delivery is also dropped
+   * by the guard but is deliberately NOT recorded here — it is expected
+   * steady-state traffic (an SSE reconnect resend, a cold-ETag poll), not an
+   * upstream trying to move the client backwards (qfg-rr5b).
    */
   recordGuardRejected(): void {
     if (!this.enabled) return;

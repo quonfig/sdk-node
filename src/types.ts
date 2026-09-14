@@ -447,6 +447,10 @@ export interface ExampleContextEntry {
  * camelCase keys are the exact shape api-telemetry's Zod schema + the ClickHouse
  * MV parse; they must match across every SDK. `start`/`end` are unix millis,
  * matching the eval-summary window convention.
+ *
+ * `guardRejected` counts only STRICTLY older payloads dropped by the
+ * reject-older guard — an equal-generation re-delivery is a silent no-op
+ * (qfg-rr5b). The wire shape itself is unchanged.
  */
 export interface FailoverEvent {
   start: number;

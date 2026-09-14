@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.1 - 2026-09-14
+
+- **`guardRejected` now counts only a STRICTLY older payload (qfg-rr5b, qfg-bcgf).** The
+  reject-older ordering guard drops any envelope that does not advance the held generation, and
+  1.2.0 counted every one of those drops as `guardRejected` in the `failover` telemetry event. Most
+  of them were not regressions at all: api-delivery re-sends the current envelope on every SSE
+  connect, and a config poll returns a full 200 at the same generation whenever the per-leg ETag
+  slot is cold (a fresh transport, a reconnect, the fallback poller's engage-time fetch). An
+  equal-generation re-delivery is now a silent no-op — still not installed, and it still advances
+  `lastSuccessfulRefresh()` exactly where it did before — and only an incoming generation _strictly
+  less than_ the held generation is counted, which is the case the `sdk_failover` signal exists to
+  alert on ("a leg tried to move us backwards"). The unversioned carve-out (incoming generation
+  absent or 0, a pre-watermark server) is unchanged: those snapshots install and are never counted.
+  **Expect `guardRejected` to read LOWER on 1.2.1 than on 1.2.0 for the same traffic** — the drop is
+  this narrowing, not a change in upstream behavior. Nothing else moved: no wire-shape, ClickHouse,
+  or dashboard-query change, no public API change, and no new dependencies. Matches the cross-SDK
+  rule shipped in sdk-ruby 1.4.1 and sdk-python 1.4.1.
+
 ## 1.2.0 - 2026-07-08
 
 - **`lastSuccessfulRefresh()` now tracks liveness, not just installs (qfg-41nh.11).** The stamp is a

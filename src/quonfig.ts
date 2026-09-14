@@ -1328,6 +1328,31 @@ export class Quonfig {
   }
 
   /**
+   * Whether a guard-rejected envelope was STRICTLY older than the held
+   * generation — i.e. an upstream actually tried to move this client backwards.
+   * That is the only outcome `guardRejected` counts (qfg-rr5b).
+   *
+   * An EQUAL-generation re-delivery is deliberately not counted: api-delivery's
+   * SSE `sendInitialConfig` re-sends the current envelope on every connect, and
+   * a config poll returns a full 200 at the same generation whenever the
+   * per-leg ETag slot is cold (a fresh transport, a reconnect, the fallback
+   * poller's engage-time fetch). All of that is expected steady-state traffic,
+   * so counting it polluted the `sdk_failover` signal, where `guardRejected` is
+   * supposed to mean "a leg tried to move us backwards". It stays a silent
+   * no-op: not installed, and liveness still advances at the call sites exactly
+   * as it did before (qfg-41nh.11).
+   *
+   * The gen<=0 unversioned carve-out in {@link Quonfig.shouldInstall} accepts
+   * such snapshots outright, so a rejection always carries a positive incoming
+   * generation; the guard here is belt-and-suspenders.
+   */
+  private isStrictlyOlderThanHeld(envelope: ConfigEnvelope): boolean {
+    const incoming = envelope.meta.generation ?? 0;
+    if (incoming <= 0) return false;
+    return incoming < this.heldGenerationValue;
+  }
+
+  /**
    * Meta.generation of the config the client is currently holding (0 before the
    * first install, or when the server predates the watermark). A higher
    * generation is strictly newer; the canonical-ordering guard compares against
@@ -1478,10 +1503,13 @@ export class Quonfig {
       } else {
         // 200 dropped by the reject-older guard (equal-or-older payload): the
         // fetch succeeded, only the install was a no-op — so liveness still
-        // advances (qfg-41nh.11). Count the guard rejection for failover
-        // observability too (qfg-41nh.18).
+        // advances (qfg-41nh.11). Only a STRICTLY older payload is counted for
+        // failover observability; an equal-generation re-delivery is a silent
+        // no-op (qfg-rr5b).
         this.recordSuccessfulRefresh();
-        this.failover.recordGuardRejected();
+        if (this.isStrictlyOlderThanHeld(res.envelope)) {
+          this.failover.recordGuardRejected();
+        }
       }
     };
 
@@ -1538,11 +1566,15 @@ export class Quonfig {
     } else {
       // Guard-rejected SSE message (equal-or-older): nothing installs, but the
       // message was received and processed, so liveness still advances
-      // (qfg-41nh.11). Count the rejection for failover observability too; SSE
-      // installs carry no HTTP leg, so resolved-from is not recorded here
-      // (qfg-41nh.18).
+      // (qfg-41nh.11). Only a STRICTLY older message is counted for failover
+      // observability — api-delivery re-sends the current envelope on every
+      // connect, so an equal-generation resend is expected traffic, not a
+      // regression attempt (qfg-rr5b). SSE installs carry no HTTP leg, so
+      // resolved-from is not recorded here (qfg-41nh.18).
       this.recordSuccessfulRefresh();
-      this.failover.recordGuardRejected();
+      if (this.isStrictlyOlderThanHeld(envelope)) {
+        this.failover.recordGuardRejected();
+      }
     }
   }
 
