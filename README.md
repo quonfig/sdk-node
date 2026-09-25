@@ -72,8 +72,20 @@ new Quonfig({
   datafile: "./config.json",     // Legacy local envelope path
   dataDirAutoReload: false,      // Opt in to fs.watch-based re-read in datadir mode (default: false)
   dataDirAutoReloadDebounceMs: 200, // Debounce window for the watcher (default: 200)
+  collectEvaluationSummaries: true, // Send evaluation counts (default: true)
+  contextUploadMode: "periodic_example", // "periodic_example" | "shapes_only" | "none"
+  telemetryFlushIntervalMs: 60000,  // How often telemetry is sent (default: 60000)
+  telemetryTimeoutMs: 15000,        // Overall deadline per telemetry POST (default: 15000)
+  telemetryMaxRetainedBatches: 5,   // Failed batches kept for resend (default: 5)
+  telemetryMaxRetainedBytes: 2097152, // Bytes of failed batches kept (default: 2MB)
+  telemetryMaxRetainedAgeMs: 300000,  // Discard kept batches older than this (default: 5 min)
+  telemetryMaxEvaluationSummaries: 10000, // Distinct flag/config keys per window (default: 10000)
+  telemetryMaxContextShapeFields: 10000,  // Distinct context fields per window (default: 10000)
+  telemetryMaxExampleContexts: 10000,     // Example contexts per window (default: 10000)
 });
 ```
+
+See [Telemetry](#telemetry) for what these send and how failures are handled.
 
 ## Environment variables
 
@@ -350,6 +362,46 @@ logger.debug("live-controlled");
 
 Both adapters also ship convenience constructors — `createWinstonLogger` and `createPinoLogger` —
 that return a ready-to-use logger with the Quonfig gate already attached.
+
+## Telemetry
+
+The SDK sends usage telemetry to `telemetryUrl` so the Quonfig dashboard can show which flags and
+configs are evaluated and with what contexts. Telemetry never affects flag evaluation: every failure
+below is contained in the background reporter.
+
+**What is sent.** Evaluation summaries (per flag/config: counts per rule and value), context shapes
+(context field names and types), example contexts (up to one per context key per hour) and failover
+counters. Opt out with `collectEvaluationSummaries: false` and `contextUploadMode: "shapes_only"`
+(no example contexts) or `"none"` (no context data). With all three off, no reporter runs.
+
+**How it is sent.**
+
+- One POST every `telemetryFlushIntervalMs` (60s), with at most one POST in flight. A tick that
+  fires while a POST is still out is skipped and its data rolls into the next window.
+- Each POST has an overall deadline of `telemetryTimeoutMs` (15s), connect and TLS included.
+- When a POST fails (timeout, network error, 408, 429 or 5xx), the serialized batch is kept
+  byte-for-byte and resent unchanged, never merged with newer data, so the server can recognize a
+  resend of a batch that did land. Up to 5 batches / 2MB are kept for up to 5 minutes; beyond that
+  the oldest is dropped, and a single batch larger than the byte cap is sent once and never kept.
+  Resends happen no sooner than 30s after a failure and after any `Retry-After` (honored up to 10
+  minutes), oldest first, then the current window.
+- A 401, 403 or 404 means the SDK key or `telemetryUrl` is wrong: the SDK logs one error and
+  disables telemetry for the rest of the process. Any other 4xx drops that one batch with an error
+  (the server rejected the payload) and telemetry continues.
+
+**Logging.** A failed POST logs at debug only. The first batch actually dropped logs one warning
+with the last POST result and queue depth; further drops log at debug with a summary warning at most
+every 10 minutes; the first success after failures logs one info line. The default console logger
+does not print debug lines; pass `logger` to receive them.
+
+**`flush()` and `close()`.** `flush()` sends the current window now (useful in serverless handlers);
+after a failure it respects the 30s floor and `Retry-After`. `close()` sends the current window once
+with a 5s deadline, does not resend kept batches, and never blocks process exit.
+
+**Memory.** Everything is bounded: at most 10,000 evaluation-summary keys, 10,000 context-shape
+fields and 10,000 example contexts per window (see the `telemetryMax*` options; keys already seen
+keep counting at the cap), a 100,000-entry example-context rate-limit map, and the 2MB retained
+queue.
 
 ## License
 

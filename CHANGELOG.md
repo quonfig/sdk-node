@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+- **Telemetry transport policy (qfg-mol-9u0, qfg-mol-m3c.1).** The telemetry POST timeout goes from
+  3s to 15s (`telemetryTimeoutMs`; fetch has no separate connect timeout, so this deadline covers
+  connect and TLS too). A failed batch is kept byte-for-byte and resent (no merging, so the server
+  dedups a resend of a batch that did land). Resends happen no sooner than 30s after a failure and
+  honor `Retry-After` up to 10 min. The retained queue is capped at 5 batches / 2MB / 5 min (oldest
+  dropped; a batch larger than the byte cap is never kept). At most one POST is in flight.
+  401/403/404 disable telemetry for the process with one ERROR; any other 4xx drops that batch with
+  one ERROR. Logging: a failed POST logs at debug, one WARN when data is actually dropped (then a
+  summary at most every 10 min), one INFO on recovery. Before this, every failed POST logged a WARN.
+- **Flush interval 8s -> 60s** (`telemetryFlushIntervalMs`); the dead adaptive backoff is removed.
+  `flush()` still sends immediately when healthy; after a failure it respects the 30s floor and
+  `Retry-After`.
+- **`close()`** sends the live window once with a 5s deadline and no longer waits on retained
+  batches; it never blocks exit.
+- **Memory caps:** evaluation-summary keys, context-shape fields (before: context names only) and
+  example contexts are capped at 10,000 per window, and the example-context rate-limit map at
+  100,000. An existing summary key keeps counting at the cap (before, it stopped counting: a bug).
+- **New options:** `telemetryFlushIntervalMs`, `telemetryTimeoutMs`, `telemetryMaxRetainedBatches`,
+  `telemetryMaxRetainedBytes`, `telemetryMaxRetainedAgeMs`, `telemetryMaxEvaluationSummaries`,
+  `telemetryMaxContextShapeFields`, `telemetryMaxExampleContexts`. Invalid values (non-finite or
+  <= 0) fall back to the default.
+- The default console logger no longer prints debug lines. A supplied `logger` still receives every
+  level.
+- Exported classes: `Transport` gains `sendTelemetry()` and `getTelemetryUrl()`;
+  `Transport.postTelemetry()` is deprecated (unused by the SDK, behavior unchanged).
+  `TelemetryReporter` gains `tick()`, `flush()`, `close()`; `sync()` and `stop()` are deprecated
+  aliases, `initialDelay` is read as the flush interval and `maxDelay` is ignored. The collectors
+  gain `disable()`.
+- `contextUploadMode` default is unchanged (`periodic_example`). No wire change, no removed public
+  API, no new dependencies.
+
 ## 1.2.1 - 2026-09-14
 
 - **`guardRejected` now counts only a STRICTLY older payload (qfg-rr5b, qfg-bcgf).** The
