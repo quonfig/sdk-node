@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 - 2026-09-25
 
 - **Telemetry transport policy (qfg-mol-9u0, qfg-mol-m3c.1).** The telemetry POST timeout goes from
   3s to 15s (`telemetryTimeoutMs`; fetch has no separate connect timeout, so this deadline covers
