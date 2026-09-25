@@ -3,15 +3,18 @@
  * implementation of integration-test-data/chaos/telemetry-transport-contract.md.
  *
  * Fixture: a real Quonfig client (datafile mode, real reporter + queue + fetch)
- * pointed at a scriptable node:http stub; vitest fake timers drive the tick
- * timer, the request timeout and Date; a capturing logger records every level.
- * Only the endpoint, the clock and the logger are mocked.
+ * pointed at a scriptable node:http stub; a manual clock (private
+ * `__testTelemetryClock` option) drives the tick timer, the request timeout and
+ * every telemetry time comparison; a capturing logger records every level.
+ * Only the endpoint, the clock and the logger are mocked. Global timers stay
+ * real: vitest fake timers stall undici's keep-alive reuse on Node 22.23.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { Quonfig } from "../src/quonfig";
 import type { QuonfigOptions } from "../src/types";
 import { captureLogger, type CaptureLogger } from "./helpers/captureLogger";
+import { ManualClock } from "./helpers/manualClock";
 import { startTelemetryStub, type TelemetryStub } from "./helpers/telemetryStub";
 
 const MIN = 60_000;
@@ -39,18 +42,18 @@ function envelope() {
 let stub: TelemetryStub;
 let logger: CaptureLogger;
 let q: Quonfig | undefined;
+let clock: ManualClock;
 
 beforeEach(async () => {
   stub = await startTelemetryStub();
   logger = captureLogger();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  clock = new ManualClock();
 });
 
 afterEach(async () => {
   await stub.close();
   if (q) await q.close();
   q = undefined;
-  vi.useRealTimers();
 });
 
 async function client(overrides: Partial<QuonfigOptions> = {}): Promise<{ q: Quonfig; r: any }> {
@@ -60,8 +63,9 @@ async function client(overrides: Partial<QuonfigOptions> = {}): Promise<{ q: Quo
     telemetryUrl: stub.url,
     enableSSE: false,
     logger,
+    __testTelemetryClock: clock,
     ...overrides,
-  });
+  } as QuonfigOptions);
   await q.init();
   logger.clear();
   return { q, r: (q as any).telemetryReporter };
@@ -85,7 +89,7 @@ const hasConfig = (i: number, key: string) =>
 
 /** Advance the clock, then let any POSTs the tick started reach the stub and settle. */
 async function advance(r: any, ms: number, expectPosts?: number): Promise<void> {
-  await vi.advanceTimersByTimeAsync(ms);
+  await clock.advance(ms);
   if (expectPosts !== undefined) await stub.waitForPosts(expectPosts);
   await r.whenIdle();
 }
@@ -96,7 +100,7 @@ describe("T1 timeout aborts and retains (P1, P5, P7)", () => {
     record(q, "A");
     stub.script({ hang: true }, { status: 200 });
 
-    await vi.advanceTimersByTimeAsync(MIN); // tick 1: POST 0 hangs
+    await clock.advance(MIN); // tick 1: POST 0 hangs
     await stub.waitForPosts(1);
     await advance(r, 15_000); // the request is aborted
     expect(stub.postCount()).toBe(1);
@@ -248,7 +252,7 @@ describe("T4 Retry-After and the 30s floor (P4)", () => {
   it("T4d Retry-After HTTP-date honored", async () => {
     const { q, r } = await client();
     record(q, "A");
-    stub.script({ status: 503, retryAfter: new Date(Date.now() + 3 * MIN).toUTCString() });
+    stub.script({ status: 503, retryAfter: new Date(clock.now() + 3 * MIN).toUTCString() });
     await advance(r, MIN, 1); // F = 60s, Retry-After = 180s wall clock -> 120s after F
     await advance(r, MIN); // F+60
     expect(stub.postCount()).toBe(1);
@@ -468,7 +472,7 @@ describe("T8 shutdown (P8)", () => {
     });
     await stub.waitForPosts(3);
     expect(closed).toBe(false);
-    await vi.advanceTimersByTimeAsync(5_000);
+    await clock.advance(5_000);
     await closing;
     expect(closed).toBe(true);
     q = undefined;
@@ -479,11 +483,11 @@ describe("T8 shutdown (P8)", () => {
     expect(has(2, "B")).toBe(false);
     expect(stub.sha(2)).not.toBe(stub.sha(0));
 
-    await vi.advanceTimersByTimeAsync(10 * MIN);
+    await clock.advance(10 * MIN);
     expect(stub.postCount()).toBe(3);
     expect(r.debugState().inFlight).toBe(false);
     expect(r.debugState().timerActive).toBe(false);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(clock.pending()).toBe(0);
     await expect(client1.close()).resolves.toBeUndefined();
   });
 });

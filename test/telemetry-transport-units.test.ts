@@ -22,9 +22,9 @@ import { ContextShapeCollector } from "../src/telemetry/contextShapes";
 import { ExampleContextCollector } from "../src/telemetry/exampleContexts";
 import { captureLogger } from "./helpers/captureLogger";
 import { startTelemetryStub, type TelemetryStub } from "./helpers/telemetryStub";
+import { ManualClock } from "./helpers/manualClock";
 
 afterEach(() => {
-  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -96,8 +96,10 @@ describe("TelemetryTransportQueue", () => {
     over: Partial<{ maxRetainedBatches: number; maxRetainedBytes: number }> = {}
   ) => {
     const logger = captureLogger();
+    const clock = new ManualClock();
     const sent: Buffer[] = [];
     const q = new TelemetryTransportQueue({
+      clock,
       send: async (body) => {
         sent.push(body);
         const r = results.length > 0 ? results.shift()! : { status: 200, bodySnippet: "" };
@@ -112,7 +114,7 @@ describe("TelemetryTransportQueue", () => {
       maxRetainedAgeMs: 300_000,
       onDisabled: () => {},
     });
-    return { q, sent, logger };
+    return { q, sent, logger, clock };
   };
   const b = (s: string) => Buffer.from(s, "utf8");
 
@@ -134,7 +136,6 @@ describe("TelemetryTransportQueue", () => {
   });
 
   it("an oversize batch is not counted against the caps and is dropped after a failed send", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { q, sent, logger } = make([{ status: 503, bodySnippet: "" }], { maxRetainedBytes: 10 });
     q.append(b("small"));
     q.append(b("x".repeat(50)));
@@ -147,26 +148,24 @@ describe("TelemetryTransportQueue", () => {
     expect(logger.logCount("warn", /byte cap/)).toBe(1);
   });
 
-  it("age boundary is strict: exactly maxRetainedAgeMs survives, one ms more is discarded", () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const { q } = make([]);
+  it("age boundary is strict: exactly maxRetainedAgeMs survives, one ms more is discarded", async () => {
+    const { q, clock } = make([]);
     q.append(b("old"));
-    vi.advanceTimersByTime(300_000);
+    await clock.advance(300_000);
     q.expire();
     expect(q.retainedCount).toBe(1);
-    vi.advanceTimersByTime(1);
+    await clock.advance(1);
     q.expire();
     expect(q.retainedCount).toBe(0);
   });
 
   it("a Retry-After shorter than the floor does not shorten it", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const { q } = make([{ status: 429, retryAfter: "5", bodySnippet: "" }]);
+    const { q, clock } = make([{ status: 429, retryAfter: "5", bodySnippet: "" }]);
     q.append(b("a"));
     await q.drain();
-    vi.advanceTimersByTime(29_999);
+    await clock.advance(29_999);
     expect(q.sendAllowed()).toBe(false);
-    vi.advanceTimersByTime(1);
+    await clock.advance(1);
     expect(q.sendAllowed()).toBe(true);
   });
 
@@ -257,15 +256,22 @@ describe("Transport.sendTelemetry", () => {
     expect(t.getTelemetryUrl()).toBe(`${stub.url}/api/v1/telemetry/`);
   });
 
-  it("rejects with reason 'timeout' when the overall timeout fires (fake clock)", async () => {
+  it("rejects with reason 'timeout' when the overall timeout fires (manual clock)", async () => {
     stub = await startTelemetryStub();
     stub.setDefault({ hang: true });
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const clock = new ManualClock();
     const t = new Transport(["https://api.example.com"], "KEY", stub.url);
-    const p = t.sendTelemetry(Buffer.from("{}"), { timeoutMs: 15_000 }).catch((e) => e);
+    let settled = false;
+    const p = t
+      .sendTelemetry(Buffer.from("{}"), { timeoutMs: 15_000, clock })
+      .catch((e) => e)
+      .finally(() => {
+        settled = true;
+      });
     await stub.waitForPosts(1);
-    await vi.advanceTimersByTimeAsync(14_999);
-    await vi.advanceTimersByTimeAsync(1);
+    await clock.advance(14_999);
+    expect(settled).toBe(false);
+    await clock.advance(1);
     const err = await p;
     expect(err).toBeInstanceOf(TelemetryRequestError);
     expect(err.reason).toBe("timeout");

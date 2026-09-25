@@ -79,9 +79,9 @@ export async function startTelemetryStub(): Promise<TelemetryStub> {
       return Array.isArray(v) ? v.join(", ") : v;
     },
     waitForPosts: async (n) => {
-      // Poll on setImmediate + performance.now(), which the tests leave real.
-      // Not vi.waitFor: under fake timers it advances the fake clock by its
-      // poll interval, which would skew the failure times the tests assert on.
+      // Poll on setImmediate + performance.now() (always real time).
+      // Not vi.waitFor: under vitest fake timers it advances the fake clock by
+      // its poll interval.
       const start = performance.now();
       while (bodies.length < n) {
         if (performance.now() - start > 5000) {

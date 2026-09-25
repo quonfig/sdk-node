@@ -1,4 +1,5 @@
 import type { NormalizedLogger } from "../sdkLogger";
+import { realTelemetryClock, type TelemetryClock } from "./clock";
 import { TelemetryRequestError, type TelemetryHttpResult } from "../transport";
 
 /**
@@ -90,6 +91,7 @@ export class TelemetryTransportQueue {
   private readonly maxRetainedBytes: number;
   private readonly maxRetainedAgeMs: number;
   private readonly onDisabled: () => void;
+  private readonly clock: TelemetryClock;
 
   private queue: RetainedBatch[] = [];
   private inFlight: AbortController | undefined;
@@ -119,7 +121,9 @@ export class TelemetryTransportQueue {
     maxRetainedBytes: number;
     maxRetainedAgeMs: number;
     onDisabled: () => void;
+    clock?: TelemetryClock;
   }) {
+    this.clock = args.clock ?? realTelemetryClock;
     this.send = args.send;
     this.telemetryUrl = args.telemetryUrl;
     this.logger = args.logger;
@@ -152,7 +156,7 @@ export class TelemetryTransportQueue {
 
   /** Discard batches older than the max age (strictly greater). Tick step 2. */
   expire(): void {
-    const now = Date.now();
+    const now = this.clock.now();
     while (this.queue.length > 0 && now - this.queue[0].createdAt > this.maxRetainedAgeMs) {
       this.queue.shift();
       this.recordDrop(`batch older than ${Math.round(this.maxRetainedAgeMs / 60_000)} min`);
@@ -163,14 +167,14 @@ export class TelemetryTransportQueue {
 
   /** The 30s floor after a failure and any Retry-After have both elapsed. Tick step 3. */
   sendAllowed(): boolean {
-    const now = Date.now();
+    const now = this.clock.now();
     return now >= this.lastFailureAt + RESEND_FLOOR_MS && now >= this.retryAfterUntil;
   }
 
   /** Append a serialized window and enforce the caps (drop oldest). Tick step 4. */
   append(body: Buffer): void {
     const oversize = body.length > this.maxRetainedBytes;
-    this.queue.push({ body, bytes: body.length, createdAt: Date.now(), oversize });
+    this.queue.push({ body, bytes: body.length, createdAt: this.clock.now(), oversize });
 
     let count = 0;
     let bytes = 0;
@@ -284,7 +288,9 @@ export class TelemetryTransportQueue {
 
   private onSuccess(): void {
     if (this.failuresSinceSuccess === 0) return;
-    const seconds = Math.round((Date.now() - (this.firstFailureAt ?? Date.now())) / 1000);
+    const seconds = Math.round(
+      (this.clock.now() - (this.firstFailureAt ?? this.clock.now())) / 1000
+    );
     this.logger.info(
       `Telemetry recovered: POST succeeded after ${this.failuresSinceSuccess} failed attempt(s) over ${seconds}s; ${this.dropsThisOutage} batch(es) were dropped.`
     );
@@ -300,7 +306,7 @@ export class TelemetryTransportQueue {
     result: string,
     retryAfter: string | undefined
   ): void {
-    const now = Date.now();
+    const now = this.clock.now();
     this.failuresSinceSuccess++;
     this.firstFailureAt ??= now;
     this.lastFailureAt = now;
@@ -331,7 +337,7 @@ export class TelemetryTransportQueue {
   }
 
   private onRejected(status: number, bytes: number, bodySnippet: string): void {
-    const now = Date.now();
+    const now = this.clock.now();
     if (
       this.lastRejectErrorAt === undefined ||
       now - this.lastRejectErrorAt >= DROP_WARN_INTERVAL_MS
@@ -349,7 +355,7 @@ export class TelemetryTransportQueue {
   }
 
   private recordDrop(reason: string): void {
-    const now = Date.now();
+    const now = this.clock.now();
     this.dropsSinceWarn++;
     this.dropsThisOutage++;
     const lastResult = this.lastResult || "none";

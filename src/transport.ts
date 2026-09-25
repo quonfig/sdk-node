@@ -1,6 +1,7 @@
 import type { ConfigEnvelope } from "./types";
 import { normalizeLogger, type Logger, type NormalizedLogger } from "./sdkLogger";
 import SDK_VERSION from "./version";
+import { realTelemetryClock, type TelemetryClock } from "./telemetry/clock";
 
 export interface FetchResult {
   envelope?: ConfigEnvelope;
@@ -445,24 +446,24 @@ export class Transport {
    * {@link TelemetryRequestError} on timeout, network error or abort. Never
    * logs: the telemetry queue owns the logging policy. (qfg-mol-9u0)
    *
-   * `timeoutMs` bounds the whole request, response body included. It uses an
-   * AbortController and the global `setTimeout` looked up at call time (not
-   * `AbortSignal.timeout`, whose internal timer a mocked clock cannot drive), so
-   * tests can advance a fake clock past it. Global `fetch` exposes no separate
-   * connect-timeout knob, so the overall deadline also bounds connect/TLS.
+   * `timeoutMs` bounds the whole request, response body included. It is an
+   * AbortController fired by `opts.clock` (default: the wall clock), not
+   * `AbortSignal.timeout`, so tests can drive it with a manual clock. Global
+   * `fetch` exposes no separate connect-timeout knob, so the overall deadline
+   * also bounds connect/TLS.
    */
   async sendTelemetry(
     body: Buffer,
-    opts: { timeoutMs: number; signal?: AbortSignal }
+    opts: { timeoutMs: number; signal?: AbortSignal; clock?: TelemetryClock }
   ): Promise<TelemetryHttpResult> {
+    const clock = opts.clock ?? realTelemetryClock;
     const controller = new AbortController();
     let reason: TelemetryRequestError["reason"] | undefined;
     const abort = (r: TelemetryRequestError["reason"]): void => {
       if (reason === undefined) reason = r;
       controller.abort();
     };
-    const timer = setTimeout(() => abort("timeout"), opts.timeoutMs);
-    if (typeof timer === "object" && timer !== null && "unref" in timer) timer.unref();
+    const timer = clock.setTimeout(() => abort("timeout"), opts.timeoutMs);
     const onCallerAbort = (): void => abort("aborted");
     if (opts.signal) {
       if (opts.signal.aborted) onCallerAbort();
@@ -488,7 +489,7 @@ export class Transport {
       if (reason !== undefined) throw new TelemetryRequestError(reason, err);
       throw new TelemetryRequestError("network", err);
     } finally {
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
       opts.signal?.removeEventListener("abort", onCallerAbort);
     }
   }

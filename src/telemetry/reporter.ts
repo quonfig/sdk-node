@@ -5,6 +5,7 @@ import type { EvaluationSummaryCollector } from "./evaluationSummaries";
 import type { ContextShapeCollector } from "./contextShapes";
 import type { ExampleContextCollector } from "./exampleContexts";
 import type { FailoverCollector } from "./failoverAggregator";
+import { realTelemetryClock, type TelemetryClock } from "./clock";
 import {
   SHUTDOWN_FLUSH_DEADLINE_MS,
   TELEMETRY_DEFAULTS,
@@ -43,7 +44,8 @@ export class TelemetryReporter {
   private failover: FailoverCollector;
   private logger: NormalizedLogger;
   private queue: TelemetryTransportQueue;
-  private timer: ReturnType<typeof setTimeout> | undefined;
+  private clock: TelemetryClock;
+  private timer: unknown;
   private closed = false;
   private closing: Promise<void> | undefined;
   private pendingTick: Promise<void> | undefined;
@@ -65,7 +67,10 @@ export class TelemetryReporter {
     initialDelay?: number;
     /** @deprecated Ignored: the adaptive backoff was removed in 1.3.0. */
     maxDelay?: number;
+    /** @internal Test seam; defaults to the wall clock. */
+    clock?: TelemetryClock;
   }) {
+    this.clock = args.clock ?? realTelemetryClock;
     this.transport = args.transport;
     this.instanceHash = args.instanceHash;
     this.evaluationSummaries = args.evaluationSummaries;
@@ -87,7 +92,8 @@ export class TelemetryReporter {
       maxRetainedAgeMs: positiveOr(args.maxRetainedAgeMs, TELEMETRY_DEFAULTS.maxRetainedAgeMs),
     };
     this.queue = new TelemetryTransportQueue({
-      send: (body, timeoutMs, signal) => this.transport.sendTelemetry(body, { timeoutMs, signal }),
+      send: (body, timeoutMs, signal) =>
+        this.transport.sendTelemetry(body, { timeoutMs, signal, clock: this.clock }),
       telemetryUrl: this.transport.getTelemetryUrl(),
       logger: this.logger,
       timeoutMs: this.config.timeoutMs,
@@ -95,6 +101,7 @@ export class TelemetryReporter {
       maxRetainedBytes: this.config.maxRetainedBytes,
       maxRetainedAgeMs: this.config.maxRetainedAgeMs,
       onDisabled: () => this.onDisabled(),
+      clock: this.clock,
     });
   }
 
@@ -108,20 +115,17 @@ export class TelemetryReporter {
   }
 
   private schedule(): void {
-    this.timer = setTimeout(() => {
+    this.timer = this.clock.setTimeout(() => {
       this.timer = undefined;
       if (this.closed || this.queue.disabled) return;
       this.schedule();
       void this.tick().catch((err) => this.logger.debug(`Telemetry tick failed: ${err}`));
     }, this.config.flushIntervalMs);
-    if (typeof this.timer === "object" && this.timer !== null && "unref" in this.timer) {
-      this.timer.unref();
-    }
   }
 
   private clearTimer(): void {
     if (this.timer !== undefined) {
-      clearTimeout(this.timer);
+      this.clock.clearTimeout(this.timer);
       this.timer = undefined;
     }
   }

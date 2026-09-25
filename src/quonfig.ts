@@ -44,6 +44,7 @@ import { ExampleContextCollector } from "./telemetry/exampleContexts";
 import { FailoverCollector } from "./telemetry/failoverAggregator";
 import { TelemetryReporter } from "./telemetry/reporter";
 import { TELEMETRY_DEFAULTS } from "./telemetry/transportQueue";
+import type { TelemetryClock } from "./telemetry/clock";
 
 const DEFAULT_FALLBACK_POLL_INTERVAL_MS = 60000;
 const DEFAULT_INIT_TIMEOUT = 10000;
@@ -244,6 +245,7 @@ export class Quonfig {
   private inFlightRefresh?: Promise<void>;
   private closed: boolean = false;
   private telemetryReporter?: TelemetryReporter;
+  private testTelemetryClock?: TelemetryClock;
   private telemetryTransportOptions: {
     flushIntervalMs?: number;
     timeoutMs?: number;
@@ -326,6 +328,7 @@ export class Quonfig {
     this.fallbackPollIntervalMs = fallbackInterval;
     this.sseReadDeadlineMs = options.sseReadDeadlineMs;
     this.testEventSourceFactory = (options as any).__testEventSourceFactory;
+    this.testTelemetryClock = (options as any).__testTelemetryClock;
 
     this.namespace = options.namespace;
     this.onNoDefault = options.onNoDefault ?? "error";
@@ -1760,6 +1763,9 @@ export class Quonfig {
       failover: this.failover,
       logger: this.logger,
       ...this.telemetryTransportOptions,
+      // Private test seam (like __testEventSourceFactory): a manual clock for
+      // the telemetry transport contract tests. NOT part of the public API.
+      clock: this.testTelemetryClock,
     });
 
     this.telemetryReporter.start();
