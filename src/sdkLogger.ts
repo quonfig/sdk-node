@@ -34,7 +34,9 @@ function prefix(message: string): string {
 
 function defaultSdkLogger(): NormalizedLogger {
   return {
-    debug: (message, ...args) => console.debug(prefix(message), ...args),
+    // Debug is silent by default: telemetry logs every failed POST at debug
+    // (P7), which must not reach stdout unless the host supplies a logger.
+    debug: NOOP,
     info: (message, ...args) => console.info(prefix(message), ...args),
     warn: (message, ...args) => console.warn(prefix(message), ...args),
     error: (message, ...args) => console.error(prefix(message), ...args),

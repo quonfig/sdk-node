@@ -22,13 +22,49 @@ export interface LegResult {
 const DEFAULT_DOMAIN = "quonfig.com";
 
 /**
- * Hard cap on how long a telemetry POST may block. Telemetry is non-critical
- * background work, but `close()`/`flush()` await it, so an unbounded fetch to a
- * slow or unreachable endpoint can stall shutdown indefinitely (observed as
- * intermittent afterEach hook timeouts on slow CI runners — qfg-i2ar). Abort
- * the request after this window and treat it as a non-fatal telemetry failure.
+ * Timeout of the deprecated {@link Transport.postTelemetry} only (qfg-i2ar).
+ * The reporter's POST uses `telemetryTimeoutMs` (default 15s) via
+ * {@link Transport.sendTelemetry}.
  */
 const TELEMETRY_POST_TIMEOUT_MS = 3000;
+
+/** Outcome of one telemetry POST that got an HTTP response. */
+export interface TelemetryHttpResult {
+  status: number;
+  retryAfter?: string;
+  bodySnippet: string;
+}
+
+/**
+ * A telemetry POST that got no HTTP response: the overall timeout fired
+ * (`timeout`), the connection or request failed (`network`), or the caller
+ * aborted it (`aborted`, only `close()` does this).
+ */
+export class TelemetryRequestError extends Error {
+  readonly reason: "timeout" | "network" | "aborted";
+  readonly code?: string;
+
+  constructor(reason: "timeout" | "network" | "aborted", cause?: unknown) {
+    const code = errorCode(cause);
+    const detail = code ?? (cause instanceof Error ? cause.message : undefined);
+    super(detail ? `telemetry POST ${reason}: ${detail}` : `telemetry POST ${reason}`);
+    this.name = "TelemetryRequestError";
+    this.reason = reason;
+    this.code = code;
+    if (cause !== undefined) (this as { cause?: unknown }).cause = cause;
+  }
+}
+
+/** Find a Node error code (ECONNREFUSED, ...) on an error or its cause chain. */
+function errorCode(err: unknown): string | undefined {
+  let e: unknown = err;
+  for (let i = 0; i < 5 && e && typeof e === "object"; i++) {
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === "string" && code.length > 0) return code;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
 
 /**
  * Default per-URL config-fetch deadline (qfg-7h5d.1.7). ~3s is short enough that
@@ -395,7 +431,75 @@ export class Transport {
   }
 
   /**
+   * Full URL of the telemetry endpoint the SDK POSTs to.
+   */
+  getTelemetryUrl(): string {
+    return `${this.telemetryBaseUrl}/api/v1/telemetry/`;
+  }
+
+  /**
+   * POST one serialized telemetry batch (the exact bytes; the caller retains
+   * and resends the same Buffer, so the server can dedup a resend of a batch
+   * that did land). Resolves with the HTTP status, the `Retry-After` header
+   * and the first 1024 characters of the response body; rejects with a
+   * {@link TelemetryRequestError} on timeout, network error or abort. Never
+   * logs: the telemetry queue owns the logging policy. (qfg-mol-9u0)
+   *
+   * `timeoutMs` bounds the whole request, response body included. It uses an
+   * AbortController and the global `setTimeout` looked up at call time (not
+   * `AbortSignal.timeout`, whose internal timer a mocked clock cannot drive), so
+   * tests can advance a fake clock past it. Global `fetch` exposes no separate
+   * connect-timeout knob, so the overall deadline also bounds connect/TLS.
+   */
+  async sendTelemetry(
+    body: Buffer,
+    opts: { timeoutMs: number; signal?: AbortSignal }
+  ): Promise<TelemetryHttpResult> {
+    const controller = new AbortController();
+    let reason: TelemetryRequestError["reason"] | undefined;
+    const abort = (r: TelemetryRequestError["reason"]): void => {
+      if (reason === undefined) reason = r;
+      controller.abort();
+    };
+    const timer = setTimeout(() => abort("timeout"), opts.timeoutMs);
+    if (typeof timer === "object" && timer !== null && "unref" in timer) timer.unref();
+    const onCallerAbort = (): void => abort("aborted");
+    if (opts.signal) {
+      if (opts.signal.aborted) onCallerAbort();
+      else opts.signal.addEventListener("abort", onCallerAbort, { once: true });
+    }
+
+    try {
+      const response = await fetch(this.getTelemetryUrl(), {
+        method: "POST",
+        headers: this.getHeaders({ "Content-Type": "application/json" }),
+        body: new Uint8Array(body.buffer, body.byteOffset, body.byteLength),
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      const retryAfter = response.headers.get("retry-after") ?? undefined;
+      const result: TelemetryHttpResult = {
+        status: response.status,
+        bodySnippet: text.slice(0, 1024),
+      };
+      if (retryAfter !== undefined) result.retryAfter = retryAfter;
+      return result;
+    } catch (err) {
+      if (reason !== undefined) throw new TelemetryRequestError(reason, err);
+      throw new TelemetryRequestError("network", err);
+    } finally {
+      clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", onCallerAbort);
+    }
+  }
+
+  /**
    * Post telemetry data to the telemetry endpoint.
+   *
+   * @deprecated Kept for callers of the exported `Transport` class. The SDK's
+   * own reporter uses {@link Transport.sendTelemetry}, which returns the
+   * outcome instead of logging it. This method keeps its historic behavior
+   * (3s timeout, WARN on failure). Removed in 2.0.0.
    */
   async postTelemetry(data: any): Promise<void> {
     const headers = this.getHeaders({
@@ -404,22 +508,18 @@ export class Transport {
 
     let response: Response;
     try {
-      response = await fetch(`${this.telemetryBaseUrl}/api/v1/telemetry/`, {
+      response = await fetch(this.getTelemetryUrl(), {
         method: "POST",
         headers,
         body: JSON.stringify(data),
-        // Bound the request so a hung endpoint can't stall close()/flush().
         signal: AbortSignal.timeout(TELEMETRY_POST_TIMEOUT_MS),
       });
     } catch (err) {
-      // Telemetry failures — including the timeout abort and network errors —
-      // are non-fatal; log and move on so the shutdown path never hangs.
       this.logger.warn(`Telemetry POST failed: ${err}`);
       return;
     }
 
     if (!response.ok) {
-      // Telemetry failures are non-fatal; just log
       const body = await response.text().catch(() => "");
       this.logger.warn(`Telemetry POST failed: ${response.status} ${body}`);
     }

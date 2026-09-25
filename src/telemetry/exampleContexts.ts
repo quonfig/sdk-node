@@ -1,4 +1,5 @@
 import type { Contexts, ContextUploadMode, ExampleContextEntry, TelemetryEvent } from "../types";
+import { EXAMPLE_CONTEXT_SEEN_CAP } from "./transportQueue";
 
 /**
  * Collects example contexts for telemetry reporting.
@@ -10,15 +11,23 @@ export class ExampleContextCollector {
   private seen: Map<string, number> = new Map();
   private maxDataSize: number;
   private rateLimitMs: number;
+  private maxSeen: number;
 
+  /**
+   * `maxDataSize` caps the examples per window; `maxSeen` bounds the
+   * rate-limit map (P6). When the map is full and pruning frees nothing, a
+   * new example is not recorded (drop newest).
+   */
   constructor(
     contextUploadMode: ContextUploadMode,
     maxDataSize: number = 10000,
-    rateLimitMs: number = 60 * 60 * 1000 // 1 hour
+    rateLimitMs: number = 60 * 60 * 1000, // 1 hour
+    maxSeen: number = EXAMPLE_CONTEXT_SEEN_CAP
   ) {
     this.enabled = contextUploadMode === "periodic_example";
     this.maxDataSize = maxDataSize;
     this.rateLimitMs = rateLimitMs;
+    this.maxSeen = maxSeen;
   }
 
   isEnabled(): boolean {
@@ -38,8 +47,24 @@ export class ExampleContextCollector {
       return;
     }
 
+    if (lastSeen === undefined && this.seen.size >= this.maxSeen) {
+      this.pruneCache();
+      if (this.seen.size >= this.maxSeen) return;
+    }
+
     this.data.push([Date.now(), contexts]);
     this.seen.set(key, Date.now());
+  }
+
+  /**
+   * Stop recording for the rest of the process and clear buffered data. Called
+   * when telemetry is disabled after a 401/403/404 (P3), so nothing aggregates
+   * for a dead endpoint.
+   */
+  disable(): void {
+    this.enabled = false;
+    this.data.length = 0;
+    this.seen.clear();
   }
 
   /**

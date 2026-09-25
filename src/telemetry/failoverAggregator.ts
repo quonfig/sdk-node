@@ -82,6 +82,12 @@ export class FailoverCollector {
     }
   }
 
+  /** Stop recording for the rest of the process (telemetry disabled, P3). */
+  disable(): void {
+    this.enabled = false;
+    this.drain();
+  }
+
   /**
    * Drain the window's counters into a TelemetryEvent and reset. Returns
    * `undefined` when no failover activity occurred (every counter zero), so a

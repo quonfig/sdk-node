@@ -32,13 +32,16 @@ export class EvaluationSummaryCollector {
 
   push(evaluation: Evaluation): void {
     if (!this.enabled) return;
-    if (this.data.size >= this.maxDataSize) return;
     if (evaluation.unwrappedValue === undefined) return;
     if (evaluation.configType === "log_level") return;
 
+    const key = JSON.stringify([evaluation.configKey, evaluation.configType]);
+    // Cap on distinct (configKey, configType) per window: a NEW key beyond the
+    // cap is dropped, an existing key keeps counting (P6).
+    if (!this.data.has(key) && this.data.size >= this.maxDataSize) return;
+
     this.startAt = this.startAt ?? Date.now();
 
-    const key = JSON.stringify([evaluation.configKey, evaluation.configType]);
     // For redacted (confidential / decryptWith) values, the wire shape is
     // always `{string: "*****<md5>"}` regardless of the underlying type —
     // the redaction itself is a string and must not masquerade as the
@@ -67,6 +70,17 @@ export class EvaluationSummaryCollector {
     } else {
       existing.count++;
     }
+  }
+
+  /**
+   * Stop recording for the rest of the process and clear buffered data. Called
+   * when telemetry is disabled after a 401/403/404 (P3), so nothing aggregates
+   * for a dead endpoint.
+   */
+  disable(): void {
+    this.enabled = false;
+    this.data.clear();
+    this.startAt = undefined;
   }
 
   drain(): TelemetryEvent | undefined {

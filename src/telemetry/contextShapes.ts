@@ -2,11 +2,14 @@ import type { ContextShape, Contexts, ContextUploadMode, TelemetryEvent } from "
 
 /**
  * Collects context shapes (field names + types) for telemetry reporting.
+ * `maxDataSize` caps the distinct (contextName, fieldName) pairs per window;
+ * a new pair beyond the cap is dropped, existing pairs are untouched (P6).
  */
 export class ContextShapeCollector {
   private enabled: boolean;
   private data: Map<string, Record<string, number>> = new Map();
   private maxDataSize: number;
+  private fieldCount = 0;
 
   constructor(contextUploadMode: ContextUploadMode, maxDataSize: number = 10000) {
     this.enabled = contextUploadMode !== "none";
@@ -22,20 +25,27 @@ export class ContextShapeCollector {
 
     for (const [name, ctx] of Object.entries(contexts)) {
       for (const [key, value] of Object.entries(ctx)) {
-        let shape = this.data.get(name);
+        const shape = this.data.get(name);
+        if (shape !== undefined && shape[key] !== undefined) continue;
+        if (this.fieldCount >= this.maxDataSize) continue;
 
-        if (shape === undefined && this.data.size >= this.maxDataSize) {
-          continue;
-        }
-
-        shape = shape ?? {};
-
-        if (shape[key] === undefined) {
-          shape[key] = fieldTypeForValue(value);
-          this.data.set(name, shape);
-        }
+        const next = shape ?? {};
+        next[key] = fieldTypeForValue(value);
+        this.data.set(name, next);
+        this.fieldCount++;
       }
     }
+  }
+
+  /**
+   * Stop recording for the rest of the process and clear buffered data. Called
+   * when telemetry is disabled after a 401/403/404 (P3), so nothing aggregates
+   * for a dead endpoint.
+   */
+  disable(): void {
+    this.enabled = false;
+    this.data.clear();
+    this.fieldCount = 0;
   }
 
   /**
@@ -51,6 +61,7 @@ export class ContextShapeCollector {
 
     // Clear data after drain
     this.data.clear();
+    this.fieldCount = 0;
 
     return {
       contextShapes: { shapes },
