@@ -90,9 +90,11 @@ describe("TelemetryReporter folds the failover event into the periodic flush", (
   it("submits a failover event with only-non-zero-window semantics and exact keys", async () => {
     const captured: any[] = [];
     const transport = {
-      postTelemetry: async (payload: any) => {
-        captured.push(payload);
+      sendTelemetry: async (body: Buffer) => {
+        captured.push(JSON.parse(body.toString("utf8")));
+        return { status: 200, bodySnippet: "" };
       },
+      getTelemetryUrl: () => "http://telemetry.test/api/v1/telemetry/",
     } as unknown as Transport;
 
     const failover = new FailoverCollector(true);
@@ -112,7 +114,7 @@ describe("TelemetryReporter folds the failover event into the periodic flush", (
       failover,
     });
 
-    await reporter.sync();
+    await reporter.tick();
 
     expect(captured).toHaveLength(1);
     expect(captured[0].instanceHash).toBe("test-instance");
@@ -124,9 +126,9 @@ describe("TelemetryReporter folds the failover event into the periodic flush", (
     expect(failoverEvent.failover.resolvedFromSecondary).toBe(1);
     expect(failoverEvent.failover.resolvedFromLkg).toBe(0);
 
-    // A second sync with no new activity emits nothing (healthy steady state).
+    // A second tick with no new activity emits nothing (healthy steady state).
     captured.length = 0;
-    await reporter.sync();
+    await reporter.tick();
     expect(captured).toHaveLength(0);
   });
 });
@@ -195,8 +197,9 @@ describe("failover telemetry — client-level (qfg-41nh.18)", () => {
     const url = await listen(server);
 
     const captured: any[] = [];
-    vi.spyOn(Transport.prototype, "postTelemetry").mockImplementation(async (p: any) => {
-      captured.push(p);
+    vi.spyOn(Transport.prototype, "sendTelemetry").mockImplementation(async (body: Buffer) => {
+      captured.push(JSON.parse(body.toString("utf8")));
+      return { status: 200, bodySnippet: "" };
     });
 
     const client = makeClient([url]);
@@ -242,8 +245,9 @@ describe("failover telemetry — client-level (qfg-41nh.18)", () => {
     const secondaryUrl = await listen(secondary);
 
     const captured: any[] = [];
-    vi.spyOn(Transport.prototype, "postTelemetry").mockImplementation(async (p: any) => {
-      captured.push(p);
+    vi.spyOn(Transport.prototype, "sendTelemetry").mockImplementation(async (body: Buffer) => {
+      captured.push(JSON.parse(body.toString("utf8")));
+      return { status: 200, bodySnippet: "" };
     });
 
     const client = makeClient([primaryUrl, secondaryUrl]);
@@ -300,8 +304,9 @@ describe("guardRejected counts strictly-older payloads only (qfg-rr5b)", () => {
     const url = await listen(server);
 
     const captured: any[] = [];
-    vi.spyOn(Transport.prototype, "postTelemetry").mockImplementation(async (p: any) => {
-      captured.push(p);
+    vi.spyOn(Transport.prototype, "sendTelemetry").mockImplementation(async (body: Buffer) => {
+      captured.push(JSON.parse(body.toString("utf8")));
+      return { status: 200, bodySnippet: "" };
     });
 
     const client = makeClient([url]);
@@ -342,8 +347,9 @@ describe("guardRejected counts strictly-older payloads only (qfg-rr5b)", () => {
     const url = await listen(server);
 
     const captured: any[] = [];
-    vi.spyOn(Transport.prototype, "postTelemetry").mockImplementation(async (p: any) => {
-      captured.push(p);
+    vi.spyOn(Transport.prototype, "sendTelemetry").mockImplementation(async (body: Buffer) => {
+      captured.push(JSON.parse(body.toString("utf8")));
+      return { status: 200, bodySnippet: "" };
     });
 
     const client = makeClient([url]);
@@ -383,8 +389,9 @@ describe("guardRejected counts strictly-older payloads only (qfg-rr5b)", () => {
     const url = await listen(server);
 
     const captured: any[] = [];
-    vi.spyOn(Transport.prototype, "postTelemetry").mockImplementation(async (p: any) => {
-      captured.push(p);
+    vi.spyOn(Transport.prototype, "sendTelemetry").mockImplementation(async (body: Buffer) => {
+      captured.push(JSON.parse(body.toString("utf8")));
+      return { status: 200, bodySnippet: "" };
     });
 
     const client = makeClient([url]);
@@ -418,8 +425,9 @@ describe("guardRejected counts strictly-older payloads only (qfg-rr5b)", () => {
     const url = await listen(server);
 
     const captured: any[] = [];
-    vi.spyOn(Transport.prototype, "postTelemetry").mockImplementation(async (p: any) => {
-      captured.push(p);
+    vi.spyOn(Transport.prototype, "sendTelemetry").mockImplementation(async (body: Buffer) => {
+      captured.push(JSON.parse(body.toString("utf8")));
+      return { status: 200, bodySnippet: "" };
     });
 
     const client = makeClient([url]);

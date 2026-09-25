@@ -84,6 +84,51 @@ describe("pluggable Logger option", () => {
     expect(String(args[0])).toContain("Telemetry POST failed");
   });
 
+  it("reporter telemetry POST failure goes to the supplied logger at DEBUG, not console (qfg-mol-9u0)", async () => {
+    const logger = spyLogger();
+    const consoleSpies = (["debug", "info", "warn", "error"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation(() => {})
+    );
+    vi.spyOn(Transport.prototype, "sendTelemetry").mockResolvedValue({
+      status: 503,
+      bodySnippet: "server boom",
+    });
+
+    const q = new Quonfig({
+      sdkKey: "test-key",
+      datafile: {
+        meta: { version: "v", environment: "Production" },
+        configs: [
+          {
+            id: "c1",
+            key: "greeting",
+            type: "config",
+            valueType: "string",
+            sendToClientSdk: false,
+            default: {
+              rules: [
+                { criteria: [{ operator: "ALWAYS_TRUE" }], value: { type: "string", value: "hi" } },
+              ],
+            },
+          },
+        ],
+      },
+      enableSSE: false,
+      logger,
+    });
+    await q.init();
+    q.get("greeting", { user: { key: "u1" } });
+    await q.flush();
+
+    expect(
+      logger.debugCalls.some((c) => String(c[0]).includes("Telemetry POST failed (503)"))
+    ).toBe(true);
+    expect(logger.warnCalls.length).toBe(0);
+    expect(logger.errorCalls.length).toBe(0);
+    for (const spy of consoleSpies) expect(spy).not.toHaveBeenCalled();
+    await q.close();
+  });
+
   it("does not throw when the supplied logger lacks debug/info and those levels are emitted", () => {
     const minimalLogger: Logger = {
       warn: () => {},

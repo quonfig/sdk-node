@@ -8,6 +8,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { Quonfig } from "../src/quonfig";
+import { spyOnSendTelemetry } from "./helpers/telemetrySpy";
 import { Transport } from "../src/transport";
 import type { ConfigEnvelope } from "../src/types";
 
@@ -39,9 +40,7 @@ describe("close() drains telemetry (qfg-vrfm)", () => {
       },
       sourceIndex: 0,
     });
-    const postTelemetrySpy = vi
-      .spyOn(Transport.prototype, "postTelemetry")
-      .mockResolvedValue(undefined);
+    const { spy: postTelemetrySpy, payloads } = spyOnSendTelemetry();
 
     const quonfig = new Quonfig({
       sdkKey: "test-sdk-key",
@@ -63,7 +62,7 @@ describe("close() drains telemetry (qfg-vrfm)", () => {
     // additive failover event (resolvedFromPrimary=1 from the HTTP init install,
     // qfg-41nh.18). This test's contract is that the buffered eval summary is
     // drained on close, so assert its presence without pinning the array length.
-    expect(postTelemetrySpy).toHaveBeenCalledWith(
+    expect(payloads()[0]).toEqual(
       expect.objectContaining({
         events: expect.arrayContaining([
           expect.objectContaining({

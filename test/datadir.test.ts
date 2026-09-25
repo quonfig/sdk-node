@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { loadEnvelopeFromDatadir } from "../src/datadir";
 import { Quonfig } from "../src/quonfig";
+import { spyOnSendTelemetry } from "./helpers/telemetrySpy";
 import { Transport } from "../src/transport";
 import type { ConfigEnvelope, WorkspaceConfigDocument } from "../src/types";
 
@@ -436,9 +437,7 @@ describe("Quonfig datadir", () => {
     const fetchSpy = vi
       .spyOn(Transport.prototype, "fetchFromUrlAt")
       .mockResolvedValue({ result: { envelope, notChanged: false }, sourceIndex: 0 });
-    const postTelemetrySpy = vi
-      .spyOn(Transport.prototype, "postTelemetry")
-      .mockResolvedValue(undefined);
+    const { spy: postTelemetrySpy, payloads } = spyOnSendTelemetry();
 
     const quonfig = new Quonfig({
       sdkKey: "test-sdk-key",
@@ -458,7 +457,7 @@ describe("Quonfig datadir", () => {
     // additive failover event (resolvedFromPrimary=1 from the HTTP init install,
     // qfg-41nh.18). The contract here is that the eval summary is posted on
     // flush, so assert its presence without pinning the array length.
-    expect(postTelemetrySpy).toHaveBeenCalledWith(
+    expect(payloads()[0]).toEqual(
       expect.objectContaining({
         instanceHash: expect.any(String),
         events: expect.arrayContaining([

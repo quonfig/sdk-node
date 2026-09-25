@@ -43,6 +43,7 @@ import { ContextShapeCollector } from "./telemetry/contextShapes";
 import { ExampleContextCollector } from "./telemetry/exampleContexts";
 import { FailoverCollector } from "./telemetry/failoverAggregator";
 import { TelemetryReporter } from "./telemetry/reporter";
+import { TELEMETRY_DEFAULTS } from "./telemetry/transportQueue";
 
 const DEFAULT_FALLBACK_POLL_INTERVAL_MS = 60000;
 const DEFAULT_INIT_TIMEOUT = 10000;
@@ -243,6 +244,13 @@ export class Quonfig {
   private inFlightRefresh?: Promise<void>;
   private closed: boolean = false;
   private telemetryReporter?: TelemetryReporter;
+  private telemetryTransportOptions: {
+    flushIntervalMs?: number;
+    timeoutMs?: number;
+    maxRetainedBatches?: number;
+    maxRetainedBytes?: number;
+    maxRetainedAgeMs?: number;
+  };
   private instanceHash: string;
   private environmentId: string = "";
   private initialized: boolean = false;
@@ -409,11 +417,27 @@ export class Quonfig {
 
     // Initialize telemetry collectors
     const contextUploadMode: ContextUploadMode = options.contextUploadMode ?? "periodic_example";
+    const cap = (v: number | undefined, fallback: number): number =>
+      typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.max(1, Math.floor(v)) : fallback;
     this.evaluationSummaries = new EvaluationSummaryCollector(
-      options.collectEvaluationSummaries ?? true
+      options.collectEvaluationSummaries ?? true,
+      cap(options.telemetryMaxEvaluationSummaries, TELEMETRY_DEFAULTS.maxEvaluationSummaries)
     );
-    this.contextShapes = new ContextShapeCollector(contextUploadMode);
-    this.exampleContexts = new ExampleContextCollector(contextUploadMode);
+    this.contextShapes = new ContextShapeCollector(
+      contextUploadMode,
+      cap(options.telemetryMaxContextShapeFields, TELEMETRY_DEFAULTS.maxContextShapeFields)
+    );
+    this.exampleContexts = new ExampleContextCollector(
+      contextUploadMode,
+      cap(options.telemetryMaxExampleContexts, TELEMETRY_DEFAULTS.maxExampleContexts)
+    );
+    this.telemetryTransportOptions = {
+      flushIntervalMs: options.telemetryFlushIntervalMs,
+      timeoutMs: options.telemetryTimeoutMs,
+      maxRetainedBatches: options.telemetryMaxRetainedBatches,
+      maxRetainedBytes: options.telemetryMaxRetainedBytes,
+      maxRetainedAgeMs: options.telemetryMaxRetainedAgeMs,
+    };
     // Failover counters ride any enabled telemetry stream regardless of the
     // eval/context opt-outs, but a full telemetry opt-out disables them too.
     this.failover = new FailoverCollector(this.isTelemetryEnabled());
@@ -924,18 +948,23 @@ export class Quonfig {
    */
   async flush(): Promise<void> {
     if (this.telemetryReporter) {
-      await this.telemetryReporter.sync();
+      await this.telemetryReporter.flush();
     }
   }
 
   /**
-   * Close the SDK. Drains pending telemetry, then stops SSE, polling, and
-   * the telemetry reporter. Returns a Promise so callers can `await close()`
-   * before exiting; matches Go/Ruby/Python "close drains" behavior and the
-   * sdk-javascript@0.0.12 contract.
+   * Close the SDK. Sends the live telemetry window once (5s deadline; failed
+   * batches retained for resend are not drained), then stops SSE, polling,
+   * and the telemetry reporter. Returns a Promise so callers can
+   * `await close()` before exiting; never blocks exit on a slow telemetry
+   * endpoint.
    */
   async close(): Promise<void> {
-    await this.flush();
+    if (this.telemetryReporter) {
+      const reporter = this.telemetryReporter;
+      this.telemetryReporter = undefined;
+      await reporter.close();
+    }
 
     if (this.sseConnection) {
       this.sseConnection.close();
@@ -953,11 +982,6 @@ export class Quonfig {
     }
     this.cancelPendingFallbackEngage();
     this.fallbackPollerEngaged = false;
-
-    if (this.telemetryReporter) {
-      this.telemetryReporter.stop();
-      this.telemetryReporter = undefined;
-    }
 
     this.closed = true;
   }
@@ -1735,6 +1759,7 @@ export class Quonfig {
       exampleContexts: this.exampleContexts,
       failover: this.failover,
       logger: this.logger,
+      ...this.telemetryTransportOptions,
     });
 
     this.telemetryReporter.start();

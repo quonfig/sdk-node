@@ -278,6 +278,50 @@ export interface QuonfigOptions {
   onNoDefault?: OnNoDefault;
   collectEvaluationSummaries?: boolean;
   contextUploadMode?: ContextUploadMode;
+  /**
+   * How often (ms) the SDK sends collected telemetry. One POST per interval,
+   * at most one in flight. Default 60000 (was a hardcoded 8000 before 1.3.0).
+   * Invalid values (non-finite or <= 0) fall back to the default. (qfg-mol-9u0)
+   */
+  telemetryFlushIntervalMs?: number;
+  /**
+   * Overall deadline (ms) for one telemetry POST, request start to response
+   * end, connect and TLS included. A timed-out batch is kept and resent
+   * unchanged later. Default 15000 (was 3000 before 1.3.0). (qfg-mol-9u0)
+   */
+  telemetryTimeoutMs?: number;
+  /**
+   * Maximum number of failed telemetry batches kept for resend. When full, the
+   * oldest batch is dropped. Default 5. (qfg-mol-9u0)
+   */
+  telemetryMaxRetainedBatches?: number;
+  /**
+   * Maximum total bytes of failed telemetry batches kept for resend (oldest
+   * dropped first). A single batch larger than this is sent once and dropped
+   * if that send fails, never retained. Default 2097152 (2MB). (qfg-mol-9u0)
+   */
+  telemetryMaxRetainedBytes?: number;
+  /**
+   * A retained telemetry batch older than this (ms) is discarded instead of
+   * resent. Default 300000 (5 min). (qfg-mol-9u0)
+   */
+  telemetryMaxRetainedAgeMs?: number;
+  /**
+   * Maximum distinct (config key, config type) evaluation summaries per
+   * telemetry window. New keys beyond the cap are not recorded; existing keys
+   * keep counting. Default 10000. (qfg-mol-9u0)
+   */
+  telemetryMaxEvaluationSummaries?: number;
+  /**
+   * Maximum distinct (context name, field name) pairs in the context-shape
+   * report per telemetry window. Default 10000. (qfg-mol-9u0)
+   */
+  telemetryMaxContextShapeFields?: number;
+  /**
+   * Maximum example contexts per telemetry window (`contextUploadMode:
+   * "periodic_example"`). Default 10000. (qfg-mol-9u0)
+   */
+  telemetryMaxExampleContexts?: number;
   initTimeout?: number;
   datadir?: string;
   datafile?: string | object;

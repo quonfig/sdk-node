@@ -34,6 +34,19 @@ describe("auth header consistency", () => {
     expect(captured?.get("Authorization")).toBe(expectedHeader);
   });
 
+  it("Transport.sendTelemetry (the reporter's POST) sends Basic base64('1:KEY')", async () => {
+    let captured: Headers | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      captured = new Headers(init?.headers as HeadersInit);
+      return fetchOk();
+    });
+
+    const transport = new Transport(["https://api.example.com"], KEY);
+    await transport.sendTelemetry(Buffer.from("{}"), { timeoutMs: 15000 });
+
+    expect(captured?.get("Authorization")).toBe(expectedHeader);
+  });
+
   it("ApiClient (Client) sends Basic base64('1:KEY') so api-telemetry accepts the auth", async () => {
     let captured: Headers | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {

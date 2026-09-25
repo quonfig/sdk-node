@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { BoundQuonfig, Quonfig } from "../src/quonfig";
+import { spyOnSendTelemetry } from "./helpers/telemetrySpy";
 import { Transport } from "../src/transport";
 import type { ConfigEnvelope } from "../src/types";
 
@@ -104,9 +105,7 @@ describe("Quonfig.inContext callback overload", () => {
   });
 
   it("records evaluation summaries for keys resolved via the callback form", async () => {
-    const postTelemetrySpy = vi
-      .spyOn(Transport.prototype, "postTelemetry")
-      .mockResolvedValue(undefined);
+    const { spy: postTelemetrySpy, payloads } = spyOnSendTelemetry();
     vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
       result: {
         envelope: envelope([planRuleConfig()]),
@@ -127,7 +126,7 @@ describe("Quonfig.inContext callback overload", () => {
     await q.flush();
 
     expect(postTelemetrySpy).toHaveBeenCalledTimes(1);
-    expect(postTelemetrySpy).toHaveBeenCalledWith(
+    expect(payloads()[0]).toEqual(
       expect.objectContaining({
         events: expect.arrayContaining([
           expect.objectContaining({

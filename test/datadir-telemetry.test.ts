@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { Quonfig } from "../src/quonfig";
-import { Transport } from "../src/transport";
+import { spyOnSendTelemetry } from "./helpers/telemetrySpy";
 import type { ConfigEnvelope } from "../src/types";
 
 describe("telemetry reporter starts in datadir mode", () => {
@@ -31,9 +31,7 @@ describe("telemetry reporter starts in datadir mode", () => {
       ],
     };
 
-    const postTelemetrySpy = vi
-      .spyOn(Transport.prototype, "postTelemetry")
-      .mockResolvedValue(undefined);
+    const { spy: postTelemetrySpy, payloads } = spyOnSendTelemetry();
 
     const quonfig = new Quonfig({
       sdkKey: "test-sdk-key",
@@ -50,7 +48,7 @@ describe("telemetry reporter starts in datadir mode", () => {
     await quonfig.close();
 
     expect(postTelemetrySpy).toHaveBeenCalledTimes(1);
-    expect(postTelemetrySpy).toHaveBeenCalledWith(
+    expect(payloads()[0]).toEqual(
       expect.objectContaining({
         events: [
           expect.objectContaining({
@@ -96,9 +94,7 @@ describe("telemetry reporter starts in datadir mode", () => {
       ],
     };
 
-    const postTelemetrySpy = vi
-      .spyOn(Transport.prototype, "postTelemetry")
-      .mockResolvedValue(undefined);
+    const { spy: postTelemetrySpy, payloads } = spyOnSendTelemetry();
 
     const quonfig = new Quonfig({
       // No sdkKey — datafile is the only credential-equivalent.
