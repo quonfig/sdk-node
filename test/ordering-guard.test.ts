@@ -120,12 +120,13 @@ describe("install-guard carve-out: established client installs an unversioned sn
       // An unversioned snapshot arrives (generation 0 — a server that predates
       // the generation watermark). It carries no ordering info, so the guard
       // must NOT reject it as "older": the established client installs it
-      // (held falls to 0, install count advances) rather than freezing on 42.
+      // (install count advances) rather than freezing on 42. The held
+      // generation is NOT lowered — it stays at the prior max (qfg-9dxb.3).
       body = envelopeJSON(0);
       etag = '"gen-0"';
       await refresh(client);
       expect(client.configInstallCount()).toBe(establishedInstalls + 1);
-      expect(client.heldGeneration()).toBe(0);
+      expect(client.heldGeneration()).toBe(42);
 
       // A payload with NO meta.generation field at all is equally unversioned
       // (generation ?? 0 → 0) and also installs via the same carve-out.
@@ -136,7 +137,15 @@ describe("install-guard carve-out: established client installs an unversioned sn
       etag = '"no-generation"';
       await refresh(client);
       expect(client.configInstallCount()).toBe(establishedInstalls + 2);
-      expect(client.heldGeneration()).toBe(0);
+      expect(client.heldGeneration()).toBe(42);
+
+      // Because the watermark was kept, an OLDER versioned snapshot arriving
+      // after the unversioned installs is still rejected (never goes backward).
+      body = envelopeJSON(41);
+      etag = '"gen-41"';
+      await refresh(client);
+      expect(client.configInstallCount()).toBe(establishedInstalls + 2);
+      expect(client.heldGeneration()).toBe(42);
     } finally {
       await client.close().catch(() => {});
     }

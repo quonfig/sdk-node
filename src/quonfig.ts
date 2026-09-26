@@ -258,7 +258,7 @@ export class Quonfig {
   private initialized: boolean = false;
 
   // ---- canonical-ordering + failover observability (qfg-7h5d.1.7) ----
-  /** Meta.generation of the currently-installed envelope (0 before first install). */
+  /** Highest positive Meta.generation installed (0 until a versioned install; never lowered). */
   private heldGenerationValue: number = 0;
   /** Count of installEnvelope calls over the client's lifetime (every install path). */
   private configInstalls: number = 0;
@@ -1313,7 +1313,16 @@ export class Quonfig {
   private installEnvelope(envelope: ConfigEnvelope): void {
     this.store.update(envelope);
     this.environmentId = envelope.meta.environment;
-    this.heldGenerationValue = envelope.meta.generation ?? 0;
+    // Fix A (qfg-9dxb.3): an unversioned install (generation absent or <= 0 —
+    // a pre-watermark server, `qfg serve`, or datadir) still installs via the
+    // carve-out, but carries no ordering information, so it never LOWERS a
+    // positive held generation. Otherwise a single unversioned payload would
+    // reset the watermark and let a later, older versioned snapshot regress an
+    // established client — breaking "never goes backward".
+    const incoming = envelope.meta.generation ?? 0;
+    if (incoming > 0) {
+      this.heldGenerationValue = incoming;
+    }
     this.configInstalls++;
     this.lastSuccessfulRefreshAt = new Date();
     this.invokeOnConfigUpdate();
@@ -1337,7 +1346,9 @@ export class Quonfig {
    *   - An unversioned snapshot (generation absent or 0 — a server that predates
    *     the watermark) carries no ordering information, so we can't reject it as
    *     "older". It installs exactly as it did before this guard existed,
-   *     preserving backward compatibility for pre-watermark servers.
+   *     preserving backward compatibility for pre-watermark servers. It does
+   *     not lower the held generation (qfg-9dxb.3), so a later older versioned
+   *     snapshot is still rejected.
    *
    * Node is single-threaded, so this synchronous check plus the installEnvelope
    * that follows it run as one atomic step with respect to every other install
@@ -1380,10 +1391,13 @@ export class Quonfig {
   }
 
   /**
-   * Meta.generation of the config the client is currently holding (0 before the
-   * first install, or when the server predates the watermark). A higher
-   * generation is strictly newer; the canonical-ordering guard compares against
-   * it on every install path. (qfg-7h5d.1.7)
+   * Highest positive Meta.generation the client has installed (0 until a
+   * versioned snapshot installs, e.g. when the server predates the watermark).
+   * A higher generation is strictly newer; the canonical-ordering guard
+   * compares against it on every install path. (qfg-7h5d.1.7)
+   *
+   * An unversioned install (generation absent or 0) still installs but does
+   * not lower this value — before qfg-9dxb.3 it reset it to 0.
    */
   heldGeneration(): number {
     return this.heldGenerationValue;
@@ -1501,6 +1515,21 @@ export class Quonfig {
         lastError = leg.error;
         return;
       }
+      try {
+        installLeg(leg);
+      } catch (err) {
+        // Any throw while installing a leg (a payload that passed transport
+        // validation but still can't be applied) fails THAT leg rather than
+        // escaping into the hedge's drain, where it would leave firstInstall
+        // unsettled and wedge fetchAndInstall — and with it the fallback poller
+        // and updateIfStalerThan — for the life of the process (qfg-4k7d).
+        failures++;
+        lastError = err instanceof Error ? err : new Error(String(err));
+        this.logger.warn("[quonfig] failed to install config payload:", err);
+      }
+    };
+
+    const installLeg = (leg: LegResult): void => {
       const res = leg.result!;
       if (res.notChanged) {
         // 304 Not Modified: the leg answered and confirmed the held config is

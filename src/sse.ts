@@ -1,3 +1,4 @@
+import { parseConfigEnvelope } from "./envelope";
 import type { ConfigEnvelope, SSEConnectionState } from "./types";
 import type { Transport } from "./transport";
 import { normalizeLogger, type Logger, type NormalizedLogger } from "./sdkLogger";
@@ -200,7 +201,9 @@ export class SSEConnection {
 
       es.onmessage = (event: any) => {
         try {
-          const envelope: ConfigEnvelope = JSON.parse(event.data);
+          // A non-envelope event is dropped exactly like malformed JSON
+          // (qfg-9dxb.3 Fix B): it never reaches the install guard.
+          const envelope: ConfigEnvelope = parseConfigEnvelope(JSON.parse(event.data));
           onUpdate(envelope);
         } catch (err) {
           this.logger.warn("SSE message parse error:", err);

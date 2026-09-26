@@ -1,4 +1,5 @@
 import type { ConfigEnvelope } from "./types";
+import { parseConfigEnvelope } from "./envelope";
 import { normalizeLogger, type Logger, type NormalizedLogger } from "./sdkLogger";
 import SDK_VERSION from "./version";
 import { realTelemetryClock, type TelemetryClock } from "./telemetry/clock";
@@ -297,12 +298,17 @@ export class Transport {
         throw new Error(`Unexpected status ${response.status} from ${baseUrl}: ${body}`);
       }
 
+      // Decode AND validate before touching the ETag slot: a non-envelope 200
+      // (a proxy/WAF answering `{}` or `{"error":...}`) is a failed leg, so
+      // hedge/failover proceed, and its ETag is never stored — otherwise later
+      // 304s would keep "confirming" the junk (qfg-9dxb.3 Fix B).
+      const envelope = parseConfigEnvelope(await response.json());
+
       const newEtag = response.headers.get("ETag");
       if (newEtag) {
         this.etags[i] = newEtag;
       }
 
-      const envelope = (await response.json()) as ConfigEnvelope;
       return { result: { envelope, notChanged: false }, sourceIndex: i };
     } catch (err) {
       return { error: err instanceof Error ? err : new Error(String(err)), sourceIndex: i };

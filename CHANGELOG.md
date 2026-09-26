@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Reject non-envelope config payloads (qfg-9dxb.3, qfg-4k7d).** A config response must now have a
+  `meta` object with a non-empty `version`. Over HTTP, a 200 that fails this check (for example `{}`
+  or `{"error":"x"}` from a proxy or WAF) counts as a failed leg: hedging and failover continue and
+  its ETag is not stored. Over SSE, such an event is dropped the same way malformed JSON is. Before
+  this, such a 200 on an established client threw inside the install path and permanently wedged
+  `fetchAndInstall`, the fallback poller and `updateIfStalerThan`. Any other error while installing
+  a leg now fails that leg instead of wedging the refresh. `qfg serve` payloads (version and
+  environment, no generation) still install.
+- **`heldGeneration()` is no longer lowered by an unversioned install (qfg-9dxb.3).** A payload with
+  no `meta.generation` (or 0) still installs, but `heldGeneration()` keeps the highest positive
+  generation seen instead of resetting to 0. A later, older versioned snapshot is therefore still
+  rejected, so an established client can never go backward.
+
 ## 1.3.0 - 2026-09-25
 
 - **Telemetry transport policy (qfg-mol-9u0, qfg-mol-m3c.1).** The telemetry POST timeout goes from

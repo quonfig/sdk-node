@@ -298,3 +298,50 @@ describe("Quonfig — Layer 2 fallback poller", () => {
     await quonfig.close();
   });
 });
+
+describe("Quonfig — fallback poller survives a non-envelope 200 (qfg-4k7d)", () => {
+  it("keeps polling after a junk 200 and installs the next good payload", async () => {
+    const initial = { ...envelopeWithFlag("v1", false) };
+    initial.meta.generation = 1;
+    const later = { ...envelopeWithFlag("v3", true) };
+    later.meta.generation = 3;
+
+    // Mock the network (not fetchFromUrlAt) so the transport's real
+    // decode/validation path runs on every poll.
+    const bodies = [JSON.stringify(initial), "{}", '{"error":"x"}', JSON.stringify(later)];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      const body = bodies.length > 1 ? bodies.shift()! : bodies[0];
+      return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    const fakeOut: { value: FakeEventSource | null } = { value: null };
+    const quonfig = new Quonfig({
+      sdkKey: "test-sdk-key",
+      enableSSE: true,
+      fallbackPollEnabled: true,
+      fallbackPollIntervalMs: 1000,
+      collectEvaluationSummaries: false,
+      contextUploadMode: "none",
+      __testEventSourceFactory: makeEventSourceFactory(fakeOut),
+    } as any);
+
+    await quonfig.init();
+    expect(quonfig.isFeatureEnabled("build.dark-mode")).toBe(false);
+
+    // Initial SSE connect fails -> poller engages with an immediate poll.
+    await vi.advanceTimersByTimeAsync(10);
+    fakeOut.value!.onerror?.({ type: "error" });
+    expect((quonfig as any).fallbackPollerActive()).toBe(true);
+
+    // Two junk polls, then the good one.
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    const calls = fetchSpy.mock.calls.filter(([u]) => String(u).includes("/api/v2/configs"));
+    expect(calls.length).toBeGreaterThanOrEqual(4);
+    expect(quonfig.isFeatureEnabled("build.dark-mode")).toBe(true);
+    expect(quonfig.heldGeneration()).toBe(3);
+
+    await quonfig.close();
+  });
+});
