@@ -175,7 +175,7 @@ describe("HTTP: a non-envelope 200 on an established client", () => {
 });
 
 describe("qfg serve payloads (version + environment, no generation)", () => {
-  it("seed a fresh client and install on an established one via the carve-out, keeping the held max", async () => {
+  it("seed a fresh client, but never override a held real generation (qfg-9dxb.9)", async () => {
     let body = JSON.stringify(
       flagEnvelope(true, { version: "abc123", environment: "development" })
     );
@@ -201,9 +201,9 @@ describe("qfg serve payloads (version + environment, no generation)", () => {
       body = JSON.stringify(flagEnvelope(false, { version: "def456", environment: "development" }));
       etag = '"serve-2"';
       expect(await refresh(client)).toBe("settled");
-      expect(client.configInstallCount()).toBe(installs + 1);
-      expect(client.isFeatureEnabled("build.dark-mode")).toBe(false);
-      // Fix A: the unversioned install never lowers the positive held generation.
+      // Once a real generation is held, an unversioned payload is a no-op.
+      expect(client.configInstallCount()).toBe(installs);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
       expect(client.heldGeneration()).toBe(42);
     } finally {
       await client.close().catch(() => {});

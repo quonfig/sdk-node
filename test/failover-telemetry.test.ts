@@ -417,7 +417,7 @@ describe("guardRejected counts strictly-older payloads only (qfg-rr5b)", () => {
     }
   });
 
-  it("never counts an unversioned (generation <= 0) snapshot — the carve-out installs it", async () => {
+  it("never counts a rejected unversioned (generation <= 0) snapshot — a silent no-op", async () => {
     const server = http.createServer((_req, res) => {
       res.writeHead(200, { ETag: '"gen-42"', "Content-Type": "application/json" });
       res.end(envelopeJSON(42));
@@ -435,10 +435,12 @@ describe("guardRejected counts strictly-older payloads only (qfg-rr5b)", () => {
       await client.init();
       const installs = client.configInstallCount();
 
-      // A pre-watermark server's snapshot carries no ordering information, so
-      // the guard can't call it older: it installs, and nothing is counted.
+      // A gen-0 snapshot (a damaged-store server) is not installed over the
+      // held gen 42 (qfg-9dxb.9), but it is not provably OLDER either, so the
+      // rejection is a silent no-op: nothing is counted.
       driveSSE(client, JSON.parse(envelopeJSON(0)) as ConfigEnvelope);
-      expect(client.configInstallCount()).toBe(installs + 1);
+      expect(client.configInstallCount()).toBe(installs);
+      expect(client.heldGeneration()).toBe(42);
 
       await client.flush();
 

@@ -9,7 +9,9 @@ import { Quonfig } from "../src/quonfig";
  * mirrors chaos scenarios o02/o03/o04). Install only if the incoming
  * Meta.generation advances the held generation: a fresh client seeds off
  * whatever arrives first, an established client never regresses to an older
- * payload, a same-generation snapshot is a no-op.
+ * payload, a same-generation snapshot is a no-op. An unversioned (gen<=0)
+ * payload installs only while the client has never held a real generation
+ * (qfg-9dxb.9).
  */
 
 function envelopeJSON(generation: number): string {
@@ -17,6 +19,34 @@ function envelopeJSON(generation: number): string {
     configs: [],
     meta: { version: `gen-${generation}`, environment: "Production", generation },
   });
+}
+
+function flagEnvelope(value: boolean, meta: Record<string, unknown>): Record<string, unknown> {
+  return {
+    meta,
+    configs: [
+      {
+        id: "flag-1",
+        key: "build.dark-mode",
+        type: "feature_flag",
+        valueType: "bool",
+        sendToClientSdk: false,
+        default: {
+          rules: [{ criteria: [{ operator: "ALWAYS_TRUE" }], value: { type: "bool", value } }],
+        },
+      },
+    ],
+  };
+}
+
+function flagJSON(value: boolean, generation: number): string {
+  return JSON.stringify(
+    flagEnvelope(value, {
+      version: `gen-${generation}-${value}`,
+      environment: "Production",
+      generation,
+    })
+  );
 }
 
 const servers: http.Server[] = [];
@@ -95,12 +125,11 @@ describe("reject-older install guard (o02 secondary-older)", () => {
   });
 });
 
-describe("install-guard carve-out: established client installs an unversioned snapshot (gen <= 0)", () => {
-  it("an established client at gen 42 installs an incoming gen<=0 payload instead of freezing", async () => {
-    // The server starts on a real positive generation, then flips to
-    // unversioned payloads. Distinct ETags per phase so the bumped body is
-    // never masked as a 304 by the transport's per-leg If-None-Match slot.
-    let body = envelopeJSON(42);
+describe("install guard: a gen<=0 payload never overrides a held real generation (qfg-9dxb.9)", () => {
+  it("holds gen N (NEW) against a gen-0 (OLD) payload, and a gen-N re-delivery stays NEW", async () => {
+    // Distinct ETags per phase so each body is served as a full 200 and never
+    // masked as a 304 by the transport's per-leg If-None-Match slot.
+    let body = flagJSON(true, 42);
     let etag = '"gen-42"';
 
     const server = http.createServer((_req, res) => {
@@ -112,40 +141,75 @@ describe("install-guard carve-out: established client installs an unversioned sn
     const client = makeClient([url]);
     try {
       await client.init();
-      // Established on a real positive generation.
       expect(client.heldGeneration()).toBe(42);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
       const establishedInstalls = client.configInstallCount();
-      expect(establishedInstalls).toBeGreaterThan(0);
 
-      // An unversioned snapshot arrives (generation 0 — a server that predates
-      // the generation watermark). It carries no ordering info, so the guard
-      // must NOT reject it as "older": the established client installs it
-      // (install count advances) rather than freezing on 42. The held
-      // generation is NOT lowered — it stays at the prior max (qfg-9dxb.3).
-      body = envelopeJSON(0);
+      // Gen 0 today only comes from a server whose git object store is damaged
+      // (rev-count failed). It must not move the client back to OLD content.
+      body = flagJSON(false, 0);
       etag = '"gen-0"';
       await refresh(client);
-      expect(client.configInstallCount()).toBe(establishedInstalls + 1);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
+      expect(client.configInstallCount()).toBe(establishedInstalls);
       expect(client.heldGeneration()).toBe(42);
 
-      // A payload with NO meta.generation field at all is equally unversioned
-      // (generation ?? 0 → 0) and also installs via the same carve-out.
-      body = JSON.stringify({
-        configs: [],
-        meta: { version: "no-generation", environment: "Production" },
-      });
+      // A payload with NO meta.generation field is equally unversioned.
+      body = JSON.stringify(
+        flagEnvelope(false, { version: "no-generation", environment: "Production" })
+      );
       etag = '"no-generation"';
       await refresh(client);
-      expect(client.configInstallCount()).toBe(establishedInstalls + 2);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
+      expect(client.configInstallCount()).toBe(establishedInstalls);
+
+      // The healthy gen N re-delivered: still NEW (never stuck on OLD).
+      body = flagJSON(true, 42);
+      etag = '"gen-42-again"';
+      await refresh(client);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
       expect(client.heldGeneration()).toBe(42);
 
-      // Because the watermark was kept, an OLDER versioned snapshot arriving
-      // after the unversioned installs is still rejected (never goes backward).
-      body = envelopeJSON(41);
-      etag = '"gen-41"';
+      // A newer versioned snapshot still heals forward.
+      body = flagJSON(false, 43);
+      etag = '"gen-43"';
       await refresh(client);
-      expect(client.configInstallCount()).toBe(establishedInstalls + 2);
-      expect(client.heldGeneration()).toBe(42);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(false);
+      expect(client.heldGeneration()).toBe(43);
+    } finally {
+      await client.close().catch(() => {});
+    }
+  });
+
+  it("a client that has only ever seen gen 0 installs each gen-0 payload", async () => {
+    let body = flagJSON(true, 0);
+    let etag = '"gen-0-a"';
+
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { ETag: etag, "Content-Type": "application/json" });
+      res.end(body);
+    });
+    const url = await listen(server);
+
+    const client = makeClient([url]);
+    try {
+      await client.init();
+      expect(client.heldGeneration()).toBe(0);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
+      const seedInstalls = client.configInstallCount();
+
+      body = flagJSON(false, 0);
+      etag = '"gen-0-b"';
+      await refresh(client);
+      expect(client.configInstallCount()).toBe(seedInstalls + 1);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(false);
+
+      body = flagJSON(true, 0);
+      etag = '"gen-0-c"';
+      await refresh(client);
+      expect(client.configInstallCount()).toBe(seedInstalls + 2);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
+      expect(client.heldGeneration()).toBe(0);
     } finally {
       await client.close().catch(() => {});
     }

@@ -1314,11 +1314,11 @@ export class Quonfig {
     this.store.update(envelope);
     this.environmentId = envelope.meta.environment;
     // Fix A (qfg-9dxb.3): an unversioned install (generation absent or <= 0 —
-    // a pre-watermark server, `qfg serve`, or datadir) still installs via the
-    // carve-out, but carries no ordering information, so it never LOWERS a
-    // positive held generation. Otherwise a single unversioned payload would
-    // reset the watermark and let a later, older versioned snapshot regress an
-    // established client — breaking "never goes backward".
+    // `qfg serve`, datadir, or a network payload installed while no real
+    // generation is held yet) carries no ordering information, so it never
+    // LOWERS a positive held generation. Otherwise a single unversioned payload
+    // would reset the watermark and let a later, older versioned snapshot
+    // regress an established client — breaking "never goes backward".
     const incoming = envelope.meta.generation ?? 0;
     if (incoming > 0) {
       this.heldGenerationValue = incoming;
@@ -1343,12 +1343,15 @@ export class Quonfig {
    *     never move the client backward; a later, newer leg heals forward.
    *   - A same-generation snapshot is not strictly greater, so it is a no-op —
    *     an equal second leg can't re-install or flap.
-   *   - An unversioned snapshot (generation absent or 0 — a server that predates
-   *     the watermark) carries no ordering information, so we can't reject it as
-   *     "older". It installs exactly as it did before this guard existed,
-   *     preserving backward compatibility for pre-watermark servers. It does
-   *     not lower the held generation (qfg-9dxb.3), so a later older versioned
-   *     snapshot is still rejected.
+   *   - An unversioned snapshot (generation absent or <= 0) installs ONLY while
+   *     the client has never held a real generation (held == 0), e.g. against
+   *     `qfg serve`. Once a positive generation is held it is a silent no-op
+   *     (qfg-9dxb.9). The pre-watermark servers that sent gen 0 on every
+   *     payload are long gone; gen 0 now only comes from an api-delivery
+   *     machine whose git object store is damaged (rev-count failed) — the
+   *     least trustworthy source — so it must not override a held real
+   *     generation and move the client back to older content. Such an install
+   *     never lowers the held generation (qfg-9dxb.3).
    *
    * Node is single-threaded, so this synchronous check plus the installEnvelope
    * that follows it run as one atomic step with respect to every other install
@@ -1358,10 +1361,10 @@ export class Quonfig {
   private shouldInstall(envelope: ConfigEnvelope): boolean {
     if (this.configInstalls === 0) return true;
     const incoming = envelope.meta.generation ?? 0;
-    // Unversioned incoming snapshot: no watermark to order by → install (the
-    // pre-watermark behavior). The guard only blocks a strictly-older versioned
-    // snapshot from regressing an established client.
-    if (incoming <= 0) return true;
+    // Unversioned incoming snapshot (gen <= 0): install only if no real
+    // generation has ever been held. Over a held positive generation it comes
+    // from a damaged-store server and must not win (qfg-9dxb.9).
+    if (incoming <= 0) return this.heldGenerationValue === 0;
     return incoming > this.heldGenerationValue;
   }
 
@@ -1380,9 +1383,9 @@ export class Quonfig {
    * no-op: not installed, and liveness still advances at the call sites exactly
    * as it did before (qfg-41nh.11).
    *
-   * The gen<=0 unversioned carve-out in {@link Quonfig.shouldInstall} accepts
-   * such snapshots outright, so a rejection always carries a positive incoming
-   * generation; the guard here is belt-and-suspenders.
+   * A gen<=0 snapshot rejected by {@link Quonfig.shouldInstall} (held > 0) is
+   * not provably older — it carries no ordering information — so it is a
+   * silent no-op too and never counted (qfg-9dxb.9).
    */
   private isStrictlyOlderThanHeld(envelope: ConfigEnvelope): boolean {
     const incoming = envelope.meta.generation ?? 0;
@@ -1557,7 +1560,8 @@ export class Quonfig {
           resolveFirstInstall();
         }
       } else {
-        // 200 dropped by the reject-older guard (equal-or-older payload): the
+        // 200 dropped by the reject-older guard (equal-or-older payload, or a
+        // gen<=0 one over a held real generation — qfg-9dxb.9): the
         // fetch succeeded, only the install was a no-op — so liveness still
         // advances (qfg-41nh.11). Only a STRICTLY older payload is counted for
         // failover observability; an equal-generation re-delivery is a silent
@@ -1620,7 +1624,8 @@ export class Quonfig {
       // installEnvelope stamps lastSuccessfulRefreshAt itself.
       this.installEnvelope(envelope);
     } else {
-      // Guard-rejected SSE message (equal-or-older): nothing installs, but the
+      // Guard-rejected SSE message (equal-or-older, or gen<=0 over a held real
+      // generation — qfg-9dxb.9): nothing installs, but the
       // message was received and processed, so liveness still advances
       // (qfg-41nh.11). Only a STRICTLY older message is counted for failover
       // observability — api-delivery re-sends the current envelope on every

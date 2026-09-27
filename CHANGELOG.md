@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A generation-0 payload no longer overrides a held generation (qfg-9dxb.9).** Once the client has
+  installed a payload with a positive `meta.generation`, a later payload with generation 0 (or none)
+  is ignored. Before this, such a payload always installed, so a server with a damaged git store
+  could move the client back to older config. The client then also rejected the healthy current
+  generation until a newer one arrived. A client that has never seen a positive generation (for
+  example against `qfg serve`) still installs every such payload. The ignored payload is not counted
+  as `guardRejected`.
 - **Reject non-envelope config payloads (qfg-9dxb.3, qfg-4k7d).** A config response must now have a
   `meta` object with a non-empty `version`. Over HTTP, a 200 that fails this check (for example `{}`
   or `{"error":"x"}` from a proxy or WAF) counts as a failed leg: hedging and failover continue and
@@ -11,8 +18,8 @@
   a leg now fails that leg instead of wedging the refresh. `qfg serve` payloads (version and
   environment, no generation) still install.
 - **`heldGeneration()` is no longer lowered by an unversioned install (qfg-9dxb.3).** A payload with
-  no `meta.generation` (or 0) still installs, but `heldGeneration()` keeps the highest positive
-  generation seen instead of resetting to 0. A later, older versioned snapshot is therefore still
+  no `meta.generation` (or 0) no longer resets `heldGeneration()` to 0 when it installs; it keeps
+  the highest positive generation seen. A later, older versioned snapshot is therefore still
   rejected, so an established client can never go backward.
 
 ## 1.3.0 - 2026-09-25
