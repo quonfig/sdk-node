@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 - 2026-09-28
 
 - **Changed (behavior change): a weighted rollout that hashes on a missing property now gives every
   such caller the same variant (qfg-9dxb.8).** When a weighted rollout hashes on a context property
@@ -12,12 +12,6 @@
   missing, and the SDK logs one warning per flag. A weighted rollout with no hash property
   configured still picks a random variant on every evaluation, unchanged. When the property is
   present, users land in the same variant as in 1.3.0.
-- **Segment and decryption-key reference loops no longer crash `get()` (qfg-9dxb.7).** A segment
-  that references itself through `IN_SEG` / `NOT_IN_SEG` (directly or through a chain such as A -> B
-  -> A) is now treated as a missing segment at the point where the loop closes: `IN_SEG` is false
-  and `NOT_IN_SEG` is true. A confidential value whose `decryptWith` chain loops now fails with a
-  normal decryption error, the same as a missing key. Before this, both cases recursed until a
-  `RangeError: Maximum call stack size exceeded` was thrown out of `get()`. Behavior matches sdk-go.
 - **A generation-0 payload no longer overrides a held generation (qfg-9dxb.9).** Once the client has
   installed a payload with a positive `meta.generation`, a later payload with generation 0 (or none)
   is ignored and the client keeps the config it has. In 1.3.0 such a payload always installed, so a
@@ -26,6 +20,12 @@
   the client picks that config up when it is next served with a positive generation higher than the
   one it holds. A client that has never seen a positive generation (for example against `qfg serve`)
   still installs every such payload. The ignored payload is not counted as `guardRejected`.
+- **Segment and decryption-key reference loops no longer crash `get()` (qfg-9dxb.7).** A segment
+  that references itself through `IN_SEG` / `NOT_IN_SEG` (directly or through a chain such as A -> B
+  -> A) is now treated as a missing segment at the point where the loop closes: `IN_SEG` is false
+  and `NOT_IN_SEG` is true. A confidential value whose `decryptWith` chain loops now fails with a
+  normal decryption error, the same as a missing key. Before this, both cases recursed until a
+  `RangeError: Maximum call stack size exceeded` was thrown out of `get()`. Behavior matches sdk-go.
 - **Reject non-envelope config payloads (qfg-9dxb.3, qfg-4k7d).** A config response must now have a
   `meta` object with a non-empty `version`. Over HTTP, a 200 that fails this check (for example `{}`
   or `{"error":"x"}` from a proxy or WAF) counts as a failed leg: hedging and failover continue and
