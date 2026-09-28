@@ -1,4 +1,4 @@
-import type { Contexts, Value, WeightedValuesData } from "./types";
+import type { ContextValue, Contexts, Value, WeightedValuesData } from "./types";
 import { hashZeroToOne } from "./hashing";
 import { contextLookup } from "./context";
 
@@ -25,11 +25,12 @@ export class WeightedValueResolver {
     configKey: string,
     contexts: Contexts
   ): { value: Value | undefined; index: number; missingHashProperty?: string } {
-    const fraction = this.getUserFraction(wv, configKey, contexts);
+    const hashValue = wv.hashByPropertyName
+      ? contextLookup(contexts, wv.hashByPropertyName)
+      : undefined;
+    const fraction = this.getUserFraction(wv, configKey, hashValue);
     const missingHashProperty =
-      wv.hashByPropertyName && contextLookup(contexts, wv.hashByPropertyName) == null
-        ? wv.hashByPropertyName
-        : undefined;
+      wv.hashByPropertyName && hashValue == null ? wv.hashByPropertyName : undefined;
 
     let totalWeight = 0;
     for (const entry of wv.weightedValues) {
@@ -53,9 +54,12 @@ export class WeightedValueResolver {
     return { value: undefined, index: -1 };
   }
 
-  private getUserFraction(wv: WeightedValuesData, configKey: string, contexts: Contexts): number {
+  private getUserFraction(
+    wv: WeightedValuesData,
+    configKey: string,
+    value: ContextValue | undefined
+  ): number {
     if (wv.hashByPropertyName) {
-      const value = contextLookup(contexts, wv.hashByPropertyName);
       // Missing (undefined/null) hashes the same as "" (qfg-9dxb.8).
       const valueToHash = `${configKey}${value ?? ""}`;
       return hashZeroToOne(valueToHash);
