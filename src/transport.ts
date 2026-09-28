@@ -19,6 +19,13 @@ export interface LegResult {
   result?: FetchResult;
   error?: Error;
   sourceIndex: number;
+  /**
+   * Set on a 200 that stored a new ETag in this leg's slot. Undoes that store
+   * (restores the previous ETag) if the slot still holds it. The caller uses it
+   * when the payload is ignored as unversioned (gen<=0) so the ignored
+   * response's ETag can't turn later polls into 304s (qfg-9dxb.9).
+   */
+  rollbackEtag?: () => void;
 }
 
 const DEFAULT_DOMAIN = "quonfig.com";
@@ -305,11 +312,16 @@ export class Transport {
       const envelope = parseConfigEnvelope(await response.json());
 
       const newEtag = response.headers.get("ETag");
+      let rollbackEtag: (() => void) | undefined;
       if (newEtag) {
+        const previousEtag = this.etags[i];
         this.etags[i] = newEtag;
+        rollbackEtag = () => {
+          if (this.etags[i] === newEtag) this.etags[i] = previousEtag;
+        };
       }
 
-      return { result: { envelope, notChanged: false }, sourceIndex: i };
+      return { result: { envelope, notChanged: false }, sourceIndex: i, rollbackEtag };
     } catch (err) {
       return { error: err instanceof Error ? err : new Error(String(err)), sourceIndex: i };
     }

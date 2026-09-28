@@ -214,6 +214,56 @@ describe("install guard: a gen<=0 payload never overrides a held real generation
       await client.close().catch(() => {});
     }
   });
+
+  it("an ignored gen-0 200 does not leave its ETag behind to mask the same sha's repaired generation", async () => {
+    // api-delivery's ETag is the git sha. A machine can serve sha B at gen 0
+    // (damaged rev-count) and later repair the generation for the SAME sha, so
+    // the ETag does not change. If the ignored gen-0 response's ETag were kept,
+    // every later poll would 304 and the client would stay on A until the next
+    // commit.
+    let state = { sha: '"sha-A"', value: true, generation: 5 };
+    const ifNoneMatch: (string | undefined)[] = [];
+
+    const server = http.createServer((req, res) => {
+      const inm = req.headers["if-none-match"];
+      ifNoneMatch.push(inm);
+      if (inm === state.sha) {
+        res.writeHead(304);
+        res.end();
+        return;
+      }
+      res.writeHead(200, { ETag: state.sha, "Content-Type": "application/json" });
+      res.end(flagJSON(state.value, state.generation));
+    });
+    const url = await listen(server);
+
+    const client = makeClient([url]);
+    try {
+      await client.init();
+      expect(client.heldGeneration()).toBe(5);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
+
+      // Commit B served at gen 0: ignored, client stays on A.
+      state = { sha: '"sha-B"', value: false, generation: 0 };
+      await refresh(client);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
+      expect(client.heldGeneration()).toBe(5);
+
+      // Same sha B, generation repaired to 6.
+      state = { sha: '"sha-B"', value: false, generation: 6 };
+      await refresh(client);
+      expect(client.heldGeneration()).toBe(6);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(false);
+
+      // The accepted 200 still stores its ETag: the next poll is conditional
+      // on sha B and answered 304.
+      await refresh(client);
+      expect(ifNoneMatch[ifNoneMatch.length - 1]).toBe('"sha-B"');
+      expect(client.heldGeneration()).toBe(6);
+    } finally {
+      await client.close().catch(() => {});
+    }
+  });
 });
 
 describe("install guard heals forward and seeds (o03/o04)", () => {

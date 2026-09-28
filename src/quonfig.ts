@@ -1570,6 +1570,12 @@ export class Quonfig {
         if (this.isStrictlyOlderThanHeld(res.envelope)) {
           this.failover.recordGuardRejected();
         }
+        // An ignored gen<=0 payload must not leave its ETag (the git sha) in
+        // the leg's slot: a repaired generation for the same sha would then be
+        // answered 304 forever. Other rejections keep their ETag (qfg-9dxb.9).
+        if ((res.envelope.meta.generation ?? 0) <= 0) {
+          leg.rollbackEtag?.();
+        }
       }
     };
 

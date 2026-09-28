@@ -10,11 +10,12 @@
   `RangeError: Maximum call stack size exceeded` was thrown out of `get()`. Behavior matches sdk-go.
 - **A generation-0 payload no longer overrides a held generation (qfg-9dxb.9).** Once the client has
   installed a payload with a positive `meta.generation`, a later payload with generation 0 (or none)
-  is ignored. Before this, such a payload always installed, so a server with a damaged git store
-  could move the client back to older config. The client then also rejected the healthy current
-  generation until a newer one arrived. A client that has never seen a positive generation (for
-  example against `qfg serve`) still installs every such payload. The ignored payload is not counted
-  as `guardRejected`.
+  is ignored and the client keeps the config it has. In 1.3.0 such a payload always installed, so a
+  server with a damaged git store could move the client back to older config. The trade-off: while
+  the client holds a real generation, a generation-0 payload is ignored even if its config is newer;
+  the client picks that config up when it is next served with a positive generation higher than the
+  one it holds. A client that has never seen a positive generation (for example against `qfg serve`)
+  still installs every such payload. The ignored payload is not counted as `guardRejected`.
 - **Reject non-envelope config payloads (qfg-9dxb.3, qfg-4k7d).** A config response must now have a
   `meta` object with a non-empty `version`. Over HTTP, a 200 that fails this check (for example `{}`
   or `{"error":"x"}` from a proxy or WAF) counts as a failed leg: hedging and failover continue and
