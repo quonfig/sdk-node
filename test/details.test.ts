@@ -67,24 +67,19 @@ describe("Quonfig *Details API", () => {
   describe("SPLIT reason", () => {
     it("getStringDetails returns SPLIT for of.weighted (weighted variants)", () => {
       // The weighted_values config has variants weighted 50/50 by user.id.
-      // We don't pin which variant lands; we just assert it's one of them
-      // and reason is SPLIT (or STATIC if the hash happens to land on index 0).
-      // The brief says SPLIT, but computeReason() returns STATIC when
-      // weightedValueIndex === 0. To force a non-zero index, try several
-      // user IDs and pick one that lands on index 1+.
+      // Every bucket -- including bucket 0 -- is a SPLIT (qfg-stbb).
       const variants = ["variant-a", "variant-b"];
-      let sawSplit = false;
-      let sawValue = false;
-      for (let i = 0; i < 50 && !sawSplit; i++) {
+      const seenVariants = new Set<string>();
+      for (let i = 0; i < 50; i++) {
         const details = quonfig.getStringDetails("of.weighted", {
           user: { id: `user-${i}` },
         });
         expect(variants).toContain(details.value);
-        sawValue = true;
-        if (details.reason === "SPLIT") sawSplit = true;
+        expect(details.reason).toBe("SPLIT");
+        seenVariants.add(details.variant!);
       }
-      expect(sawValue).toBe(true);
-      expect(sawSplit).toBe(true);
+      // Both buckets (split:0 and split:1) were exercised.
+      expect([...seenVariants].sort()).toEqual(["split:0", "split:1"]);
     });
   });
 
@@ -209,8 +204,7 @@ describe("Quonfig *Details API", () => {
     });
 
     it("SPLIT: variant='split:<n>', flagMetadata.weightedValueIndex matches", () => {
-      // Try several user IDs until we land on a SPLIT (computeReason returns
-      // STATIC for index 0 — we want a non-zero bucket so variant='split:1'+).
+      // Every weighted bucket is a SPLIT, including bucket 0 (qfg-stbb).
       let saw: { variant?: string; md?: Record<string, unknown> } | undefined;
       for (let i = 0; i < 100; i++) {
         const d = quonfig.getStringDetails("of.weighted", {

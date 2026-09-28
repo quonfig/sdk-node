@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed: a weighted rollout serving its first variant (bucket 0) now reports `SPLIT` (qfg-stbb).**
+  The reason check treated the 0-based weighted-value index as "not weighted" when it was 0, so a
+  caller landing in the first bucket was reported as `STATIC` (telemetry reason 1,
+  `variant: "static"`) and `flagMetadata.weightedValueIndex` was left out. It now reports `SPLIT`,
+  `variant: "split:0"` and `weightedValueIndex: 0`. The telemetry `weighted_value_index` field is
+  unchanged (still 0-based).
+
 ## 1.4.0 - 2026-09-28
 
 - **Changed (behavior change): a weighted rollout that hashes on a missing property now gives every

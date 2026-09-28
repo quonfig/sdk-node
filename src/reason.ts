@@ -16,7 +16,9 @@ function hasTargetingRules(cfg: ConfigResponse): boolean {
 }
 
 export function computeReason(match: EvalMatch, cfg: ConfigResponse): number {
-  if (match.weightedValueIndex !== undefined && match.weightedValueIndex > 0) return ReasonSplit;
+  // weightedValueIndex is 0-based; the evaluator uses -1 as the "not a
+  // weighted rollout" sentinel, so bucket 0 is still a SPLIT (qfg-stbb).
+  if (match.weightedValueIndex >= 0) return ReasonSplit;
   if (match.ruleIndex === 0 && !hasTargetingRules(cfg)) return ReasonStatic;
   return ReasonTargetingMatch;
 }

@@ -105,6 +105,28 @@ describe("telemetry", () => {
     ]);
   });
 
+  it("reason is SPLIT for weighted value landing in bucket 0", () => {
+    const aggregator = buildAggregator("evaluation_summary", {});
+    feedAggregator(
+      aggregator,
+      "evaluation_summary",
+      { keys: ["feature-flag.weighted"] },
+      mergeContexts({ user: { tracking_id: "3e9459d6" } } as Contexts)
+    );
+    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+      {
+        key: "feature-flag.weighted",
+        type: "FEATURE_FLAG",
+        value: 1,
+        value_type: "int",
+        count: 1,
+        reason: 3,
+        selected_value: { int: 1 },
+        summary: { config_row_index: 0, conditional_value_index: 0, weighted_value_index: 0 },
+      },
+    ]);
+  });
+
   it("reason is TARGETING_MATCH for feature flag fallthrough with targeting rules", () => {
     const aggregator = buildAggregator("evaluation_summary", {});
     feedAggregator(aggregator, "evaluation_summary", { keys: ["feature-flag.integer"] }, {});
