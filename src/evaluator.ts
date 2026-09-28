@@ -90,6 +90,9 @@ export class Evaluator {
             if (resolved.value !== undefined) {
               match.value = resolved.value;
               match.weightedValueIndex = resolved.index;
+              if (resolved.missingHashProperty !== undefined) {
+                match.missingHashProperty = resolved.missingHashProperty;
+              }
             }
           }
         }

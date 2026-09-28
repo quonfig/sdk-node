@@ -418,6 +418,11 @@ export interface EvalMatch {
   value?: Value;
   ruleIndex: number;
   weightedValueIndex: number;
+  /**
+   * Set to the weighted rollout's hashByPropertyName when that property was
+   * missing from the context and the first variant was served (qfg-9dxb.8).
+   */
+  missingHashProperty?: string;
 }
 
 // ---- Public Evaluation Details (for *Details API) ----

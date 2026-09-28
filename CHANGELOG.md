@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Changed (behavior change): a weighted rollout with no hash value now serves its first variant
+  (qfg-9dxb.8).** When a weighted rollout hashes on a context property (for example
+  `user.tracking_id`) and that property is missing from the context (no context at all, the named
+  context missing, or the property missing or `null`), the SDK now always serves the first weighted
+  variant. Before, such evaluations got a random variant on every call. The same applies to a
+  weighted rollout with no hash property configured. The `get*Details` methods include
+  `hashPropertyMissing: true` in `flagMetadata` when this happens, and the SDK logs one warning per
+  flag. When the property is present (including an empty string), users land in the same variant as
+  in 1.3.0. This matches the .NET and Java SDKs.
 - **Segment and decryption-key reference loops no longer crash `get()` (qfg-9dxb.7).** A segment
   that references itself through `IN_SEG` / `NOT_IN_SEG` (directly or through a chain such as A -> B
   -> A) is now treated as a missing segment at the point where the loop closes: `IN_SEG` is false

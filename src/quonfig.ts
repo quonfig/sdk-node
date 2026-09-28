@@ -7,6 +7,7 @@ import type {
   ConnectionState,
   Contexts,
   ContextUploadMode,
+  EvalMatch,
   Evaluation,
   EvaluationDetails,
   EvaluationErrorCode,
@@ -232,6 +233,8 @@ export class Quonfig {
 
   private store: ConfigStore;
   private evaluator: Evaluator;
+  // Config keys already warned about a missing weighted-rollout hash property (qfg-9dxb.8).
+  private readonly warnedMissingHashProperty = new Set<string>();
   private resolver: Resolver;
   private dependencyResolver: ConfigDependencyResolver;
   private transport: Transport;
@@ -549,6 +552,7 @@ export class Quonfig {
 
     // Evaluate
     const match = this.evaluator.evaluateConfig(config, this.environmentId, mergedContexts);
+    this.warnIfHashPropertyMissing(config.key, match);
 
     if (!match.isMatch || match.value === undefined) {
       return this.handleNoDefault(key, defaultValue);
@@ -1016,6 +1020,7 @@ export class Quonfig {
     evaluation?: Evaluation;
     configId?: string;
     configType?: ConfigTypeString;
+    hashPropertyMissing?: boolean;
   } {
     if (!this.initialized) {
       return {
@@ -1062,6 +1067,7 @@ export class Quonfig {
       this.exampleContexts.push(mergedContexts);
 
       const match = this.evaluator.evaluateConfig(config, this.environmentId, mergedContexts);
+      this.warnIfHashPropertyMissing(config.key, match);
 
       if (!match.isMatch || match.value === undefined) {
         return {
@@ -1104,7 +1110,12 @@ export class Quonfig {
       };
       this.evaluationSummaries.push(evaluation);
 
-      return { value: unwrapped, reason, evaluation };
+      return {
+        value: unwrapped,
+        reason,
+        evaluation,
+        hashPropertyMissing: match.missingHashProperty !== undefined,
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const msg = message.toLowerCase();
@@ -1172,18 +1183,31 @@ export class Quonfig {
     }
 
     const ev = raw.evaluation;
+    const flagMetadata = this.buildFlagMetadata(
+      ev?.configId,
+      ev?.configType,
+      ev?.ruleIndex,
+      ev?.weightedValueIndex,
+      raw.reason
+    );
+    if (raw.hashPropertyMissing) flagMetadata.hashPropertyMissing = true;
     return {
       value: coerced,
       reason: raw.reason,
       variant: this.buildVariant(raw.reason, ev?.ruleIndex, ev?.weightedValueIndex),
-      flagMetadata: this.buildFlagMetadata(
-        ev?.configId,
-        ev?.configType,
-        ev?.ruleIndex,
-        ev?.weightedValueIndex,
-        raw.reason
-      ),
+      flagMetadata,
     };
+  }
+
+  /** Warn once per config key when a weighted rollout's hash property is missing (qfg-9dxb.8). */
+  private warnIfHashPropertyMissing(configKey: string, match: EvalMatch): void {
+    if (match.missingHashProperty === undefined || this.warnedMissingHashProperty.has(configKey)) {
+      return;
+    }
+    this.warnedMissingHashProperty.add(configKey);
+    this.logger.warn(
+      `quonfig: weighted rollout for "${configKey}" hashes on "${match.missingHashProperty}" which is missing from context; using first variant`
+    );
   }
 
   /**
