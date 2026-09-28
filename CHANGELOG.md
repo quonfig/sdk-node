@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Segment and decryption-key reference loops no longer crash `get()` (qfg-9dxb.7).** A segment
+  that references itself through `IN_SEG` / `NOT_IN_SEG` (directly or through a chain such as A -> B
+  -> A) is now treated as a missing segment at the point where the loop closes: `IN_SEG` is false
+  and `NOT_IN_SEG` is true. A confidential value whose `decryptWith` chain loops now fails with a
+  normal decryption error, the same as a missing key. Before this, both cases recursed until a
+  `RangeError: Maximum call stack size exceeded` was thrown out of `get()`. Behavior matches sdk-go.
 - **A generation-0 payload no longer overrides a held generation (qfg-9dxb.9).** Once the client has
   installed a payload with a positive `meta.generation`, a later payload with generation 0 (or none)
   is ignored. Before this, such a payload always installed, so a server with a damaged git store

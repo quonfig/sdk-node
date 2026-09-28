@@ -31,16 +31,32 @@ export class Evaluator {
    *  5. If matched value is weighted_values, resolve through WeightedValueResolver
    */
   evaluateConfig(cfg: ConfigResponse, envID: string, contexts: Contexts): EvalMatch {
+    return this.evaluateConfigOnPath(cfg, envID, contexts, []);
+  }
+
+  /**
+   * evaluateConfig plus segPath: the keys of the configs currently being
+   * evaluated above this one through IN_SEG / NOT_IN_SEG. A segment reference
+   * back onto the path is a cycle and is treated as a missing segment instead
+   * of recursing until a RangeError (qfg-9dxb.7, matches sdk-go qfg-9dxb.4).
+   * It is a path, not a global visited set, so diamonds still resolve.
+   */
+  private evaluateConfigOnPath(
+    cfg: ConfigResponse,
+    envID: string,
+    contexts: Contexts,
+    segPath: readonly string[]
+  ): EvalMatch {
     // Try environment-specific rules first
     if (envID && cfg.environment && cfg.environment.id === envID) {
-      const match = this.evaluateRules(cfg, cfg.environment.rules ?? [], contexts, 0);
+      const match = this.evaluateRules(cfg, cfg.environment.rules ?? [], contexts, 0, segPath);
       if (match !== undefined) {
         return match;
       }
     }
 
     // Fall back to default rules
-    const match = this.evaluateRules(cfg, cfg.default.rules ?? [], contexts, 0);
+    const match = this.evaluateRules(cfg, cfg.default.rules ?? [], contexts, 0, segPath);
     if (match !== undefined) {
       return match;
     }
@@ -52,11 +68,12 @@ export class Evaluator {
     cfg: ConfigResponse,
     rules: Rule[],
     contexts: Contexts,
-    ruleIndexOffset: number
+    ruleIndexOffset: number,
+    segPath: readonly string[]
   ): EvalMatch | undefined {
     for (let i = 0; i < rules.length; i++) {
       const rule = rules[i]!;
-      if (this.evaluateAllCriteria(cfg, rule.criteria, contexts)) {
+      if (this.evaluateAllCriteria(cfg, rule.criteria, contexts, segPath)) {
         const value = { ...rule.value };
         const match: EvalMatch = {
           isMatch: true,
@@ -86,10 +103,11 @@ export class Evaluator {
   private evaluateAllCriteria(
     cfg: ConfigResponse,
     criteria: Criterion[],
-    contexts: Contexts
+    contexts: Contexts,
+    segPath: readonly string[]
   ): boolean {
     for (const criterion of criteria) {
-      if (!this.evaluateSingleCriterion(cfg, criterion, contexts)) {
+      if (!this.evaluateSingleCriterion(cfg, criterion, contexts, segPath)) {
         return false;
       }
     }
@@ -99,19 +117,25 @@ export class Evaluator {
   private evaluateSingleCriterion(
     cfg: ConfigResponse,
     criterion: Criterion,
-    contexts: Contexts
+    contexts: Contexts,
+    segPath: readonly string[]
   ): boolean {
     const propertyName = criterion.propertyName ?? "";
     const { value: contextValue, exists: contextExists } = getContextValue(contexts, propertyName);
 
     // Build a segment resolver that recursively evaluates segment configs
     const segmentResolver: SegmentResolver = (segmentKey: string) => {
+      // A reference back to any config on the current evaluation path is a
+      // cycle. Treat it like a missing segment (IN_SEG false, NOT_IN_SEG true).
+      if (segmentKey === cfg.key || segPath.includes(segmentKey)) {
+        return { result: false, found: false };
+      }
       const segConfig = this.configStore.get(segmentKey);
       if (segConfig === undefined) {
         return { result: false, found: false };
       }
       // Evaluate the segment config (segments have no environment, use default rules)
-      const segMatch = this.evaluateConfig(segConfig, "", contexts);
+      const segMatch = this.evaluateConfigOnPath(segConfig, "", contexts, [...segPath, cfg.key]);
       if (!segMatch.isMatch || segMatch.value === undefined) {
         return { result: false, found: false };
       }

@@ -50,6 +50,23 @@ export class Resolver {
     envID: string,
     contexts: Contexts
   ): { resolved: Value; reportableValue?: GetValue } {
+    return this.resolveValueOnPath(val, configKey, valueType, envID, contexts, []);
+  }
+
+  /**
+   * resolveValue plus keyPath: the config keys already being resolved above
+   * this one through decryptWith. A decryptWith pointing back onto the path is
+   * a cycle and fails like any other decryption error instead of recursing
+   * until a RangeError (qfg-9dxb.7, matches sdk-go qfg-9dxb.4).
+   */
+  private resolveValueOnPath(
+    val: Value,
+    configKey: string,
+    valueType: ValueType,
+    envID: string,
+    contexts: Contexts,
+    keyPath: readonly string[]
+  ): { resolved: Value; reportableValue?: GetValue } {
     // Handle provided values (ENV_VAR)
     if (val.type === "provided") {
       const provided = val.value;
@@ -74,6 +91,13 @@ export class Resolver {
 
     // Handle decryption
     if (val.confidential && val.decryptWith) {
+      const path = [...keyPath, configKey];
+      if (path.includes(val.decryptWith)) {
+        throw new Error(
+          `Decryption key config "${val.decryptWith}" is part of a decryptWith cycle`
+        );
+      }
+
       const keyCfg = this.store.get(val.decryptWith);
       if (keyCfg === undefined) {
         throw new Error(`Decryption key config "${val.decryptWith}" not found`);
@@ -85,12 +109,13 @@ export class Resolver {
       }
 
       // Resolve the key value recursively (it could itself be a provided ENV_VAR)
-      const { resolved: resolvedKey } = this.resolveValue(
+      const { resolved: resolvedKey } = this.resolveValueOnPath(
         keyMatch.value,
         keyCfg.key,
         keyCfg.valueType,
         envID,
-        contexts
+        contexts,
+        path
       );
 
       const secretKey = String(resolvedKey.value);
