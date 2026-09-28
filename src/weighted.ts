@@ -12,10 +12,11 @@ export class WeightedValueResolver {
    * Resolve picks a value from the weighted distribution.
    *
    * If hashByPropertyName is set and the context has a value for that property,
-   * the selection is deterministic via Murmur3 hash. Otherwise the fraction is
-   * 0.0, which selects the first weighted variant (matches sdk-net/sdk-java,
-   * qfg-9dxb.8). When hashByPropertyName is set but its context value is
-   * undefined or null, `missingHashProperty` names that property.
+   * the selection is deterministic via Murmur3 hash. If hashByPropertyName is
+   * set but the value is missing (undefined/null), configKey + "" is hashed,
+   * the same as a present empty string, and `missingHashProperty` names the
+   * property (qfg-9dxb.8). If hashByPropertyName is not set, it falls back
+   * to Math.random().
    *
    * Returns the selected value and its index, or [undefined, -1] if no values.
    */
@@ -24,16 +25,11 @@ export class WeightedValueResolver {
     configKey: string,
     contexts: Contexts
   ): { value: Value | undefined; index: number; missingHashProperty?: string } {
-    let fraction = 0;
-    let missingHashProperty: string | undefined;
-    if (wv.hashByPropertyName) {
-      const value = contextLookup(contexts, wv.hashByPropertyName);
-      if (value !== undefined && value !== null) {
-        fraction = hashZeroToOne(`${configKey}${value}`);
-      } else {
-        missingHashProperty = wv.hashByPropertyName;
-      }
-    }
+    const fraction = this.getUserFraction(wv, configKey, contexts);
+    const missingHashProperty =
+      wv.hashByPropertyName && contextLookup(contexts, wv.hashByPropertyName) == null
+        ? wv.hashByPropertyName
+        : undefined;
 
     let totalWeight = 0;
     for (const entry of wv.weightedValues) {
@@ -55,5 +51,15 @@ export class WeightedValueResolver {
       return { value: { ...wv.weightedValues[0]!.value }, index: 0, missingHashProperty };
     }
     return { value: undefined, index: -1 };
+  }
+
+  private getUserFraction(wv: WeightedValuesData, configKey: string, contexts: Contexts): number {
+    if (wv.hashByPropertyName) {
+      const value = contextLookup(contexts, wv.hashByPropertyName);
+      // Missing (undefined/null) hashes the same as "" (qfg-9dxb.8).
+      const valueToHash = `${configKey}${value ?? ""}`;
+      return hashZeroToOne(valueToHash);
+    }
+    return Math.random();
   }
 }

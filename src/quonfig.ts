@@ -1206,7 +1206,7 @@ export class Quonfig {
     }
     this.warnedMissingHashProperty.add(configKey);
     this.logger.warn(
-      `quonfig: weighted rollout for "${configKey}" hashes on "${match.missingHashProperty}" which is missing from context; using first variant`
+      `quonfig: weighted rollout for "${configKey}" hashes on "${match.missingHashProperty}" which is missing from context; hashing an empty value instead`
     );
   }
 

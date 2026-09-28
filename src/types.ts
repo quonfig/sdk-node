@@ -420,7 +420,7 @@ export interface EvalMatch {
   weightedValueIndex: number;
   /**
    * Set to the weighted rollout's hashByPropertyName when that property was
-   * missing from the context and the first variant was served (qfg-9dxb.8).
+   * missing from the context and configKey + "" was hashed (qfg-9dxb.8).
    */
   missingHashProperty?: string;
 }
