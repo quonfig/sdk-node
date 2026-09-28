@@ -76,4 +76,120 @@ describe("get_weighted_values", () => {
     );
     expect(__actual).toBe(3);
   });
+
+  it("even split ones serves first variant at low hash fraction", () => {
+    const __actual = resolveCase(
+      "feature-flag.weighted.even-split-ones",
+      mergeContexts({ user: { tracking_id: "b7ff78c8" } } as Contexts)
+    );
+    expect(__actual).toBe("a");
+  });
+
+  it("even split ones serves first variant at low hash fraction 2", () => {
+    const __actual = resolveCase(
+      "feature-flag.weighted.even-split-ones",
+      mergeContexts({ user: { tracking_id: "289f4748" } } as Contexts)
+    );
+    expect(__actual).toBe("a");
+  });
+
+  it("even split ones serves second variant at high hash fraction", () => {
+    const __actual = resolveCase(
+      "feature-flag.weighted.even-split-ones",
+      mergeContexts({ user: { tracking_id: "d60b2cb6" } } as Contexts)
+    );
+    expect(__actual).toBe("b");
+  });
+
+  it("even split ones serves second variant at high hash fraction 2", () => {
+    const __actual = resolveCase(
+      "feature-flag.weighted.even-split-ones",
+      mergeContexts({ user: { tracking_id: "21bcfd13" } } as Contexts)
+    );
+    expect(__actual).toBe("b");
+  });
+
+  it("non-standard sum still serves normalized true bucket", () => {
+    const __actual = resolveCase(
+      "feature-flag.weighted.non-standard",
+      mergeContexts({ user: { tracking_id: "ff8adf17" } } as Contexts)
+    );
+    expect(__actual).toBe(true);
+  });
+
+  it("non-standard sum still serves normalized true bucket 2", () => {
+    const __actual = resolveCase(
+      "feature-flag.weighted.non-standard",
+      mergeContexts({ user: { tracking_id: "36ef1a7a" } } as Contexts)
+    );
+    expect(__actual).toBe(true);
+  });
+
+  it("non-standard sum still serves normalized false bucket", () => {
+    const __actual = resolveCase(
+      "feature-flag.weighted.non-standard",
+      mergeContexts({ user: { tracking_id: "f667c76a" } } as Contexts)
+    );
+    expect(__actual).toBe(false);
+  });
+
+  it("non-standard sum still serves normalized false bucket 2", () => {
+    const __actual = resolveCase(
+      "feature-flag.weighted.non-standard",
+      mergeContexts({ user: { tracking_id: "7467ca21" } } as Contexts)
+    );
+    expect(__actual).toBe(false);
+  });
+
+  it("weighted value with hash property missing from context hashes empty string", () => {
+    const __actual = resolveCase(
+      "feature-flag.weighted.missing-hash",
+      mergeContexts({ user: { key: "no-tracking-id-user" } } as Contexts)
+    );
+    expect(__actual).toBe(2);
+  });
+
+  it("weighted value with no context hashes empty string", () => {
+    const __actual = resolveCase("feature-flag.weighted.missing-hash", {});
+    expect(__actual).toBe(2);
+  });
+
+  it("weighted value with hash property empty string hashes empty string", () => {
+    const __actual = resolveCase(
+      "feature-flag.weighted.missing-hash",
+      mergeContexts({ user: { key: "empty-tracking-id-user", tracking_id: "" } } as Contexts)
+    );
+    expect(__actual).toBe(2);
+  });
+
+  it("weighted value with zero-weight first variant and hash property missing never serves zero-weight variant", () => {
+    const __actual = resolveCase(
+      "feature-flag.weighted.zero-first",
+      mergeContexts({ user: { key: "no-tracking-id-user" } } as Contexts)
+    );
+    expect(__actual).toBe(2);
+  });
+
+  it("weighted value with no hash property is random on every evaluation", () => {
+    const __seen = new Set<unknown>();
+    for (let __i = 0; __i < 200; __i++) {
+      __seen.add(resolveCase("feature-flag.weighted.no-hash", {}));
+    }
+    expect(__seen).toEqual(new Set([1, 2]));
+  });
+
+  it("weighted value with no hash property is random on every evaluation with context", () => {
+    const __seen = new Set<unknown>();
+    for (let __i = 0; __i < 200; __i++) {
+      __seen.add(
+        resolveCase(
+          "feature-flag.weighted.no-hash",
+          mergeContexts({
+            user: { key: "same-user-every-time", tracking_id: "same-tracking-id" },
+          } as Contexts)
+        )
+      );
+    }
+    expect(__seen).toEqual(new Set([1, 2]));
+  });
 });
