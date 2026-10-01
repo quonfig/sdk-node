@@ -103,7 +103,7 @@ describe("datadir_environment", () => {
       collectEvaluationSummaries: false,
       contextUploadMode: "none",
     });
-    await expect(client.init()).rejects.toThrow(Error);
+    await expect(client.init()).rejects.toThrow(/Environment required for datadir mode/);
   });
 
   it("datadir with invalid environment fails to init", async () => {
@@ -116,6 +116,6 @@ describe("datadir_environment", () => {
       collectEvaluationSummaries: false,
       contextUploadMode: "none",
     });
-    await expect(client.init()).rejects.toThrow(Error);
+    await expect(client.init()).rejects.toThrow(/Environment ".*" not found in workspace/);
   });
 });
