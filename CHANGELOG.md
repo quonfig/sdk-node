@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Tests: every integration-test-data case now runs through the public `Quonfig` client
+  (qfg-2agi.32).** The generated suite used test-only copies of the store/evaluator/resolver, its
+  own not-found error and hand-built telemetry records, so bugs in `getDuration`, `isEnabled`,
+  `get`'s default, `globalContext`, the telemetry reason, redaction at the `get()` call site and the
+  `onNoDefault: "error"` raise all stayed green. Cases now call the typed getter (or `get` with a
+  default, or `isEnabled`), pass context tiers through `globalContext` / `withContext` / the
+  per-call argument, and assert telemetry on what the real reporter POSTs. No library change.
+
 - **Fixed: an ENV_VAR-provided value now has the same type as a stored one (qfg-2agi.22).** `get()`
   on a duration config provided by an environment variable returned the ISO string (`"PT1.5S"`)
   instead of integer milliseconds (`1500`), which is what a stored duration returns. Int and double

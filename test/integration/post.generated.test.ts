@@ -4,46 +4,34 @@
 // Source: integration-test-data/generators/src/targets/node.ts
 
 import { describe, it, expect } from "vitest";
-import { store, evaluator, resolver, envID } from "./setup";
-import { mergeContexts } from "../../src/context";
-import type { Contexts } from "../../src/types";
-import { buildAggregator, feedAggregator, aggregatorPost } from "./aggregator-helpers";
+import { collectTelemetry, telemetryPost, TELEMETRY_PROBE_KEY } from "./setup";
 
 describe("post", () => {
-  it("reports context shape aggregation", () => {
-    const aggregator = buildAggregator("context_shape", { context_upload_mode: ":shape_only" });
-    feedAggregator(
-      aggregator,
-      "context_shape",
-      {
+  it("reports context shape aggregation", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({ contextUploadMode: "shapes_only" }, (client) => {
+      client.get(TELEMETRY_PROBE_KEY, {
         user: { name: "Michael", age: 38, human: true },
         role: { name: "developer", admin: false, salary: 15.75, permissions: ["read", "write"] },
-      },
-      {}
-    );
-    expect(aggregatorPost(aggregator, "context_shape", "/api/v1/context-shapes")).toEqual([
+      });
+    });
+    expect(telemetryPost(posted, "context_shape", observed)).toEqual([
       { name: "user", field_types: { name: 2, age: 1, human: 5 } },
       { name: "role", field_types: { name: 2, admin: 5, salary: 4, permissions: 10 } },
     ]);
   });
 
-  it("reports evaluation summary", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(
-      aggregator,
-      "evaluation_summary",
-      {
-        keys: [
-          "my-test-key",
-          "feature-flag.integer",
-          "my-string-list-key",
-          "feature-flag.integer",
-          "feature-flag.weighted",
-        ],
-      },
-      mergeContexts({ user: { tracking_id: "92a202f2" } } as Contexts)
-    );
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("reports evaluation summary", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      const scope = client.withContext({ user: { tracking_id: "92a202f2" } });
+      observed.set("my-test-key", scope.get("my-test-key"));
+      observed.set("feature-flag.integer", scope.get("feature-flag.integer"));
+      observed.set("my-string-list-key", scope.get("my-string-list-key"));
+      observed.set("feature-flag.integer", scope.get("feature-flag.integer"));
+      observed.set("feature-flag.weighted", scope.get("feature-flag.weighted"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "my-test-key",
         type: "CONFIG",
@@ -87,33 +75,31 @@ describe("post", () => {
     ]);
   });
 
-  it("reports example contexts", () => {
-    const aggregator = buildAggregator("example_contexts", {});
-    feedAggregator(
-      aggregator,
-      "example_contexts",
-      {
+  it("reports example contexts", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      client.get(TELEMETRY_PROBE_KEY, {
         user: { name: "michael", age: 38, key: "michael:1234" },
         device: { mobile: false },
         team: { id: 3.5 },
-      },
-      {}
-    );
-    expect(aggregatorPost(aggregator, "example_contexts", "/api/v1/telemetry")).toEqual({
+      });
+    });
+    expect(telemetryPost(posted, "example_contexts", observed)).toEqual({
       user: { name: "michael", age: 38, key: "michael:1234" },
       device: { mobile: false },
       team: { id: 3.5 },
     });
   });
 
-  it("example contexts without key are not reported", () => {
-    const aggregator = buildAggregator("example_contexts", {});
-    feedAggregator(
-      aggregator,
-      "example_contexts",
-      { user: { name: "michael", age: 38 }, device: { mobile: false }, team: { id: 3.5 } },
-      {}
-    );
-    expect(aggregatorPost(aggregator, "example_contexts", "/api/v1/telemetry")).toEqual(undefined);
+  it("example contexts without key are not reported", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      client.get(TELEMETRY_PROBE_KEY, {
+        user: { name: "michael", age: 38 },
+        device: { mobile: false },
+        team: { id: 3.5 },
+      });
+    });
+    expect(telemetryPost(posted, "example_contexts", observed)).toEqual(undefined);
   });
 });

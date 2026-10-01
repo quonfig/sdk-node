@@ -4,16 +4,15 @@
 // Source: integration-test-data/generators/src/targets/node.ts
 
 import { describe, it, expect } from "vitest";
-import { store, evaluator, resolver, envID } from "./setup";
-import { mergeContexts } from "../../src/context";
-import type { Contexts } from "../../src/types";
-import { buildAggregator, feedAggregator, aggregatorPost } from "./aggregator-helpers";
+import { collectTelemetry, telemetryPost, TELEMETRY_PROBE_KEY } from "./setup";
 
 describe("telemetry", () => {
-  it("reason is STATIC for config with no targeting rules", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.string"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("reason is STATIC for config with no targeting rules", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("brand.new.string", client.get("brand.new.string"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "brand.new.string",
         type: "CONFIG",
@@ -27,10 +26,12 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("reason is STATIC for feature flag with only ALWAYS_TRUE rules", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["always.true"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("reason is STATIC for feature flag with only ALWAYS_TRUE rules", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("always.true", client.get("always.true"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "always.true",
         type: "FEATURE_FLAG",
@@ -44,10 +45,12 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("reason is TARGETING_MATCH when config has targeting rules but evaluation falls through", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["my-test-key"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("reason is TARGETING_MATCH when config has targeting rules but evaluation falls through", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("my-test-key", client.get("my-test-key"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "my-test-key",
         type: "CONFIG",
@@ -61,15 +64,13 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("reason is TARGETING_MATCH when a targeting rule matches", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(
-      aggregator,
-      "evaluation_summary",
-      { keys: ["feature-flag.integer"] },
-      mergeContexts({ user: { key: "michael" } } as Contexts)
-    );
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("reason is TARGETING_MATCH when a targeting rule matches", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      const scope = client.withContext({ user: { key: "michael" } });
+      observed.set("feature-flag.integer", scope.get("feature-flag.integer"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "feature-flag.integer",
         type: "FEATURE_FLAG",
@@ -83,15 +84,13 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("reason is SPLIT for weighted value evaluation", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(
-      aggregator,
-      "evaluation_summary",
-      { keys: ["feature-flag.weighted"] },
-      mergeContexts({ user: { tracking_id: "92a202f2" } } as Contexts)
-    );
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("reason is SPLIT for weighted value evaluation", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      const scope = client.withContext({ user: { tracking_id: "92a202f2" } });
+      observed.set("feature-flag.weighted", scope.get("feature-flag.weighted"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "feature-flag.weighted",
         type: "FEATURE_FLAG",
@@ -105,15 +104,13 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("reason is SPLIT for weighted value landing in bucket 0", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(
-      aggregator,
-      "evaluation_summary",
-      { keys: ["feature-flag.weighted"] },
-      mergeContexts({ user: { tracking_id: "3e9459d6" } } as Contexts)
-    );
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("reason is SPLIT for weighted value landing in bucket 0", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      const scope = client.withContext({ user: { tracking_id: "3e9459d6" } });
+      observed.set("feature-flag.weighted", scope.get("feature-flag.weighted"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "feature-flag.weighted",
         type: "FEATURE_FLAG",
@@ -127,10 +124,12 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("reason is TARGETING_MATCH for feature flag fallthrough with targeting rules", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["feature-flag.integer"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("reason is TARGETING_MATCH for feature flag fallthrough with targeting rules", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("feature-flag.integer", client.get("feature-flag.integer"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "feature-flag.integer",
         type: "FEATURE_FLAG",
@@ -144,23 +143,16 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("evaluation summary deduplicates identical evaluations", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(
-      aggregator,
-      "evaluation_summary",
-      {
-        keys: [
-          "brand.new.string",
-          "brand.new.string",
-          "brand.new.string",
-          "brand.new.string",
-          "brand.new.string",
-        ],
-      },
-      {}
-    );
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("evaluation summary deduplicates identical evaluations", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("brand.new.string", client.get("brand.new.string"));
+      observed.set("brand.new.string", client.get("brand.new.string"));
+      observed.set("brand.new.string", client.get("brand.new.string"));
+      observed.set("brand.new.string", client.get("brand.new.string"));
+      observed.set("brand.new.string", client.get("brand.new.string"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "brand.new.string",
         type: "CONFIG",
@@ -174,15 +166,14 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("evaluation summary creates separate counters for different rules of same config", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(
-      aggregator,
-      "evaluation_summary",
-      { keys: ["feature-flag.integer"], keys_without_context: ["feature-flag.integer"] },
-      mergeContexts({ user: { key: "michael" } } as Contexts)
-    );
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("evaluation summary creates separate counters for different rules of same config", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      const scope = client.withContext({ user: { key: "michael" } });
+      observed.set("feature-flag.integer", scope.get("feature-flag.integer"));
+      observed.set("feature-flag.integer", client.get("feature-flag.integer"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "feature-flag.integer",
         type: "FEATURE_FLAG",
@@ -206,15 +197,13 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("evaluation summary groups by config key", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(
-      aggregator,
-      "evaluation_summary",
-      { keys: ["brand.new.string", "always.true"] },
-      {}
-    );
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("evaluation summary groups by config key", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("brand.new.string", client.get("brand.new.string"));
+      observed.set("always.true", client.get("always.true"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "brand.new.string",
         type: "CONFIG",
@@ -238,10 +227,12 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("selectedValue wraps string correctly", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.string"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("selectedValue wraps string correctly", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("brand.new.string", client.get("brand.new.string"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "brand.new.string",
         type: "CONFIG",
@@ -255,10 +246,12 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("selectedValue wraps boolean correctly", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.boolean"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("selectedValue wraps boolean correctly", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("brand.new.boolean", client.get("brand.new.boolean"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "brand.new.boolean",
         type: "CONFIG",
@@ -272,10 +265,12 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("selectedValue wraps int correctly", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.int"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("selectedValue wraps int correctly", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("brand.new.int", client.get("brand.new.int"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "brand.new.int",
         type: "CONFIG",
@@ -289,10 +284,12 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("selectedValue wraps double correctly", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.double"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("selectedValue wraps double correctly", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("brand.new.double", client.get("brand.new.double"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "brand.new.double",
         type: "CONFIG",
@@ -306,10 +303,12 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("selectedValue wraps string list correctly", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["my-string-list-key"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("selectedValue wraps string list correctly", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("my-string-list-key", client.get("my-string-list-key"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "my-string-list-key",
         type: "CONFIG",
@@ -323,80 +322,78 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("context shape merges fields across multiple records", () => {
-    const aggregator = buildAggregator("context_shape", {});
-    feedAggregator(
-      aggregator,
-      "context_shape",
-      [
-        { user: { name: "alice", age: 30 } },
-        { user: { name: "bob", score: 9.5 }, team: { name: "engineering" } },
-      ],
-      {}
-    );
-    expect(aggregatorPost(aggregator, "context_shape", "/api/v1/context-shapes")).toEqual([
+  it("context shape merges fields across multiple records", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      client.get(TELEMETRY_PROBE_KEY, { user: { name: "alice", age: 30 } });
+      client.get(TELEMETRY_PROBE_KEY, {
+        user: { name: "bob", score: 9.5 },
+        team: { name: "engineering" },
+      });
+    });
+    expect(telemetryPost(posted, "context_shape", observed)).toEqual([
       { name: "user", field_types: { name: 2, age: 1, score: 4 } },
       { name: "team", field_types: { name: 2 } },
     ]);
   });
 
-  it("example contexts deduplicates by key value", () => {
-    const aggregator = buildAggregator("example_contexts", {});
-    feedAggregator(
-      aggregator,
-      "example_contexts",
-      [{ user: { key: "user-123", name: "alice" } }, { user: { key: "user-123", name: "bob" } }],
-      {}
-    );
-    expect(aggregatorPost(aggregator, "example_contexts", "/api/v1/telemetry")).toEqual({
+  it("example contexts deduplicates by key value", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      client.get(TELEMETRY_PROBE_KEY, { user: { key: "user-123", name: "alice" } });
+      client.get(TELEMETRY_PROBE_KEY, { user: { key: "user-123", name: "bob" } });
+    });
+    expect(telemetryPost(posted, "example_contexts", observed)).toEqual({
       user: { key: "user-123", name: "alice" },
     });
   });
 
-  it("telemetry disabled emits nothing", () => {
-    const aggregator = buildAggregator("evaluation_summary", {
-      collect_evaluation_summaries: false,
-      context_upload_mode: ":none",
-    });
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["brand.new.string"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual(
-      undefined
+  it("telemetry disabled emits nothing", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry(
+      { collectEvaluationSummaries: false, contextUploadMode: "none" },
+      (client) => {
+        observed.set("brand.new.string", client.get("brand.new.string"));
+      }
     );
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual(undefined);
   });
 
-  it("shapes only mode reports shapes but not examples", () => {
-    const aggregator = buildAggregator("context_shape", { context_upload_mode: ":shape_only" });
-    feedAggregator(aggregator, "context_shape", { user: { name: "alice", key: "alice-123" } }, {});
-    expect(aggregatorPost(aggregator, "context_shape", "/api/v1/context-shapes")).toEqual([
+  it("shapes only mode reports shapes but not examples", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({ contextUploadMode: "shapes_only" }, (client) => {
+      client.get(TELEMETRY_PROBE_KEY, { user: { name: "alice", key: "alice-123" } });
+    });
+    expect(telemetryPost(posted, "context_shape", observed)).toEqual([
       { name: "user", field_types: { name: 2, key: 2 } },
     ]);
   });
 
-  it("log level evaluations are excluded from telemetry", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(
-      aggregator,
-      "evaluation_summary",
-      { keys: ["log-level.prefab.criteria_evaluator"] },
-      {}
-    );
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual(
-      undefined
-    );
+  it("log level evaluations are excluded from telemetry", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set(
+        "log-level.prefab.criteria_evaluator",
+        client.get("log-level.prefab.criteria_evaluator")
+      );
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual(undefined);
   });
 
-  it("empty context produces no context telemetry", () => {
-    const aggregator = buildAggregator("context_shape", {});
-    feedAggregator(aggregator, "context_shape", {}, {});
-    expect(aggregatorPost(aggregator, "context_shape", "/api/v1/context-shapes")).toEqual(
-      undefined
-    );
+  it("empty context produces no context telemetry", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      client.get(TELEMETRY_PROBE_KEY, {});
+    });
+    expect(telemetryPost(posted, "context_shape", observed)).toEqual(undefined);
   });
 
-  it("confidential plain string is redacted in selectedValue", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["confidential.new.string"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("confidential plain string is redacted in selectedValue", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("confidential.new.string", client.get("confidential.new.string"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "confidential.new.string",
         type: "CONFIG",
@@ -410,10 +407,12 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("confidential encrypted string is redacted using ciphertext hash", () => {
-    const aggregator = buildAggregator("evaluation_summary", {});
-    feedAggregator(aggregator, "evaluation_summary", { keys: ["a.secret.config"] }, {});
-    expect(aggregatorPost(aggregator, "evaluation_summary", "/api/v1/telemetry")).toEqual([
+  it("confidential encrypted string is redacted using ciphertext hash", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("a.secret.config", client.get("a.secret.config"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
         key: "a.secret.config",
         type: "CONFIG",

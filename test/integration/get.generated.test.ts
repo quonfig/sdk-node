@@ -4,169 +4,356 @@
 // Source: integration-test-data/generators/src/targets/node.ts
 
 import { describe, it, expect } from "vitest";
-import { store, evaluator, resolver, envID, publicClient } from "./setup";
-import { mergeContexts } from "../../src/context";
-import type { Contexts } from "../../src/types";
-
-function resolveCase(key: string, contexts: any): unknown {
-  const cfg = store.get(key);
-  if (!cfg) return undefined;
-  const match = evaluator.evaluateConfig(cfg, envID, contexts);
-  if (!match.isMatch || !match.value) return undefined;
-  const { resolved } = resolver.resolveValue(match.value, cfg.key, cfg.valueType, envID, contexts);
-  return resolver.unwrapValue(resolved);
-}
-
-function getCase(key: string, contexts: any, defaultValue: unknown): unknown {
-  const v = resolveCase(key, contexts);
-  return v === undefined ? defaultValue : v;
-}
-
-function enabledCase(key: string, contexts: any): boolean {
-  const v = resolveCase(key, contexts);
-  if (typeof v === "boolean") return v;
-  if (v === "true") return true;
-  if (v === "false") return false;
-  return false;
-}
-
-function runRaiseCase(
-  key: string,
-  contexts: any,
-  _errorKey: string,
-  errClass: ErrorConstructor
-): void {
-  expect(() => {
-    const cfg = store.get(key);
-    if (!cfg) throw new Error(`config not found for key: ${key}`);
-    const match = evaluator.evaluateConfig(cfg, envID, contexts);
-    if (!match.isMatch || !match.value) throw new Error(`no match for key: ${key}`);
-    const { resolved } = resolver.resolveValue(
-      match.value,
-      cfg.key,
-      cfg.valueType,
-      envID,
-      contexts
-    );
-    return resolver.unwrapValue(resolved);
-  }).toThrow(errClass);
-}
+import { withClient, withEnv } from "./setup";
 
 describe("get", () => {
-  it("get returns a found value for key", () => {
-    const __actual = resolveCase("my-test-key", {});
-    expect(__actual).toBe("my-test-value");
+  it("get returns a found value for key", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("my-test-key")).toBe("my-test-value");
+    });
   });
 
-  it("get returns nil if value not found", () => {
-    const __actual = resolveCase("my-missing-key", {});
-    expect(__actual).toBe(undefined);
+  it("get returns nil if value not found", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getString("my-missing-key")).toBe(undefined);
+    });
   });
 
-  it("get returns a default for a missing value if a default is given", () => {
-    const __actual = getCase("my-missing-key", {}, "DEFAULT");
-    expect(__actual).toBe("DEFAULT");
+  it("get returns a default for a missing value if a default is given", async () => {
+    await withClient({}, (client) => {
+      expect(client.get("my-missing-key", undefined, "DEFAULT")).toBe("DEFAULT");
+    });
   });
 
-  it("get ignores a provided default if the key is found", () => {
-    const __actual = getCase("my-test-key", {}, "DEFAULT");
-    expect(__actual).toBe("my-test-value");
+  it("get ignores a provided default if the key is found", async () => {
+    await withClient({}, (client) => {
+      expect(client.get("my-test-key", undefined, "DEFAULT")).toBe("my-test-value");
+    });
   });
 
-  it("get can return a double", () => {
-    const __actual = resolveCase("my-double-key", {});
-    expect(__actual).toBe(9.95);
+  it("get can return a double", async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("my-double-key")).toBe(9.95);
+    });
   });
 
-  it("get can return a string list", () => {
-    const __actual = resolveCase("my-string-list-key", {});
-    expect(__actual).toEqual(["a", "b", "c"]);
+  it("get can return a string list", async () => {
+    await withClient({}, (client) => {
+      expect(client.getStringList("my-string-list-key")).toEqual(["a", "b", "c"]);
+    });
   });
 
-  it("can return a value provided by an environment variable", () => {
-    const __actual = resolveCase("prefab.secrets.encryption.key", {});
-    expect(__actual).toBe("c87ba22d8662282abe8a0e4651327b579cb64a454ab0f4c170b45b15f049a221");
+  it("can return a value provided by an environment variable", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("prefab.secrets.encryption.key")).toBe(
+        "c87ba22d8662282abe8a0e4651327b579cb64a454ab0f4c170b45b15f049a221"
+      );
+    });
   });
 
-  it("can return a value provided by an environment variable after type coercion", () => {
-    const __actual = resolveCase("provided.a.number", {});
-    expect(__actual).toBe(1234);
+  it("can return a value provided by an environment variable after type coercion", async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("provided.a.number")).toBe(1234);
+    });
   });
 
-  it("can decrypt and return a secret value (with decryption key in in env var)", () => {
-    const __actual = resolveCase("a.secret.config", {});
-    expect(__actual).toBe("hello.world");
+  it("can decrypt and return a secret value (with decryption key in in env var)", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("a.secret.config")).toBe("hello.world");
+    });
   });
 
   it("duration 200 ms", async () => {
-    const __client = await publicClient();
-    const __actual = __client.getDuration("test.duration.PT0.2S", {});
-    expect(__actual).toBe(200);
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT0.2S")).toBe(200);
+    });
   });
 
   it("duration 90S", async () => {
-    const __client = await publicClient();
-    const __actual = __client.getDuration("test.duration.PT90S", {});
-    expect(__actual).toBe(90000);
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT90S")).toBe(90000);
+    });
   });
 
-  it("duration 1.5M", async () => {
-    const __client = await publicClient();
-    const __actual = __client.getDuration("test.duration.PT1.5M", {});
-    expect(__actual).toBe(90000);
-  });
-
-  it("duration 0.5H", async () => {
-    const __client = await publicClient();
-    const __actual = __client.getDuration("test.duration.PT0.5H", {});
-    expect(__actual).toBe(1800000);
+  it("duration 30M", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT30M")).toBe(1800000);
+    });
   });
 
   it("duration test.duration.P1DT6H2M1.5S", async () => {
-    const __client = await publicClient();
-    const __actual = __client.getDuration("test.duration.P1DT6H2M1.5S", {});
-    expect(__actual).toBe(108121500);
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.P1DT6H2M1.5S")).toBe(108121500);
+    });
   });
 
-  it("json test", () => {
-    const __actual = resolveCase("test.json", {});
-    expect(__actual).toEqual({ a: 1, b: "c" });
+  it("duration zero PT0S", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT0S")).toBe(0);
+    });
   });
 
-  it("get returns a native json object (not a stringified payload)", () => {
-    const __actual = resolveCase("test.json", {});
-    expect(__actual).toEqual({ a: 1, b: "c" });
+  it("duration zero P0D", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.P0D")).toBe(0);
+    });
   });
 
-  it("list on left side test (1)", () => {
-    const __actual = resolveCase(
-      "left.hand.list.test",
-      mergeContexts({ user: { name: "james", aka: ["happy", "sleepy"] } } as Contexts)
-    );
-    expect(__actual).toBe("correct");
+  it("duration days only P2D", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.P2D")).toBe(172800000);
+    });
   });
 
-  it("list on left side test (2)", () => {
-    const __actual = resolveCase(
-      "left.hand.list.test",
-      mergeContexts({ user: { name: "james", aka: ["a", "b"] } } as Contexts)
-    );
-    expect(__actual).toBe("default");
+  it("duration hours only PT1H", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT1H")).toBe(3600000);
+    });
   });
 
-  it("list on left side test opposite (1)", () => {
-    const __actual = resolveCase(
-      "left.hand.test.opposite",
-      mergeContexts({ user: { name: "james", aka: ["happy", "sleepy"] } } as Contexts)
-    );
-    expect(__actual).toBe("default");
+  it("duration minutes only PT1M", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT1M")).toBe(60000);
+    });
   });
 
-  it("list on left side test (3)", () => {
-    const __actual = resolveCase(
-      "left.hand.test.opposite",
-      mergeContexts({ user: { name: "james", aka: ["a", "b"] } } as Contexts)
-    );
-    expect(__actual).toBe("correct");
+  it("duration seconds only PT1S", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT1S")).toBe(1000);
+    });
+  });
+
+  it("duration leading zero PT05S", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT05S")).toBe(5000);
+    });
+  });
+
+  it("duration hours and minutes PT1H30M", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT1H30M")).toBe(5400000);
+    });
+  });
+
+  it("duration days and hours P1DT2H", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.P1DT2H")).toBe(93600000);
+    });
+  });
+
+  it("duration one millisecond PT0.001S", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT0.001S")).toBe(1);
+    });
+  });
+
+  it("duration magnitude ceiling P36500D", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.P36500D")).toBe(3153600000000);
+    });
+  });
+
+  it("duration rounding PT2.01S", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT2.01S")).toBe(2010);
+    });
+  });
+
+  it("duration rounding PT1.005S", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT1.005S")).toBe(1005);
+    });
+  });
+
+  it("duration rounding half up PT0.0005S", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT0.0005S")).toBe(1);
+    });
+  });
+
+  it("duration rounding down PT0.0004S", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("test.duration.PT0.0004S")).toBe(0);
+    });
+  });
+
+  it("json test", async () => {
+    await withClient({}, (client) => {
+      expect(client.getJSON("test.json")).toEqual({ a: 1, b: "c" });
+    });
+  });
+
+  it("get returns a native json object (not a stringified payload)", async () => {
+    await withClient({}, (client) => {
+      expect(client.getJSON("test.json")).toEqual({ a: 1, b: "c" });
+    });
+  });
+
+  it("list on left side test (1)", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getString("left.hand.list.test", {
+          user: { name: "james", aka: ["happy", "sleepy"] },
+        })
+      ).toBe("correct");
+    });
+  });
+
+  it("list on left side test (2)", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getString("left.hand.list.test", { user: { name: "james", aka: ["a", "b"] } })
+      ).toBe("default");
+    });
+  });
+
+  it("list on left side test opposite (1)", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getString("left.hand.test.opposite", {
+          user: { name: "james", aka: ["happy", "sleepy"] },
+        })
+      ).toBe("default");
+    });
+  });
+
+  it("list on left side test (3)", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getString("left.hand.test.opposite", { user: { name: "james", aka: ["a", "b"] } })
+      ).toBe("correct");
+    });
+  });
+
+  it("env-var-provided duration PT1.5S via get", async () => {
+    await withEnv({ QUONFIG_ITD_DURATION_PT1_5S: "PT1.5S" }, async () => {
+      await withClient({}, (client) => {
+        expect(client.getDuration("provided.duration.PT1.5S")).toBe(1500);
+      });
+    });
+  });
+
+  it("stored malformed duration 30s returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.get("test.duration.malformed.30s", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it("stored malformed duration 30s with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("test.duration.malformed.30s")).toBe(undefined);
+    });
+  });
+
+  it("stored malformed duration PT0.5H returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.get("test.duration.malformed.PT0.5H", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it("stored malformed duration PT0.5H with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("test.duration.malformed.PT0.5H")).toBe(undefined);
+    });
+  });
+
+  it("stored malformed duration P1DT returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.get("test.duration.malformed.P1DT", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it("stored malformed duration P1DT with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("test.duration.malformed.P1DT")).toBe(undefined);
+    });
+  });
+
+  it("stored malformed duration garbage returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.get("test.duration.malformed.garbage", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it("stored malformed duration garbage with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("test.duration.malformed.garbage")).toBe(undefined);
+    });
+  });
+
+  it("stored malformed duration empty returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.get("test.duration.malformed.empty", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it("stored malformed duration empty with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("test.duration.malformed.empty")).toBe(undefined);
+    });
+  });
+
+  it("env-var-provided malformed duration 30s returns the default", async () => {
+    await withEnv({ QUONFIG_ITD_DURATION_30S: "30s" }, async () => {
+      await withClient({}, (client) => {
+        expect(client.get("provided.duration.malformed.30s", undefined, 7000)).toBe(7000);
+      });
+    });
+  });
+
+  it("env-var-provided malformed duration 30s with no default returns nil", async () => {
+    await withEnv({ QUONFIG_ITD_DURATION_30S: "30s" }, async () => {
+      await withClient({ onNoDefault: "warn" }, (client) => {
+        expect(client.getDuration("provided.duration.malformed.30s")).toBe(undefined);
+      });
+    });
+  });
+
+  it("env-var-provided malformed duration PT0.5H returns the default", async () => {
+    await withEnv({ QUONFIG_ITD_DURATION_PT0_5H: "PT0.5H" }, async () => {
+      await withClient({}, (client) => {
+        expect(client.get("provided.duration.malformed.PT0.5H", undefined, 7000)).toBe(7000);
+      });
+    });
+  });
+
+  it("env-var-provided malformed duration PT0.5H with no default returns nil", async () => {
+    await withEnv({ QUONFIG_ITD_DURATION_PT0_5H: "PT0.5H" }, async () => {
+      await withClient({ onNoDefault: "warn" }, (client) => {
+        expect(client.getDuration("provided.duration.malformed.PT0.5H")).toBe(undefined);
+      });
+    });
+  });
+
+  it("env-var-provided malformed duration P1DT returns the default", async () => {
+    await withEnv({ QUONFIG_ITD_DURATION_P1DT: "P1DT" }, async () => {
+      await withClient({}, (client) => {
+        expect(client.get("provided.duration.malformed.P1DT", undefined, 7000)).toBe(7000);
+      });
+    });
+  });
+
+  it("env-var-provided malformed duration P1DT with no default returns nil", async () => {
+    await withEnv({ QUONFIG_ITD_DURATION_P1DT: "P1DT" }, async () => {
+      await withClient({ onNoDefault: "warn" }, (client) => {
+        expect(client.getDuration("provided.duration.malformed.P1DT")).toBe(undefined);
+      });
+    });
+  });
+
+  it("env-var-provided malformed duration garbage returns the default", async () => {
+    await withEnv({ QUONFIG_ITD_DURATION_GARBAGE: "garbage" }, async () => {
+      await withClient({}, (client) => {
+        expect(client.get("provided.duration.malformed.garbage", undefined, 7000)).toBe(7000);
+      });
+    });
+  });
+
+  it("env-var-provided malformed duration garbage with no default returns nil", async () => {
+    await withEnv({ QUONFIG_ITD_DURATION_GARBAGE: "garbage" }, async () => {
+      await withClient({ onNoDefault: "warn" }, (client) => {
+        expect(client.getDuration("provided.duration.malformed.garbage")).toBe(undefined);
+      });
+    });
   });
 });

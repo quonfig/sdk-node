@@ -4,180 +4,134 @@
 // Source: integration-test-data/generators/src/targets/node.ts
 
 import { describe, it, expect } from "vitest";
-import { store, evaluator, resolver, envID } from "./setup";
-import { mergeContexts } from "../../src/context";
-import type { Contexts } from "../../src/types";
-
-function resolveCase(key: string, contexts: any): unknown {
-  const cfg = store.get(key);
-  if (!cfg) return undefined;
-  const match = evaluator.evaluateConfig(cfg, envID, contexts);
-  if (!match.isMatch || !match.value) return undefined;
-  const { resolved } = resolver.resolveValue(match.value, cfg.key, cfg.valueType, envID, contexts);
-  return resolver.unwrapValue(resolved);
-}
-
-function getCase(key: string, contexts: any, defaultValue: unknown): unknown {
-  const v = resolveCase(key, contexts);
-  return v === undefined ? defaultValue : v;
-}
-
-function enabledCase(key: string, contexts: any): boolean {
-  const v = resolveCase(key, contexts);
-  if (typeof v === "boolean") return v;
-  if (v === "true") return true;
-  if (v === "false") return false;
-  return false;
-}
-
-function runRaiseCase(
-  key: string,
-  contexts: any,
-  _errorKey: string,
-  errClass: ErrorConstructor
-): void {
-  expect(() => {
-    const cfg = store.get(key);
-    if (!cfg) throw new Error(`config not found for key: ${key}`);
-    const match = evaluator.evaluateConfig(cfg, envID, contexts);
-    if (!match.isMatch || !match.value) throw new Error(`no match for key: ${key}`);
-    const { resolved } = resolver.resolveValue(
-      match.value,
-      cfg.key,
-      cfg.valueType,
-      envID,
-      contexts
-    );
-    return resolver.unwrapValue(resolved);
-  }).toThrow(errClass);
-}
+import { withClient } from "./setup";
 
 describe("context_precedence", () => {
-  it("returns the correct `flag` value using the global context (1)", () => {
-    const __actual = enabledCase(
-      "mixed.case.property.name",
-      mergeContexts({ user: { isHuman: "verified" } } as Contexts)
-    );
-    expect(__actual).toBe(true);
+  it("returns the correct `flag` value using the global context (1)", async () => {
+    await withClient({ globalContext: { user: { isHuman: "verified" } } }, (client) => {
+      expect(client.isEnabled("mixed.case.property.name")).toBe(true);
+    });
   });
 
-  it("returns the correct `flag` value using the global context (2)", () => {
-    const __actual = enabledCase(
-      "mixed.case.property.name",
-      mergeContexts({ user: { isHuman: "?" } } as Contexts)
-    );
-    expect(__actual).toBe(false);
+  it("returns the correct `flag` value using the global context (2)", async () => {
+    await withClient({ globalContext: { user: { isHuman: "?" } } }, (client) => {
+      expect(client.isEnabled("mixed.case.property.name")).toBe(false);
+    });
   });
 
-  it("returns the correct `flag` value when local context clobbers global context (1)", () => {
-    const __actual = enabledCase(
-      "mixed.case.property.name",
-      mergeContexts({ user: { isHuman: "verified" } } as Contexts)
-    );
-    expect(__actual).toBe(true);
+  it("returns the correct `flag` value when local context clobbers global context (1)", async () => {
+    await withClient({ globalContext: { user: { isHuman: "?" } } }, (client) => {
+      expect(client.isEnabled("mixed.case.property.name", { user: { isHuman: "verified" } })).toBe(
+        true
+      );
+    });
   });
 
-  it("returns the correct `flag` value when local context clobbers global context (2)", () => {
-    const __actual = enabledCase(
-      "mixed.case.property.name",
-      mergeContexts({ user: { isHuman: "?" } } as Contexts)
-    );
-    expect(__actual).toBe(false);
+  it("returns the correct `flag` value when local context clobbers global context (2)", async () => {
+    await withClient({ globalContext: { user: { isHuman: "verified" } } }, (client) => {
+      expect(client.isEnabled("mixed.case.property.name", { user: { isHuman: "?" } })).toBe(false);
+    });
   });
 
-  it("returns the correct `flag` value when block context clobbers global context (1)", () => {
-    const __actual = enabledCase(
-      "mixed.case.property.name",
-      mergeContexts({ user: { isHuman: "?" } } as Contexts)
-    );
-    expect(__actual).toBe(false);
+  it("returns the correct `flag` value when block context clobbers global context (1)", async () => {
+    await withClient({ globalContext: { user: { isHuman: "verified" } } }, (client) => {
+      const scope = client.withContext({ user: { isHuman: "?" } });
+      expect(scope.isEnabled("mixed.case.property.name")).toBe(false);
+    });
   });
 
-  it("returns the correct `flag` value when block context clobbers global context (2)", () => {
-    const __actual = enabledCase(
-      "mixed.case.property.name",
-      mergeContexts({ user: { isHuman: "verified" } } as Contexts)
-    );
-    expect(__actual).toBe(true);
+  it("returns the correct `flag` value when block context clobbers global context (2)", async () => {
+    await withClient({ globalContext: { user: { isHuman: "?" } } }, (client) => {
+      const scope = client.withContext({ user: { isHuman: "verified" } });
+      expect(scope.isEnabled("mixed.case.property.name")).toBe(true);
+    });
   });
 
-  it("returns the correct `flag` value when local context clobbers block context (1)", () => {
-    const __actual = enabledCase(
-      "mixed.case.property.name",
-      mergeContexts({ user: { isHuman: "?" } } as Contexts)
-    );
-    expect(__actual).toBe(false);
+  it("returns the correct `flag` value when local context clobbers block context (1)", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { isHuman: "verified" } });
+      expect(scope.isEnabled("mixed.case.property.name", { user: { isHuman: "?" } })).toBe(false);
+    });
   });
 
-  it("returns the correct `flag` value when local context clobbers block context (2)", () => {
-    const __actual = enabledCase(
-      "mixed.case.property.name",
-      mergeContexts({ user: { isHuman: "verified" } } as Contexts)
-    );
-    expect(__actual).toBe(true);
+  it("returns the correct `flag` value when local context clobbers block context (2)", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { isHuman: "?" } });
+      expect(scope.isEnabled("mixed.case.property.name", { user: { isHuman: "verified" } })).toBe(
+        true
+      );
+    });
   });
 
-  it("returns the correct `get` value using the global context (1)", () => {
-    const __actual = resolveCase(
-      "basic.rule.config",
-      mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts)
-    );
-    expect(__actual).toBe("override");
+  it("returns the correct `get` value using the global context (1)", async () => {
+    await withClient({ globalContext: { user: { email: "test@prefab.cloud" } } }, (client) => {
+      expect(client.getString("basic.rule.config")).toBe("override");
+    });
   });
 
-  it("returns the correct `get` value using the global context (2)", () => {
-    const __actual = resolveCase(
-      "basic.rule.config",
-      mergeContexts({ user: { email: "test@example.com" } } as Contexts)
-    );
-    expect(__actual).toBe("default");
+  it("returns the correct `get` value using the global context (2)", async () => {
+    await withClient({ globalContext: { user: { email: "test@example.com" } } }, (client) => {
+      expect(client.getString("basic.rule.config")).toBe("default");
+    });
   });
 
-  it("returns the correct `get` value when local context clobbers global context (1)", () => {
-    const __actual = resolveCase(
-      "basic.rule.config",
-      mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts)
-    );
-    expect(__actual).toBe("override");
+  it("returns the correct `get` value when local context clobbers global context (1)", async () => {
+    await withClient({ globalContext: { user: { email: "test@example.com" } } }, (client) => {
+      expect(client.getString("basic.rule.config", { user: { email: "test@prefab.cloud" } })).toBe(
+        "override"
+      );
+    });
   });
 
-  it("returns the correct `get` value when local context clobbers global context (2)", () => {
-    const __actual = resolveCase(
-      "basic.rule.config",
-      mergeContexts({ user: { email: "test@example.com" } } as Contexts)
-    );
-    expect(__actual).toBe("default");
+  it("returns the correct `get` value when local context clobbers global context (2)", async () => {
+    await withClient({ globalContext: { user: { email: "test@prefab.cloud" } } }, (client) => {
+      expect(client.getString("basic.rule.config", { user: { email: "test@example.com" } })).toBe(
+        "default"
+      );
+    });
   });
 
-  it("returns the correct `get` value when block context clobbers global context (1)", () => {
-    const __actual = resolveCase(
-      "basic.rule.config",
-      mergeContexts({ user: { email: "test@example.com" } } as Contexts)
-    );
-    expect(__actual).toBe("default");
+  it("returns the correct `get` value when block context clobbers global context (1)", async () => {
+    await withClient({ globalContext: { user: { email: "test@prefab.cloud" } } }, (client) => {
+      const scope = client.withContext({ user: { email: "test@example.com" } });
+      expect(scope.getString("basic.rule.config")).toBe("default");
+    });
   });
 
-  it("returns the correct `get` value when block context clobbers global context (2)", () => {
-    const __actual = resolveCase(
-      "basic.rule.config",
-      mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts)
-    );
-    expect(__actual).toBe("override");
+  it("returns the correct `get` value when block context clobbers global context (2)", async () => {
+    await withClient({ globalContext: { user: { email: "test@example.com" } } }, (client) => {
+      const scope = client.withContext({ user: { email: "test@prefab.cloud" } });
+      expect(scope.getString("basic.rule.config")).toBe("override");
+    });
   });
 
-  it("returns the correct `get` value when local context clobbers block context (1)", () => {
-    const __actual = resolveCase(
-      "basic.rule.config",
-      mergeContexts({ user: { email: "test@example.com" } } as Contexts)
-    );
-    expect(__actual).toBe("default");
+  it("returns the correct `get` value when local context clobbers block context (1)", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { email: "test@prefab.cloud" } });
+      expect(scope.getString("basic.rule.config", { user: { email: "test@example.com" } })).toBe(
+        "default"
+      );
+    });
   });
 
-  it("returns the correct `get` value when local context clobbers block context (2)", () => {
-    const __actual = resolveCase(
-      "basic.rule.config",
-      mergeContexts({ user: { email: "test@prefab.cloud" } } as Contexts)
-    );
-    expect(__actual).toBe("override");
+  it("returns the correct `get` value when local context clobbers block context (2)", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { email: "test@example.com" } });
+      expect(scope.getString("basic.rule.config", { user: { email: "test@prefab.cloud" } })).toBe(
+        "override"
+      );
+    });
+  });
+
+  it("returns the correct `get` value when local context replaces the whole global named context (disjoint attributes)", async () => {
+    await withClient({ globalContext: { user: { email: "test@prefab.cloud" } } }, (client) => {
+      expect(client.getString("basic.rule.config", { user: { plan: "pro" } })).toBe("default");
+    });
+  });
+
+  it("returns the correct `get` value when a named context the local context does not mention survives", async () => {
+    await withClient({ globalContext: { user: { email: "test@prefab.cloud" } } }, (client) => {
+      expect(client.getString("basic.rule.config", { team: { plan: "pro" } })).toBe("override");
+    });
   });
 });
