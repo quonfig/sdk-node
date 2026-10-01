@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed: an ENV_VAR-provided value now has the same type as a stored one (qfg-2agi.22).** `get()`
+  on a duration config provided by an environment variable returned the ISO string (`"PT1.5S"`)
+  instead of integer milliseconds (`1500`), which is what a stored duration returns. Int and double
+  configs provided by an environment variable now need the whole value to be a number: `"30s"` used
+  to read as `30` (`parseInt`/`parseFloat` took the numeric prefix) and now fails coercion like
+  `"abc"` already did (`get_or_raise` raises `unable_to_coerce_env_var`). Surrounding whitespace is
+  still allowed.
+
 - **Changed (behavior change): a same-named context now replaces the whole earlier one
   (qfg-2agi.35).** When two context tiers both supply the same named context, the newer one replaces
   it wholesale, as the docs ("Adding to and Merging Contexts") have always described. Before, the

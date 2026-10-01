@@ -188,27 +188,33 @@ export class Resolver {
   }
 }
 
+const INT_PATTERN = /^[+-]?[0-9]+$/;
+const DOUBLE_PATTERN = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
+
 function coerceValue(value: string, valueType: ValueType): any {
   switch (valueType) {
     case "string":
       return value;
+    // The whole (trimmed) string must be the number: parseInt/parseFloat would
+    // read the numeric prefix of "30s" as 30 (qfg-2agi.22).
     case "int": {
-      const n = parseInt(value, 10);
-      if (isNaN(n)) throw new Error(`Cannot convert "${value}" to int`);
-      return n;
+      const t = value.trim();
+      if (!INT_PATTERN.test(t)) throw new Error(`Cannot convert "${value}" to int`);
+      return parseInt(t, 10);
     }
     case "double": {
-      const n = parseFloat(value);
-      if (isNaN(n)) throw new Error(`Cannot convert "${value}" to double`);
-      return n;
+      const t = value.trim();
+      if (!DOUBLE_PATTERN.test(t)) throw new Error(`Cannot convert "${value}" to double`);
+      return parseFloat(t);
     }
     case "bool":
       return TRUE_VALUES.has(value.toLowerCase());
     case "string_list":
       return value.split(/\s*,\s*/);
     case "duration":
-      // Validated here so a malformed env var fails like a stored one; the
-      // valid string is still returned as-is (unwrapping it is qfg-2agi.22).
+      // Validated here so a malformed env var fails like a stored one. The ISO
+      // string is kept as a "duration" Value, so unwrapValue turns it into
+      // integer ms exactly like a stored duration (qfg-2agi.22).
       if (parseDurationMillis(value) === undefined) {
         throw new InvalidDurationError("Cannot convert environment variable to duration");
       }
@@ -228,6 +234,8 @@ function valueTypeForCoerced(valueType: ValueType): ValueType {
       return "bool";
     case "string_list":
       return "string_list";
+    case "duration":
+      return "duration";
     default:
       return "string";
   }

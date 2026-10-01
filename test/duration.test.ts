@@ -108,6 +108,13 @@ describe("malformed duration contract through the public client", () => {
     expect(ignoring.getDuration("provided.duration.PT1.5S")).toBe(1500);
   });
 
+  // qfg-2agi.22: the return type must not depend on where the value came from.
+  // A stored duration comes back from get() as integer ms, so an ENV_VAR one must too.
+  it("env-var-provided PT1.5S -> 1500 via get (not the ISO string)", () => {
+    expect(ignoring.get("provided.duration.PT1.5S")).toBe(1500);
+    expect(ignoring.getNumberDetails("provided.duration.PT1.5S").value).toBe(1500);
+  });
+
   for (const key of [...STORED, ...PROVIDED]) {
     it(`${key}: getDuration with no default returns undefined`, () => {
       expect(ignoring.getDuration(key)).toBeUndefined();
