@@ -203,6 +203,26 @@ describe("Quonfig dev-context injection", () => {
     });
   });
 
+  it("customer-supplied quonfig-user replaces the whole injected dev context (qfg-2agi.35)", async () => {
+    writeFileSync(
+      join(tmpHome, ".quonfig", "tokens.json"),
+      JSON.stringify({ userEmail: "bob@foo.com" })
+    );
+
+    const q = new Quonfig({
+      sdkKey: "test",
+      datafile: emptyEnvelope(),
+      enableQuonfigUserContext: true,
+      globalContext: { "quonfig-user": { plan: "pro" }, team: { key: "t1" } },
+    });
+    await q.init();
+
+    expect(readGlobalContext(q)).toEqual({
+      "quonfig-user": { plan: "pro" },
+      team: { key: "t1" },
+    });
+  });
+
   it("env var QUONFIG_DEV_CONTEXT=true enables the same behavior", async () => {
     writeFileSync(
       join(tmpHome, ".quonfig", "tokens.json"),

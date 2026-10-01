@@ -35,8 +35,14 @@ export function contextLookup(
 }
 
 /**
- * Merge multiple context sets. Later sets override earlier ones at the key level
- * within each named context.
+ * Merge multiple context sets, oldest tier first. A named context in a later set
+ * REPLACES the whole same-named context from earlier sets: the earlier set's
+ * attributes in that context are dropped, not merged property by property.
+ * Named contexts a later set does not mention survive unchanged.
+ *
+ * This is the documented rule (docs: concepts/context, "Adding to and Merging
+ * Contexts") and it applies to every tier: dev context + globalContext,
+ * globalContext + per-call (JIT) contexts, withContext/inContext, and nesting.
  */
 export function mergeContexts(...sets: (Contexts | undefined)[]): Contexts {
   const result: Contexts = {};
@@ -47,11 +53,7 @@ export function mergeContexts(...sets: (Contexts | undefined)[]): Contexts {
     }
 
     for (const [name, ctx] of Object.entries(cs)) {
-      if (result[name] === undefined) {
-        result[name] = { ...ctx };
-      } else {
-        result[name] = { ...result[name], ...ctx };
-      }
+      result[name] = { ...ctx };
     }
   }
 

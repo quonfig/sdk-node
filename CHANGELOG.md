@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Changed (behavior change): a same-named context now replaces the whole earlier one
+  (qfg-2agi.35).** When two context tiers both supply the same named context, the newer one replaces
+  it wholesale, as the docs ("Adding to and Merging Contexts") have always described. Before, the
+  SDK merged them property by property, so attributes from the older tier leaked into the newer one.
+  Example: with `globalContext: { user: { email }, team: { key } }`, a call
+  `getString(key, { user: { plan } })` now evaluates with `user = { plan }` only, so a rule on
+  `user.email` no longer matches; `team.key` still matches because the call did not mention `team`.
+  This applies to every tier: the injected `quonfig-user` dev context + `globalContext`,
+  `globalContext` + per-call contexts, `withContext` / `inContext`, and nested scopes. If you relied
+  on global attributes surviving a per-call context of the same name, pass the full named context in
+  the newer tier (for example `{ user: { ...globalUser, plan } }`). This matches sdk-go, sdk-java,
+  sdk-net and sdk-python.
+
 ## 1.4.0 - 2026-09-28
 
 - **Fixed: a weighted rollout serving its first variant (bucket 0) now reports `SPLIT` (qfg-stbb).**
