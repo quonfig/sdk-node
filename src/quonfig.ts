@@ -34,7 +34,7 @@ import { SSEConnection, type EventSourceFactory } from "./sse";
 import { mergeContexts } from "./context";
 import { normalizeLogger, type NormalizedLogger } from "./sdkLogger";
 import { parseLevel, shouldLog } from "./logger";
-import { durationToMilliseconds } from "./duration";
+import { InvalidDurationError, parseDurationMillis } from "./duration";
 import { loadEnvelopeFromDatadir } from "./datadir";
 import { DatadirWatcher } from "./datadirWatcher";
 import { loadQuonfigUserContext } from "./devContext";
@@ -235,6 +235,7 @@ export class Quonfig {
   private evaluator: Evaluator;
   // Config keys already warned about a missing weighted-rollout hash property (qfg-9dxb.8).
   private readonly warnedMissingHashProperty = new Set<string>();
+  private readonly warnedMalformedDuration = new Set<string>();
   private resolver: Resolver;
   private dependencyResolver: ConfigDependencyResolver;
   private transport: Transport;
@@ -558,17 +559,30 @@ export class Quonfig {
       return this.handleNoDefault(key, defaultValue);
     }
 
-    // Resolve (ENV_VAR, decryption)
-    const { resolved, reportableValue } = this.resolver.resolveValue(
-      match.value,
-      config.key,
-      config.valueType,
-      this.environmentId,
-      mergedContexts
-    );
-
-    // Unwrap to plain value
-    const unwrapped = this.resolver.unwrapValue(resolved);
+    // Resolve (ENV_VAR, decryption) and unwrap to a plain value. A malformed
+    // duration (stored or ENV_VAR) is treated like an absent value: the caller's
+    // default, else the onNoDefault policy (qfg-2agi.9).
+    let resolved: Value;
+    let reportableValue: GetValue | undefined;
+    let unwrapped: unknown;
+    try {
+      ({ resolved, reportableValue } = this.resolver.resolveValue(
+        match.value,
+        config.key,
+        config.valueType,
+        this.environmentId,
+        mergedContexts
+      ));
+      unwrapped = this.resolver.unwrapValue(resolved);
+    } catch (err) {
+      if (!(err instanceof InvalidDurationError)) throw err;
+      this.warnMalformedDurationOnce(key);
+      if (defaultValue !== undefined) return defaultValue;
+      if (this.onNoDefault === "error") {
+        throw new Error(`[quonfig] Config "${key}" has a malformed duration value`);
+      }
+      return undefined;
+    }
 
     // Record evaluation for telemetry
     const evaluation: Evaluation = {
@@ -684,8 +698,8 @@ export class Quonfig {
     if (value === undefined) return undefined;
     // If the evaluator already unwrapped it to ms (duration type), return as-is
     if (typeof value === "number") return value;
-    // If it's a string, parse it
-    if (typeof value === "string") return durationToMilliseconds(value);
+    // If it's a string (ENV_VAR-provided, validated on resolve), parse it
+    if (typeof value === "string") return parseDurationMillis(value);
     return undefined;
   }
 
@@ -1117,6 +1131,7 @@ export class Quonfig {
         hashPropertyMissing: match.missingHashProperty !== undefined,
       };
     } catch (err) {
+      if (err instanceof InvalidDurationError) this.warnMalformedDurationOnce(key);
       const message = err instanceof Error ? err.message : String(err);
       const msg = message.toLowerCase();
       if (msg.includes("type mismatch")) {
@@ -1260,6 +1275,15 @@ export class Quonfig {
       md.weightedValueIndex = weightedValueIndex;
     }
     return md;
+  }
+
+  /** Warn once per key about a malformed duration; never logs the raw value. */
+  private warnMalformedDurationOnce(key: string): void {
+    if (this.warnedMalformedDuration.has(key)) return;
+    this.warnedMalformedDuration.add(key);
+    this.logger.warn(
+      `[quonfig] Config "${key}" has a malformed duration value (expected an ISO 8601 duration such as PT30S); using the default`
+    );
   }
 
   private handleNoDefault(key: string, defaultValue?: any): any {

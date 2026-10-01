@@ -17,6 +17,19 @@
 - **Tests: integration-test-data DURATION cases now assert through the public `getDuration`
   (qfg-2agi.4).** The generated suite used to read the internal resolver, so a broken public getter
   stayed green. No library change.
+- **Fixed: durations follow the one Quonfig grammar, with exact integer milliseconds (qfg-2agi.9).**
+  The parser was unanchored with every part optional, so `-PT5S` read as 5000 ms, `xxPT5Sxx` as
+  5000, `PT5M3H` as 300000 and `30s` or `garbage` as 0, and fractions were floats (`PT2.01S` gave
+  2009.9999999999998). Durations now must match `integration-test-data/tests/duration/grammar.yaml`:
+  `P[nD][T[nH][nM][n[.f]S]]` with ASCII digits, at least one component, a fraction (up to 9 digits)
+  only on seconds, and at most `P36500D`. Milliseconds are computed exactly and rounded half up
+  (`PT2.01S` = 2010, `PT0.0005S` = 1). `PT0.5H`, `PT1.5M`, `P0.5D` and `P1DT` are now malformed.
+- **Fixed: a malformed duration value (stored or from an `ENV_VAR`) is no longer served as a number
+  (qfg-2agi.9).** `getDuration` returns `undefined` (or throws under the default
+  `onNoDefault: "error"`), `get(key, contexts, default)` returns the default, `getNumberDetails`
+  reports `reason: "ERROR"` with an `errorCode`, and the SDK logs one warning per key without the
+  raw value. The exported `durationToMilliseconds` keeps its `number` return type and returns 0 for
+  a malformed string.
 
 ## 1.4.0 - 2026-09-28
 

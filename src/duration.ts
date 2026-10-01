@@ -1,28 +1,59 @@
+// Quonfig duration grammar (qfg-2agi.9). The one definition lives in
+// integration-test-data/tests/duration/grammar.yaml:
+//
+//   ^P(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?$
+//
+// plus: at least one component, no dangling T, a fraction only on S with at
+// most 9 digits, total magnitude <= P36500D. ASCII digits only ([0-9], never
+// \d) and anchored to the whole string.
 const PATTERN =
-  /P(?:(?<days>\d+(?:\.\d+)?)D)?(?:T(?:(?<hours>\d+(?:\.\d+)?)H)?(?:(?<minutes>\d+(?:\.\d+)?)M)?(?:(?<seconds>\d+(?:\.\d+)?)S)?)?/;
+  /^P(?:([0-9]+)D)?(?:T(?=[0-9])(?:([0-9]+)H)?(?:([0-9]+)M)?(?:([0-9]+)(?:\.([0-9]{1,9}))?S)?)?$/;
 
-const MINUTES_IN_SECONDS = 60;
-const HOURS_IN_SECONDS = 60 * MINUTES_IN_SECONDS;
-const DAYS_IN_SECONDS = 24 * HOURS_IN_SECONDS;
+/**
+ * Thrown internally when a stored or ENV_VAR-provided duration is outside the
+ * grammar. Its message never carries the raw value (it may be a secret).
+ */
+export class InvalidDurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidDurationError";
+  }
+}
+
+const NANOS_PER_SECOND = 1_000_000_000n;
+const NANOS_PER_MILLI = 1_000_000n;
+const MAX_NANOS = 36_500n * 86_400n * NANOS_PER_SECOND;
+
+/**
+ * Parse a duration string against the Quonfig grammar and return its length
+ * in whole milliseconds (exact decimal arithmetic, rounded half up), or
+ * `undefined` if the string is not a valid Quonfig duration.
+ */
+export function parseDurationMillis(duration: string): number | undefined {
+  if (typeof duration !== "string") return undefined;
+  const m = PATTERN.exec(duration);
+  if (m === null) return undefined;
+  const [, days, hours, minutes, seconds, fraction] = m;
+  if (days === undefined && hours === undefined && minutes === undefined && seconds === undefined) {
+    return undefined;
+  }
+
+  const wholeSeconds =
+    ((BigInt(days ?? "0") * 24n + BigInt(hours ?? "0")) * 60n + BigInt(minutes ?? "0")) * 60n +
+    BigInt(seconds ?? "0");
+  const nanos = wholeSeconds * NANOS_PER_SECOND + BigInt((fraction ?? "").padEnd(9, "0") || "0");
+  if (nanos > MAX_NANOS) return undefined;
+
+  return Number((nanos + NANOS_PER_MILLI / 2n) / NANOS_PER_MILLI);
+}
 
 /**
  * Parse an ISO 8601 duration string and return the number of milliseconds.
  *
- * Supports formats like: PT0.2S, PT90S, PT1.5M, PT0.5H, P1DT6H2M1.5S
+ * Accepts the Quonfig duration grammar, e.g. PT0.2S, PT90S, PT30M,
+ * P1DT6H2M1.5S. Returns 0 for a string outside the grammar; use
+ * {@link parseDurationMillis} to tell a malformed value from a zero duration.
  */
 export function durationToMilliseconds(duration: string): number {
-  const match = PATTERN.exec(duration);
-  if (match === null) {
-    return 0;
-  }
-
-  const days = parseFloat(match.groups?.["days"] ?? "0");
-  const hours = parseFloat(match.groups?.["hours"] ?? "0");
-  const minutes = parseFloat(match.groups?.["minutes"] ?? "0");
-  const seconds = parseFloat(match.groups?.["seconds"] ?? "0");
-
-  return (
-    (days * DAYS_IN_SECONDS + hours * HOURS_IN_SECONDS + minutes * MINUTES_IN_SECONDS + seconds) *
-    1000
-  );
+  return parseDurationMillis(duration) ?? 0;
 }

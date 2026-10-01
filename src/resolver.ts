@@ -2,7 +2,7 @@ import type { ConfigResponse, Contexts, GetValue, Value, ValueType } from "./typ
 import type { ConfigStore } from "./store";
 import type { Evaluator } from "./evaluator";
 import { decrypt } from "./encryption";
-import { durationToMilliseconds } from "./duration";
+import { InvalidDurationError, parseDurationMillis } from "./duration";
 import { createHash } from "crypto";
 
 const TRUE_VALUES = new Set(["true", "1", "t", "yes"]);
@@ -175,8 +175,13 @@ export class Resolver {
         return [];
       case "log_level":
         return typeof val.value === "number" ? val.value : String(val.value ?? "");
-      case "duration":
-        return durationToMilliseconds(String(val.value ?? ""));
+      case "duration": {
+        const ms = parseDurationMillis(String(val.value ?? ""));
+        if (ms === undefined) {
+          throw new InvalidDurationError("malformed duration value");
+        }
+        return ms;
+      }
       default:
         return val.value;
     }
@@ -202,6 +207,11 @@ function coerceValue(value: string, valueType: ValueType): any {
     case "string_list":
       return value.split(/\s*,\s*/);
     case "duration":
+      // Validated here so a malformed env var fails like a stored one; the
+      // valid string is still returned as-is (unwrapping it is qfg-2agi.22).
+      if (parseDurationMillis(value) === undefined) {
+        throw new InvalidDurationError("Cannot convert environment variable to duration");
+      }
       return value;
     default:
       return value;
