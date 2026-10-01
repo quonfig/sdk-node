@@ -8,6 +8,7 @@ import type { ConfigResponse, ConfigEnvelope, Contexts, Evaluation } from "../..
 import { EvaluationSummaryCollector } from "../../src/telemetry/evaluationSummaries";
 import { ContextShapeCollector } from "../../src/telemetry/contextShapes";
 import { ExampleContextCollector } from "../../src/telemetry/exampleContexts";
+import { Quonfig } from "../../src/quonfig";
 
 // Set environment variables for integration tests
 process.env.PREFAB_INTEGRATION_TEST_ENCRYPTION_KEY =
@@ -90,6 +91,29 @@ store.update(envelope);
 export const evaluator = new Evaluator(store);
 export const resolver = new Resolver(store, evaluator);
 export const envID = ENV_ID;
+
+/**
+ * A real, datadir-backed public `Quonfig` client over the integration-test
+ * fixtures. Generated cases that must assert through the customer-facing API
+ * (DURATION cases via `getDuration`, qfg-2agi.4) use this instead of the
+ * internal store/evaluator/resolver. Built once per test file and cached.
+ */
+let publicClientPromise: Promise<Quonfig> | undefined;
+export function publicClient(): Promise<Quonfig> {
+  if (!publicClientPromise) {
+    const client = new Quonfig({
+      sdkKey: "test-unused",
+      datadir: DATA_DIR,
+      environment: ENV_ID,
+      enableSSE: false,
+      enablePolling: false,
+      collectEvaluationSummaries: false,
+      contextUploadMode: "none",
+    });
+    publicClientPromise = client.init().then(() => client);
+  }
+  return publicClientPromise;
+}
 
 // Re-export telemetry collectors for generated tests
 export { EvaluationSummaryCollector, ContextShapeCollector, ExampleContextCollector };

@@ -4,7 +4,7 @@
 // Source: integration-test-data/generators/src/targets/node.ts
 
 import { describe, it, expect } from "vitest";
-import { store, evaluator, resolver, envID } from "./setup";
+import { store, evaluator, resolver, envID, publicClient } from "./setup";
 import { mergeContexts } from "../../src/context";
 import type { Contexts } from "../../src/types";
 
@@ -98,28 +98,33 @@ describe("get", () => {
     expect(__actual).toBe("hello.world");
   });
 
-  it("duration 200 ms", () => {
-    const __actual = resolveCase("test.duration.PT0.2S", {});
+  it("duration 200 ms", async () => {
+    const __client = await publicClient();
+    const __actual = __client.getDuration("test.duration.PT0.2S", {});
     expect(__actual).toBe(200);
   });
 
-  it("duration 90S", () => {
-    const __actual = resolveCase("test.duration.PT90S", {});
+  it("duration 90S", async () => {
+    const __client = await publicClient();
+    const __actual = __client.getDuration("test.duration.PT90S", {});
     expect(__actual).toBe(90000);
   });
 
-  it("duration 1.5M", () => {
-    const __actual = resolveCase("test.duration.PT1.5M", {});
+  it("duration 1.5M", async () => {
+    const __client = await publicClient();
+    const __actual = __client.getDuration("test.duration.PT1.5M", {});
     expect(__actual).toBe(90000);
   });
 
-  it("duration 0.5H", () => {
-    const __actual = resolveCase("test.duration.PT0.5H", {});
+  it("duration 0.5H", async () => {
+    const __client = await publicClient();
+    const __actual = __client.getDuration("test.duration.PT0.5H", {});
     expect(__actual).toBe(1800000);
   });
 
-  it("duration test.duration.P1DT6H2M1.5S", () => {
-    const __actual = resolveCase("test.duration.P1DT6H2M1.5S", {});
+  it("duration test.duration.P1DT6H2M1.5S", async () => {
+    const __client = await publicClient();
+    const __actual = __client.getDuration("test.duration.P1DT6H2M1.5S", {});
     expect(__actual).toBe(108121500);
   });
 

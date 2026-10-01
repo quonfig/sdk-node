@@ -14,6 +14,9 @@
   on global attributes surviving a per-call context of the same name, pass the full named context in
   the newer tier (for example `{ user: { ...globalUser, plan } }`). This matches sdk-go, sdk-java,
   sdk-net and sdk-python.
+- **Tests: integration-test-data DURATION cases now assert through the public `getDuration`
+  (qfg-2agi.4).** The generated suite used to read the internal resolver, so a broken public getter
+  stayed green. No library change.
 
 ## 1.4.0 - 2026-09-28
 
