@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 - 2026-10-02
 
 - **Tests: every integration-test-data case now runs through the public `Quonfig` client
   (qfg-2agi.32).** The generated suite used test-only copies of the store/evaluator/resolver, its
