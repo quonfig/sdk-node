@@ -71,6 +71,36 @@ describe("get_weighted_values", () => {
     });
   });
 
+  it("non-ascii tracking_id emoji hashes utf-8 bytes", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getString("feature-flag.weighted.even-split-ones", {
+          user: { tracking_id: "🚀-rocket" },
+        })
+      ).toBe("a");
+    });
+  });
+
+  it("non-ascii tracking_id latin hashes utf-8 bytes", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getString("feature-flag.weighted.even-split-ones", {
+          user: { tracking_id: "münchen-7" },
+        })
+      ).toBe("a");
+    });
+  });
+
+  it("non-ascii tracking_id cjk hashes utf-8 bytes", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getString("feature-flag.weighted.even-split-ones", {
+          user: { tracking_id: "ユーザー1" },
+        })
+      ).toBe("b");
+    });
+  });
+
   it("non-standard sum still serves normalized true bucket", async () => {
     await withClient({}, (client) => {
       expect(
