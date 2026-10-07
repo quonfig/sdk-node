@@ -37,6 +37,14 @@ chaos harness and tests with no library change).
   always writes 16-byte tags, so valid encrypted values are unaffected; a value with a short tag now
   fails to decrypt.
 
+- **README: SSE reconnection and developer context are described correctly (qfg-goi1.2.5).** The
+  "Reconnection behavior" section said reconnection was left to the `eventsource` library (v3) with
+  a constant 1000ms delay. The SDK has its own reconnect loop: jittered exponential backoff from
+  500ms to a 30s cap, reset on a successful connection, retrying forever. The README also now says
+  that a `~/.quonfig/tokens.json` from `qfg login` adds `quonfig-user.email` to every evaluation by
+  default, and how to turn that off (`enableQuonfigUserContext: false` or
+  `QUONFIG_DEV_CONTEXT=false`). Docs only.
+
 - **Chaos: corpus pin bumped and `server_metric` is reported as SKIPPED (qfg-goi1.1.2).** The chaos
   and failover-chaos workflows now pin integration-test-data `v2026.10.03`, the same tag as the unit
   tests (was `v2026.05.13` / `v2026.06.19.1`). The new tag holds scenario 05's freshness expectation

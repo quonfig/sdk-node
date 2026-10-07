@@ -94,7 +94,7 @@ See [Telemetry](#telemetry) for what these send and how failures are handled.
 | `QUONFIG_BACKEND_SDK_KEY` | Fallback for `sdkKey` when omitted from options.                                                                                                    |
 | `QUONFIG_DOMAIN`          | Domain used to derive default `apiUrls` and `telemetryUrl`. Defaults to `quonfig.com`. Set to `quonfig-staging.com` to point everything at staging. |
 | `QUONFIG_ENVIRONMENT`     | Environment name to use in datadir mode (overridden by the `environment` option).                                                                   |
-| `QUONFIG_DEV_CONTEXT`     | When `true`, injects `quonfig-user.email` from `~/.quonfig/tokens.json`.                                                                            |
+| `QUONFIG_DEV_CONTEXT`     | Set to `false` to stop injecting `quonfig-user.email` from `~/.quonfig/tokens.json` (on by default; see below).                                     |
 
 Resolution order for URLs (highest wins):
 
@@ -102,6 +102,12 @@ Resolution order for URLs (highest wins):
 2. `QUONFIG_DOMAIN` env var (derives `https://primary.${DOMAIN}`, `https://secondary.${DOMAIN}`,
    `https://telemetry.${DOMAIN}`).
 3. Hardcoded default `quonfig.com`.
+
+Developer context: if `qfg login` has written `~/.quonfig/tokens.json` on the machine
+(`tokens-<domain>.json` for a non-production `QUONFIG_DOMAIN`), the SDK adds a `quonfig-user`
+context with your `email` to every evaluation (and to the example contexts sent in telemetry) so you
+can target yourself in development; turn it off with `enableQuonfigUserContext: false` or
+`QUONFIG_DEV_CONTEXT=false`.
 
 ## Failover & QUONFIG_DOMAIN
 
@@ -145,18 +151,19 @@ they continue returning the last-known values during a disconnect.
 
 ### Reconnection behavior
 
-Reconnection is delegated entirely to the [`eventsource`](https://www.npmjs.com/package/eventsource)
-library (currently v3.x). The SDK's defaults:
+The SDK owns reconnection; it does not rely on the
+[`eventsource`](https://www.npmjs.com/package/eventsource) library's built-in retry. On any stream
+error (network failure, a non-200 response such as a 502 during a deploy, a server-side close, or
+the read deadline below) the SDK closes the stream and opens a new one after a backoff:
 
-- **Initial reconnect delay:** 1000ms
-- **Backoff:** none (constant delay; no exponential growth)
-- **Jitter:** none
-- **Max retries:** unlimited — the library will retry indefinitely
-- **Server-driven delay:** the server can override the delay by sending a `retry: <ms>` field in any
-  event (per the W3C EventSource spec)
+- **Backoff:** exponential, starting at 500ms and doubling up to a 30s cap
+- **Jitter:** each wait is a random time between half the current delay and the full delay
+- **Reset:** a successful connection resets the delay to 500ms, so a routine server-side close
+  reconnects quickly
+- **Max retries:** unlimited. The stream always reconnects to the primary stream URL.
 - **Read deadline (Layer 1, configurable via `sseReadDeadlineMs`):** the SDK wraps the underlying
   `fetch` with an `AbortController` whose deadline resets on every chunk. If no chunk arrives within
-  the window (default 90s = 3x the 30s server heartbeat) the socket is dropped and the library
+  the window (default 90s = 3x the 30s server heartbeat) the socket is dropped and the SDK
   reconnects. Without this, a silent server-side stall would wait on the OS TCP timeout (often 2+
   hrs).
 
