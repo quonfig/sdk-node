@@ -19,6 +19,22 @@ describe("enabled", () => {
     });
   });
 
+  it("returns false for a flag key that does not exist", async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("my-missing-key")).toBe(false);
+    });
+  });
+
+  it("returns false for a flag key that does not exist with a context", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.isEnabled("my-missing-key", {
+          user: { key: "michael", email: "michael@example.com" },
+        })
+      ).toBe(false);
+    });
+  });
+
   it("returns true for a PROP_IS_ONE_OF rule when any prop matches", async () => {
     await withClient({}, (client) => {
       expect(
