@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Recommended semver: none (CI and chaos harness only; no library change).
+
+- **Chaos: corpus pin bumped and `server_metric` is reported as SKIPPED (qfg-goi1.1.2).** The chaos
+  and failover-chaos workflows now pin integration-test-data `v2026.10.03`, the same tag as the unit
+  tests (was `v2026.05.13` / `v2026.06.19.1`). The new tag holds scenario 05's freshness expectation
+  for 60s. `server_metric(...)` expectations used to read a stubbed `0`, so `== 0` passed without
+  checking anything. They now print `SKIPPED` with the reason: api-delivery exports metrics only via
+  OTLP push, nothing in the rig can scrape them, and server lag is covered by the staging drill
+  (qfg-47c2.19) and the `QuonfigSubscriberLagHigh` alert. Inside an `AND` the skipped part is
+  neutral and the other parts are still enforced. The run ends with a tally of skipped expressions.
+  Both workflows also write the api-delivery commit they built (still `main`, on purpose) to the job
+  summary. No library change.
+
 ## 1.5.0 - 2026-10-02
 
 - **Tests: every integration-test-data case now runs through the public `Quonfig` client

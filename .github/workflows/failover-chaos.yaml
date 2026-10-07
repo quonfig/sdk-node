@@ -59,11 +59,11 @@ jobs:
         with:
           repository: quonfig/integration-test-data
           path: integration-test-data
-          # Pin to the reframed corpus tag that carries the hedge ordering
-          # scenarios: o01 (fast primary wins, secondary never contacted),
-          # o03 (heal forward), and the new o05 (slow older primary loses to a
-          # fast newer secondary). (qfg-7h5d.1.14)
-          ref: v2026.06.19.1
+          # Kept equal to the unit-test pin in test.yaml (qfg-goi1.1.2). The
+          # corpus carries the hedge ordering scenarios: o01 (fast primary
+          # wins, secondary never contacted), o03 (heal forward), and o05
+          # (slow older primary loses to a fast newer secondary). (qfg-7h5d.1.14)
+          ref: v2026.10.03
 
       - name: Checkout api-delivery
         # api-delivery is private; the default GITHUB_TOKEN cannot read it. A PAT
@@ -76,6 +76,15 @@ jobs:
           path: api-delivery
           ref: main
           token: ${{ secrets.QUONFIG_REPO_TOKEN }}
+
+      - name: Record api-delivery SHA
+        # api-delivery tracks main on purpose so chaos catches api-delivery
+        # drift (kept by decision, qfg-goi1.1.2; see qfg-41nh.14).
+        # Record exactly which commit this run exercised.
+        run: |
+          sha="$(git -C api-delivery rev-parse HEAD)"
+          echo "api-delivery @ main: $sha"
+          echo "api-delivery @ main: \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
