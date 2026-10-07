@@ -485,8 +485,9 @@ export class Quonfig {
 
     // Fetch configs with a timeout
     const fetchPromise = this.fetchAndInstall();
+    let initTimer: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error("Initialization timed out")), this.initTimeout);
+      initTimer = setTimeout(() => reject(new Error("Initialization timed out")), this.initTimeout);
     });
 
     try {
@@ -494,6 +495,10 @@ export class Quonfig {
     } catch (err) {
       this.logger.warn("Initialization failed:", err);
       throw err;
+    } finally {
+      // An armed timer would keep the event loop alive for initTimeout ms
+      // after init() settles.
+      clearTimeout(initTimer);
     }
 
     this.initialized = true;

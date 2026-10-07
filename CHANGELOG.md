@@ -11,6 +11,11 @@ chaos harness and tests with no library change).
   with a default. The store now normalizes `criteria: null` to `[]`, so the rule matches everything,
   the same as an empty list.
 
+- **`init()` no longer keeps the process alive after it settles (qfg-goi1.2.5).** The init timeout
+  timer stayed armed after a successful `init()`, so CLI scripts, cron jobs and test runners exited
+  `initTimeout` ms (default 10s) late, even after `close()`. The timer is now cleared when `init()`
+  settles. Timeout behavior is unchanged.
+
 - **Chaos: corpus pin bumped and `server_metric` is reported as SKIPPED (qfg-goi1.1.2).** The chaos
   and failover-chaos workflows now pin integration-test-data `v2026.10.03`, the same tag as the unit
   tests (was `v2026.05.13` / `v2026.06.19.1`). The new tag holds scenario 05's freshness expectation
