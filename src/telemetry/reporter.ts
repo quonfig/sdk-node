@@ -257,6 +257,17 @@ export class TelemetryReporter {
     if (events.length === 0) return undefined;
 
     const payload: TelemetryPayload = { instanceHash: this.instanceHash, events };
-    return Buffer.from(JSON.stringify(payload), "utf8");
+    try {
+      return Buffer.from(JSON.stringify(payload), "utf8");
+    } catch (err) {
+      // Example contexts carry raw attribute values, so they are the event
+      // that can hold something JSON.stringify rejects (e.g. a BigInt). Drop
+      // only that event; the rest of the window still ships.
+      if (!examplesEvent) throw err;
+      this.logger.debug(`Telemetry: dropped example contexts that could not be serialized: ${err}`);
+      payload.events = events.filter((e) => e !== examplesEvent);
+      if (payload.events.length === 0) return undefined;
+      return Buffer.from(JSON.stringify(payload), "utf8");
+    }
   }
 }

@@ -16,6 +16,15 @@ chaos harness and tests with no library change).
   `initTimeout` ms (default 10s) late, even after `close()`. The timer is now cleared when `init()`
   settles. Timeout behavior is unchanged.
 
+- **Telemetry no longer throws into `get()`/`isEnabled()` (qfg-goi1.2.5).** A BigInt context key
+  (Prisma and some DB drivers return them for `BIGINT` ids) made every evaluation throw
+  `TypeError: Do not know how to serialize a BigInt` from the example-contexts collector. Recording
+  a context for telemetry is now best-effort: a failure skips that sample (logged once at debug) and
+  the evaluation returns as normal. A BigInt in another attribute used to make the whole telemetry
+  window fail to serialize, losing its evaluation summaries and context shapes too, and made
+  `close()` reject. Now only the example-contexts event is dropped and the rest of the window is
+  sent. How BigInt values should appear in telemetry is still open; they are not sent yet.
+
 - **Chaos: corpus pin bumped and `server_metric` is reported as SKIPPED (qfg-goi1.1.2).** The chaos
   and failover-chaos workflows now pin integration-test-data `v2026.10.03`, the same tag as the unit
   tests (was `v2026.05.13` / `v2026.06.19.1`). The new tag holds scenario 05's freshness expectation

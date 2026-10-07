@@ -280,6 +280,8 @@ export class Quonfig {
    * into the periodic flush only when telemetry is enabled. (qfg-41nh.18)
    */
   private failover: FailoverCollector;
+  /** Set once a collector push has thrown, so the debug line is logged once. */
+  private loggedTelemetryRecordError: boolean = false;
 
   constructor(options: QuonfigOptions) {
     this.sdkKey = options.sdkKey ?? process.env.QUONFIG_BACKEND_SDK_KEY ?? "";
@@ -553,8 +555,7 @@ export class Quonfig {
     }
 
     // Record context for telemetry
-    this.contextShapes.push(mergedContexts);
-    this.exampleContexts.push(mergedContexts);
+    this.recordContextTelemetry(mergedContexts);
 
     // Evaluate
     const match = this.evaluator.evaluateConfig(config, this.environmentId, mergedContexts);
@@ -1082,8 +1083,7 @@ export class Quonfig {
     }
 
     try {
-      this.contextShapes.push(mergedContexts);
-      this.exampleContexts.push(mergedContexts);
+      this.recordContextTelemetry(mergedContexts);
 
       const match = this.evaluator.evaluateConfig(config, this.environmentId, mergedContexts);
       this.warnIfHashPropertyMissing(config.key, match);
@@ -1283,6 +1283,23 @@ export class Quonfig {
   }
 
   /** Warn once per key about a malformed duration; never logs the raw value. */
+  /**
+   * Feed the context collectors. Telemetry must never throw into evaluation:
+   * a value the collectors cannot handle (e.g. a BigInt context key, which
+   * JSON.stringify rejects) skips this sample and is logged once at debug.
+   */
+  private recordContextTelemetry(contexts: Contexts): void {
+    try {
+      this.contextShapes.push(contexts);
+      this.exampleContexts.push(contexts);
+    } catch (err) {
+      if (!this.loggedTelemetryRecordError) {
+        this.loggedTelemetryRecordError = true;
+        this.logger.debug(`telemetry: skipped recording a context: ${err}`);
+      }
+    }
+  }
+
   private warnMalformedDurationOnce(key: string): void {
     if (this.warnedMalformedDuration.has(key)) return;
     this.warnedMalformedDuration.add(key);
