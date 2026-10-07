@@ -25,6 +25,13 @@ chaos harness and tests with no library change).
   `close()` reject. Now only the example-contexts event is dropped and the rest of the window is
   sent. How BigInt values should appear in telemetry is still open; they are not sent yet.
 
+- **`init()` is safe to call twice and respects `close()` (qfg-goi1.2.5).** A second `init()`,
+  either concurrent or after success, opened a second SSE stream and telemetry reporter that
+  `close()` never stopped. It now returns the first call's promise. A rejected `init()` is not
+  remembered, so catching the error and calling `init()` again still retries. Calling `close()`
+  while `init()` was still fetching no longer lets `init()` start SSE, the poller or the telemetry
+  reporter afterwards.
+
 - **Chaos: corpus pin bumped and `server_metric` is reported as SKIPPED (qfg-goi1.1.2).** The chaos
   and failover-chaos workflows now pin integration-test-data `v2026.10.03`, the same tag as the unit
   tests (was `v2026.05.13` / `v2026.06.19.1`). The new tag holds scenario 05's freshness expectation

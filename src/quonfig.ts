@@ -248,6 +248,8 @@ export class Quonfig {
   private lastSuccessfulRefreshAt?: Date;
   private inFlightRefresh?: Promise<void>;
   private closed: boolean = false;
+  /** The in-flight or successful init(); cleared if it rejects. */
+  private initPromise?: Promise<void>;
   private telemetryReporter?: TelemetryReporter;
   private testTelemetryClock?: TelemetryClock;
   private telemetryTransportOptions: {
@@ -473,8 +475,23 @@ export class Quonfig {
    * and starts background update mechanisms (SSE/polling).
    *
    * Must be called before using any get* methods.
+   *
+   * Calling init() again (concurrently or after it succeeded) returns the same
+   * promise rather than starting a second fetch, SSE stream and telemetry
+   * reporter. A rejected init() is not remembered, so it can be retried.
    */
-  async init(): Promise<void> {
+  init(): Promise<void> {
+    if (!this.initPromise) {
+      const attempt = this.runInit();
+      this.initPromise = attempt;
+      attempt.catch(() => {
+        if (this.initPromise === attempt) this.initPromise = undefined;
+      });
+    }
+    return this.initPromise;
+  }
+
+  private async runInit(): Promise<void> {
     if (this.datadir || this.datafile) {
       this.loadLocalData();
       this.initialized = true;
@@ -502,6 +519,10 @@ export class Quonfig {
       // after init() settles.
       clearTimeout(initTimer);
     }
+
+    // close() ran while the fetch was in flight: don't start SSE, the poller
+    // or the telemetry reporter that nothing would ever stop.
+    if (this.closed) return;
 
     this.initialized = true;
 
