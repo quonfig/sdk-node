@@ -12,7 +12,7 @@ function probe(over: Partial<ExpressionProbe> = {}): ExpressionProbe {
     fallbackActive: false,
     processCrashed: false,
     lastRefresh: 0,
-    sdkMetric: () => 0,
+    sdkMetric: () => ({ value: 0, known: true }),
     logMatches: () => 0,
     ...over,
   };
@@ -76,5 +76,42 @@ describe("chaos expressions: server_metric is SKIPPED, not a silent 0", () => {
     expect(r.ok).toBe(false);
     expect(r.skippedOnly).toBe(false);
     expect(r.why).toContain("unrecognized expression");
+  });
+});
+
+// An sdkMetric name the probe does not implement must fail the expectation
+// loudly (qfg-goi1.2.20). It used to read a silent 0, so a typo such as
+// `client.sdkMetric('typo_total') == 0` passed without checking anything.
+// Mirrors sdk-go chaos_helpers_test.go, where sdkMetric returns (value, known).
+describe("chaos expressions: unknown sdkMetric fails loudly, not a silent 0", () => {
+  const unknownProbe = probe({ sdkMetric: () => ({ value: 0, known: false }) });
+
+  it("fails an expectation on an unknown metric name, even when `== 0` would hold", () => {
+    const r = evaluate("client.sdkMetric('typo_total') == 0", unknownProbe);
+    expect(r.ok).toBe(false);
+    expect(r.skippedOnly).toBe(false);
+    expect(r.why).toContain("unknown sdkMetric typo_total");
+  });
+
+  it("fails an AND that contains an unknown metric", () => {
+    const r = evaluate(
+      "client.connectionState() == 'connected' AND client.sdkMetric('typo_total') == 0",
+      unknownProbe
+    );
+    expect(r.ok).toBe(false);
+    expect(r.why).toContain("unknown sdkMetric typo_total");
+  });
+
+  it("still evaluates a known metric with its labels", () => {
+    const seen: Array<[string, Record<string, string>]> = [];
+    const p = probe({
+      sdkMetric: (name, labels) => {
+        seen.push([name, labels]);
+        return { value: 3, known: true };
+      },
+    });
+    const r = evaluate("client.sdkMetric('quonfig_sdk_worker_restart_total', layer='1') >= 3", p);
+    expect(r.ok).toBe(true);
+    expect(seen).toEqual([["quonfig_sdk_worker_restart_total", { layer: "1" }]]);
   });
 });

@@ -281,14 +281,18 @@ class ChaosProbe {
       this.restartLayer1++;
     }
   }
-  sdkMetric(name: string, labels: Record<string, string>): number {
+  // known is false for a metric name the probe does not implement, so the
+  // evaluator fails the expectation instead of reading a silent 0.
+  sdkMetric(name: string, labels: Record<string, string>): { value: number; known: boolean } {
     if (name === "quonfig_sdk_worker_restart_total") {
-      if (labels.layer === "1") return this.restartLayer1;
-      if (labels.layer === "2") return this.restartLayer2;
-      return this.restartLayer1 + this.restartLayer2;
+      if (labels.layer === "1") return { value: this.restartLayer1, known: true };
+      if (labels.layer === "2") return { value: this.restartLayer2, known: true };
+      return { value: this.restartLayer1 + this.restartLayer2, known: true };
     }
-    if (name === "quonfig_sse_connect_attempts_total") return this.connAttempts;
-    return 0;
+    if (name === "quonfig_sse_connect_attempts_total") {
+      return { value: this.connAttempts, known: true };
+    }
+    return { value: 0, known: false };
   }
   logMatches(level: string, re: RegExp): number {
     let n = 0;

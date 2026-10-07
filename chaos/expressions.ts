@@ -12,7 +12,13 @@ export interface ExpressionProbe {
   fallbackActive: boolean;
   processCrashed: boolean;
   lastRefresh: number;
-  sdkMetric(name: string, labels: Record<string, string>): number;
+  /**
+   * The probe's value for an SDK-side metric. `known` is false for a metric
+   * name the probe does not implement, so the evaluator fails the expectation
+   * loudly instead of comparing against a silent 0 (mirrors sdk-go's
+   * `sdkMetric(name, labels) (value, known)`).
+   */
+  sdkMetric(name: string, labels: Record<string, string>): { value: number; known: boolean };
   logMatches(level: string, re: RegExp): number;
 }
 
@@ -129,7 +135,13 @@ function evalLeaf(expr: string, probe: ExpressionProbe): EvalResult {
   if ((m = RE_SDK_METRIC.exec(expr))) {
     const [, metric, layer, op, wantStr] = m;
     const labels: Record<string, string> = layer ? { layer } : {};
-    const got = probe.sdkMetric(metric, labels);
+    const { value: got, known } = probe.sdkMetric(metric, labels);
+    if (!known) {
+      return leafResult(
+        false,
+        `unknown sdkMetric ${metric}: the chaos probe does not implement it`
+      );
+    }
     const ok = compareNum(op, got, Number(wantStr));
     return leafResult(ok, `sdkMetric(${metric},layer=${layer ?? ""})=${got} ${op} ${wantStr}`);
   }

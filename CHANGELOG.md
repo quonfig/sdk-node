@@ -56,6 +56,13 @@ chaos harness and tests with no library change).
   Both workflows also write the api-delivery commit they built (still `main`, on purpose) to the job
   summary. No library change.
 
+- **Chaos: an unknown `sdkMetric` name fails the expectation (qfg-goi1.2.20).** The chaos probe
+  returned `0` for a metric name it does not implement, so a typo such as
+  `client.sdkMetric('typo_total') == 0` passed without checking anything. The probe now reports
+  whether it knows the metric (as sdk-go does), and an unknown name fails with
+  `unknown sdkMetric <name>`. Every metric name in integration-test-data `v2026.10.03` is
+  implemented, so no current chaos result changes. No library change.
+
 - **Tests: the datadir auto-reload debounce test no longer flakes on slow CI runners (qfg-vnjw).**
   `debounces bursts` rewrote a config file five times with a 5ms sleep between writes and expected
   one reload from an 80ms debounce. On a starved runner (Node 20.19.0 CI) a 5ms sleep can take
