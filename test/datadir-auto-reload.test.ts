@@ -83,14 +83,17 @@ describe("dataDirAutoReload", () => {
 
     let extraCallbacks = 0;
     let initialDone = false;
-    const quonfig = new Quonfig({
+    const seen: string[] = [];
+    const quonfig: Quonfig = new Quonfig({
       sdkKey: "test-sdk-key",
       datadir,
       environment: "Production",
       dataDirAutoReload: true,
       dataDirAutoReloadDebounceMs: 80,
       onConfigUpdate: () => {
-        if (initialDone) extraCallbacks++;
+        if (!initialDone) return;
+        extraCallbacks++;
+        seen.push(quonfig.getString("welcome-message") ?? "");
       },
     });
     clients.push(quonfig);
@@ -98,10 +101,16 @@ describe("dataDirAutoReload", () => {
     await quonfig.init();
     initialDone = true;
 
-    // Five rapid writes inside the debounce window.
+    // Five writes back to back, with no await between them. The debounce timer
+    // cannot fire while this loop runs, so the whole burst lands inside one
+    // debounce window however slow the machine is. The old version slept 5ms
+    // between writes; on a starved CI runner one of those sleeps took longer
+    // than the 80ms window and each write reloaded on its own (qfg-vnjw).
+    // DatadirWatcher's timing (events spread across the window, a later
+    // event after a quiet period, close() with a reload pending) is covered
+    // with fake timers in datadir-watcher-debounce.test.ts.
     for (let i = 1; i <= 5; i++) {
       writeGreetingConfig(datadir, `v${i}`);
-      await sleep(5);
     }
 
     await waitFor(() => quonfig.getString("welcome-message") === "v5", 2000);
@@ -109,6 +118,7 @@ describe("dataDirAutoReload", () => {
     await sleep(120);
 
     expect(extraCallbacks).toBe(1);
+    expect(seen).toEqual(["v5"]);
   });
 
   it("parse-then-swap: malformed JSON keeps the previous envelope and skips the callback", async () => {

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Recommended semver: none (CI and chaos harness only; no library change).
+Recommended semver: none (CI, chaos harness and tests only; no library change).
 
 - **Chaos: corpus pin bumped and `server_metric` is reported as SKIPPED (qfg-goi1.1.2).** The chaos
   and failover-chaos workflows now pin integration-test-data `v2026.10.03`, the same tag as the unit
@@ -14,6 +14,16 @@ Recommended semver: none (CI and chaos harness only; no library change).
   neutral and the other parts are still enforced. The run ends with a tally of skipped expressions.
   Both workflows also write the api-delivery commit they built (still `main`, on purpose) to the job
   summary. No library change.
+
+- **Tests: the datadir auto-reload debounce test no longer flakes on slow CI runners (qfg-vnjw).**
+  `debounces bursts` rewrote a config file five times with a 5ms sleep between writes and expected
+  one reload from an 80ms debounce. On a starved runner (Node 20.19.0 CI) a 5ms sleep can take
+  longer than 80ms, so each write reloaded on its own and the test saw 5 callbacks. The debounce was
+  working as designed. The test now writes the burst with no await between writes, so it cannot
+  outlast the window, and also checks that the one reload saw the final value. A new fake-timer test
+  (`datadir-watcher-debounce.test.ts`) covers the timing exactly: events spread across the window
+  coalesce into one reload a full window after the last event, an event after a quiet window reloads
+  again, and `close()` cancels a pending reload. No library change.
 
 ## 1.5.0 - 2026-10-02
 
