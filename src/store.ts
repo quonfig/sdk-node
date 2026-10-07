@@ -70,7 +70,10 @@ function normalizeConfigResponse(cfg: ConfigResponse): void {
   }
   for (const rule of cfg.default.rules) {
     normalizeValue(rule.value);
-    for (const criterion of rule.criteria ?? []) {
+    // Same for criteria: api-delivery's Go nil slice serializes as null. An
+    // empty criteria list is an always-match rule.
+    rule.criteria ??= [];
+    for (const criterion of rule.criteria) {
       if (criterion.valueToMatch) {
         normalizeValue(criterion.valueToMatch);
       }
@@ -83,7 +86,8 @@ function normalizeConfigResponse(cfg: ConfigResponse): void {
     }
     for (const rule of cfg.environment.rules) {
       normalizeValue(rule.value);
-      for (const criterion of rule.criteria ?? []) {
+      rule.criteria ??= [];
+      for (const criterion of rule.criteria) {
         if (criterion.valueToMatch) {
           normalizeValue(criterion.valueToMatch);
         }

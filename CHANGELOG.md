@@ -2,7 +2,14 @@
 
 ## Unreleased
 
-Recommended semver: none (CI, chaos harness and tests only; no library change).
+Recommended semver: patch (bug fixes on error and edge paths only; the earlier entries below are CI,
+chaos harness and tests with no library change).
+
+- **A rule with `"criteria": null` no longer throws (qfg-goi1.2.5).** api-delivery serializes an
+  empty criteria list as `null`. The store already accepted `rules: null`, but a rule with
+  `criteria: null` made every `get()` of that key throw `TypeError: criteria is not iterable`, even
+  with a default. The store now normalizes `criteria: null` to `[]`, so the rule matches everything,
+  the same as an empty list.
 
 - **Chaos: corpus pin bumped and `server_metric` is reported as SKIPPED (qfg-goi1.1.2).** The chaos
   and failover-chaos workflows now pin integration-test-data `v2026.10.03`, the same tag as the unit
