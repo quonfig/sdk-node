@@ -32,6 +32,11 @@ chaos harness and tests with no library change).
   while `init()` was still fetching no longer lets `init()` start SSE, the poller or the telemetry
   reporter afterwards.
 
+- **Decryption requires the full 16-byte AES-GCM auth tag (qfg-goi1.2.5).** Node accepted a
+  truncated tag (a 4-byte tag decrypted and only printed a `DEP0182` deprecation warning). The SDK
+  always writes 16-byte tags, so valid encrypted values are unaffected; a value with a short tag now
+  fails to decrypt.
+
 - **Chaos: corpus pin bumped and `server_metric` is reported as SKIPPED (qfg-goi1.1.2).** The chaos
   and failover-chaos workflows now pin integration-test-data `v2026.10.03`, the same tag as the unit
   tests (was `v2026.05.13` / `v2026.06.19.1`). The new tag holds scenario 05's freshness expectation

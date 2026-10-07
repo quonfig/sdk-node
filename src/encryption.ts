@@ -4,6 +4,7 @@ import type { CipherGCMTypes } from "crypto";
 const CIPHER_TYPE: CipherGCMTypes = "aes-256-gcm";
 const SEPARATOR = "--";
 const KEY_LENGTH = 32; // 32 bytes for aes-256-gcm
+const AUTH_TAG_LENGTH = 16; // 128-bit GCM tag
 
 /**
  * Generate a new random hex-encoded 32-byte key for AES-256-GCM encryption.
@@ -62,7 +63,9 @@ export function decrypt(encryptedString: string, keyStringHex: string): string {
   const iv = Buffer.from(ivPart, "hex");
   const authTag = Buffer.from(authTagPart, "hex");
 
-  const decipher = createDecipheriv(CIPHER_TYPE, key, iv);
+  // Require the full 16-byte tag (what encrypt() writes); without this Node
+  // accepts a truncated tag.
+  const decipher = createDecipheriv(CIPHER_TYPE, key, iv, { authTagLength: AUTH_TAG_LENGTH });
   decipher.setAuthTag(authTag);
 
   let decrypted = decipher.update(encryptedData);
