@@ -2,8 +2,16 @@
 
 ## Unreleased
 
-Recommended semver: patch (bug fixes on error and edge paths only; the earlier entries below are CI,
-chaos harness and tests with no library change).
+Recommended semver: minor (`isEnabled()` on a missing key now returns false instead of throwing, a
+rare-edge behavior change; the rest are bug fixes on error and edge paths, plus CI, chaos harness
+and tests with no library change).
+
+- **`isEnabled()` on a flag key that does not exist returns false (qfg-goi1.3).** It threw
+  `No value found for key "..."` under the default `onNoDefault: "error"`, contradicting its own
+  JSDoc. It now returns false under every `onNoDefault` policy, with or without a context (`"warn"`
+  still logs the warning). `get()` and the typed getters (`getBool()`, `getString()`, ...) are
+  unchanged: a missing key still follows `onNoDefault`. Pinned by the integration-test-data
+  v2026.10.07 `enabled.yaml` cases.
 
 - **A rule with `"criteria": null` no longer throws (qfg-goi1.2.5).** api-delivery serializes an
   empty criteria list as `null`. The store already accepted `rules: null`, but a rule with

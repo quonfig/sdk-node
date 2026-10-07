@@ -743,8 +743,17 @@ export class Quonfig {
   /**
    * Check if a feature flag is enabled.
    * Returns false if the key is not found or the value is not a boolean.
+   * A missing key returns false under every `onNoDefault` policy ("warn"
+   * still logs); `get()` and the typed getters keep the policy's behavior.
    */
   isEnabled(key: string, contexts?: Contexts): boolean {
+    this.requireInitialized();
+    if (this.store.get(key) === undefined) {
+      if (this.onNoDefault === "warn") {
+        this.logger.warn(`No value found for key "${key}"`);
+      }
+      return false;
+    }
     const value = this.get(key, contexts, undefined);
     if (typeof value === "boolean") return value;
     if (value === "true") return true;
