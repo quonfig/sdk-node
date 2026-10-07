@@ -22,7 +22,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import * as yaml from "js-yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -337,6 +337,10 @@ interface ExpectationState {
   heldSince?: number;
   passed: boolean;
   failed: boolean;
+  // Every leaf is unevaluable (server_metric): reported SKIPPED, never PASS.
+  skipped: boolean;
+  // Unevaluable leaves of this expectation, each with its reason.
+  skippedLeaves: string[];
   lastReason: string;
 }
 
@@ -346,7 +350,7 @@ async function runScenario(
   apiUrl: string,
   ssePort: number,
   pollMs: number
-): Promise<{ pass: number; fail: number; details: string[] }> {
+): Promise<{ pass: number; fail: number; skipped: string[]; details: string[] }> {
   await tp.clearToxics("sse");
   await tp.clearToxics("http");
   await tp.setEnabled("sse", true);
@@ -442,18 +446,23 @@ async function runScenario(
     exp: e,
     passed: false,
     failed: false,
+    skipped: false,
+    skippedLeaves: [],
     lastReason: "",
   }));
-
-  const serverMetric = (_name: string): number => 0;
 
   while (Date.now() - baseline < wallClock) {
     const elapsed = Date.now() - baseline;
     let allTerminal = true;
     for (const s of states) {
-      if (s.passed || s.failed) continue;
-      const r = evaluate(s.exp.assert, probe, serverMetric);
+      if (s.passed || s.failed || s.skipped) continue;
+      const r = evaluate(s.exp.assert, probe);
       s.lastReason = r.why;
+      s.skippedLeaves = r.skipped;
+      if (r.skippedOnly) {
+        s.skipped = true;
+        continue;
+      }
       if (r.ok) {
         if (s.heldSince === undefined) {
           s.heldSince = Date.now();
@@ -469,14 +478,14 @@ async function runScenario(
       if (!s.passed && elapsed > s.exp.within_ms) {
         s.failed = true;
       }
-      if (!s.passed && !s.failed) allTerminal = false;
+      if (!s.passed && !s.failed && !s.skipped) allTerminal = false;
     }
     if (allTerminal) break;
     await sleep(pollMs);
   }
 
   // Anything still pending = failure.
-  for (const s of states) if (!s.passed) s.failed = true;
+  for (const s of states) if (!s.passed && !s.skipped) s.failed = true;
 
   clearInterval(fallbackTracker);
   await quonfig.close().catch(() => {});
@@ -484,23 +493,33 @@ async function runScenario(
   const details: string[] = [];
   let pass = 0;
   let fail = 0;
+  let skippedCount = 0;
+  const skipped: string[] = [];
   for (const s of states) {
-    if (s.passed) {
+    for (const leaf of s.skippedLeaves) skipped.push(`exp[${s.idx}] SKIPPED ${leaf}`);
+    const partial =
+      s.skippedLeaves.length > 0 ? ` [SKIPPED leaf: ${s.skippedLeaves.join("; ")}]` : "";
+    if (s.skipped) {
+      skippedCount++;
+      details.push(
+        `SKIP  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms: ${s.exp.assert} — ${s.lastReason}`
+      );
+    } else if (s.passed) {
       pass++;
       details.push(
-        `PASS  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms: ${s.exp.assert} (hit at ${s.hitAt}ms)`
+        `PASS  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms: ${s.exp.assert} (hit at ${s.hitAt}ms)${partial}`
       );
     } else {
       fail++;
       details.push(
-        `FAIL  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms: ${s.exp.assert} — last: ${s.lastReason}`
+        `FAIL  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms: ${s.exp.assert} — last: ${s.lastReason}${partial}`
       );
     }
   }
   details.push(
-    `summary: ${pass} passed, ${fail} failed (state=${probe.connState}, restartLayer1=${probe.restartLayer1}, fallback=${probe.fallbackActive}, lastRefreshMs=${probe.lastRefresh})`
+    `summary: ${pass} passed, ${fail} failed, ${skippedCount} skipped (state=${probe.connState}, restartLayer1=${probe.restartLayer1}, fallback=${probe.fallbackActive}, lastRefreshMs=${probe.lastRefresh})`
   );
-  return { pass, fail, details };
+  return { pass, fail, skipped, details };
 }
 
 // ----- entry point -----
@@ -512,6 +531,10 @@ const ONLY = splitCSV(process.env.CHAOS_ONLY);
 const SKIP = splitCSV(process.env.CHAOS_SKIP);
 
 const tp = new Toxiproxy(TOXI_URL);
+
+// Run-end tally of every expression leaf the rig could not evaluate, so a skip
+// is never silent (qfg-goi1.1.2).
+const skipTally: string[] = [];
 
 const scenariosDir = chaosScenariosDir();
 const files = fs
@@ -541,6 +564,11 @@ describe("chaos harness (qfg-47c2.7)", { timeout: 30 * 60 * 1000 }, () => {
     await tp.upsertProxy("http", "0.0.0.0:18551", `${upstreamHost}:${upstreamPort}`);
   });
 
+  afterAll(() => {
+    console.log(`skipped expressions: ${skipTally.length}`);
+    for (const line of skipTally) console.log(`  ${line}`);
+  });
+
   for (const file of files) {
     const base = path.basename(file);
     const num = scenarioNumber(base);
@@ -553,6 +581,7 @@ describe("chaos harness (qfg-47c2.7)", { timeout: 30 * 60 * 1000 }, () => {
           const apiURL = process.env.CHAOS_API_DELIVERY_URL!;
           const result = await runScenario(tp, run, apiURL, SSE_PORT, POLL_MS);
           for (const line of result.details) console.log(line);
+          for (const leaf of result.skipped) skipTally.push(`${base} / ${run.name}: ${leaf}`);
           expect(result.fail, `${result.fail} expectation(s) failed`).toBe(0);
         });
       }

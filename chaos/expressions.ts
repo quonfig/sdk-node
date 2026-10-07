@@ -16,6 +16,37 @@ export interface ExpressionProbe {
   logMatches(level: string, re: RegExp): number;
 }
 
+/**
+ * Why `server_metric(...)` expressions are SKIPPED rather than evaluated: they
+ * assert on api-delivery's own metrics, which the rig cannot read.
+ */
+export const SERVER_METRIC_SKIP_REASON =
+  "server-side metric; api-delivery exports metrics only via OTLP push, so nothing is " +
+  "scrapeable from the chaos rig. Server lag is covered by the staging drill " +
+  "(qfg-47c2.19) and the QuonfigSubscriberLagHigh alert.";
+
+/**
+ * Result of evaluating an expectation expression.
+ *
+ * `skipped` lists every leaf that could not be evaluated, each with its reason.
+ * `skippedOnly` is true when nothing in the expression was actually checked:
+ * the runner reports such an expectation as SKIPPED, never as PASS.
+ */
+export interface EvalResult {
+  ok: boolean;
+  why: string;
+  skipped: string[];
+  skippedOnly: boolean;
+}
+
+function leafResult(ok: boolean, why: string): EvalResult {
+  return { ok, why, skipped: [], skippedOnly: false };
+}
+
+function skippedResult(skipped: string[]): EvalResult {
+  return { ok: true, why: `SKIPPED ${skipped.join("; ")}`, skipped, skippedOnly: true };
+}
+
 const RE_CONN_STATE_EQ = /^client\.connectionState\(\)\s*(==|!=)\s*'([^']+)'$/;
 const RE_FALLBACK_EQ = /^client\.fallbackPollerActive\(\)\s*==\s*(true|false)$/;
 const RE_PROC_ALIVE_EQ = /^client\.processStillAlive\(\)\s*==\s*(true|false)$/;
@@ -64,88 +95,86 @@ function compareNum(op: string, a: number, b: number): boolean {
   return false;
 }
 
-function evalLeaf(
-  expr: string,
-  probe: ExpressionProbe,
-  serverMetric: (n: string) => number
-): { ok: boolean; why: string } {
+function evalLeaf(expr: string, probe: ExpressionProbe): EvalResult {
   expr = expr.trim();
   let m: RegExpExecArray | null;
   if ((m = RE_CONN_STATE_EQ.exec(expr))) {
     const [, op, want] = m;
     const got = probe.connState;
     const ok = op === "==" ? got === want : got !== want;
-    return { ok, why: `connectionState=${got} ${op} ${want}` };
+    return leafResult(ok, `connectionState=${got} ${op} ${want}`);
   }
   if ((m = RE_FALLBACK_EQ.exec(expr))) {
     const want = m[1] === "true";
-    return {
-      ok: probe.fallbackActive === want,
-      why: `fallbackPollerActive=${probe.fallbackActive} want ${want}`,
-    };
+    return leafResult(
+      probe.fallbackActive === want,
+      `fallbackPollerActive=${probe.fallbackActive} want ${want}`
+    );
   }
   if ((m = RE_PROC_ALIVE_EQ.exec(expr))) {
     const want = m[1] === "true";
     const alive = !probe.processCrashed;
-    return { ok: alive === want, why: `processStillAlive=${alive} want ${want}` };
+    return leafResult(alive === want, `processStillAlive=${alive} want ${want}`);
   }
   if ((m = RE_LAST_REFRESH.exec(expr))) {
     const [, op, agoStr] = m;
     const ago = Number(agoStr);
     const threshold = Date.now() - ago;
     const ok = compareNum(op, probe.lastRefresh, threshold);
-    return {
+    return leafResult(
       ok,
-      why: `lastSuccessfulRefresh=${probe.lastRefresh} ${op} (now()-${ago})=${threshold}`,
-    };
+      `lastSuccessfulRefresh=${probe.lastRefresh} ${op} (now()-${ago})=${threshold}`
+    );
   }
   if ((m = RE_SDK_METRIC.exec(expr))) {
     const [, metric, layer, op, wantStr] = m;
     const labels: Record<string, string> = layer ? { layer } : {};
     const got = probe.sdkMetric(metric, labels);
     const ok = compareNum(op, got, Number(wantStr));
-    return { ok, why: `sdkMetric(${metric},layer=${layer ?? ""})=${got} ${op} ${wantStr}` };
+    return leafResult(ok, `sdkMetric(${metric},layer=${layer ?? ""})=${got} ${op} ${wantStr}`);
   }
   if ((m = RE_SERVER_METRIC.exec(expr))) {
-    const [, name, op, wantStr] = m;
-    const got = serverMetric(name);
-    const ok = compareNum(op, got, Number(wantStr));
-    return { ok, why: `server_metric(${name})=${got} ${op} ${wantStr}` };
+    const skip = `${expr}: ${SERVER_METRIC_SKIP_REASON}`;
+    return { ok: true, why: `SKIPPED ${skip}`, skipped: [skip], skippedOnly: true };
   }
   if ((m = RE_SDK_LOG.exec(expr))) {
     const [, level, pattern, op, wantStr] = m;
     const re = new RegExp(pattern, "i");
     const got = probe.logMatches(level, re);
     const ok = compareNum(op, got, Number(wantStr));
-    return { ok, why: `sdkLog(${level},/${pattern}/i)=${got} ${op} ${wantStr}` };
+    return leafResult(ok, `sdkLog(${level},/${pattern}/i)=${got} ${op} ${wantStr}`);
   }
-  return { ok: false, why: `unrecognized expression: ${expr}` };
+  return leafResult(false, `unrecognized expression: ${expr}`);
 }
 
-export function evaluate(
-  expr: string,
-  probe: ExpressionProbe,
-  serverMetric: (n: string) => number
-): { ok: boolean; why: string } {
+export function evaluate(expr: string, probe: ExpressionProbe): EvalResult {
   expr = expr.trim();
-  if (!expr) return { ok: true, why: "" };
+  if (!expr) return leafResult(true, "");
   if (expr.includes(" OR ")) {
-    const parts = splitOutsideQuotesAndRegex(expr, " OR ");
-    const reasons: string[] = [];
-    for (const p of parts) {
-      const r = evaluate(p, probe, serverMetric);
-      if (r.ok) return { ok: true, why: "" };
-      reasons.push(r.why);
-    }
-    return { ok: false, why: "OR: " + reasons.join(" | ") };
+    // A skipped leaf is ignored in an OR: counting it true would make the whole
+    // OR pass on the strength of an assertion that was never checked.
+    const parts = splitOutsideQuotesAndRegex(expr, " OR ").map((p) => evaluate(p, probe));
+    const skipped = parts.flatMap((r) => r.skipped);
+    const checked = parts.filter((r) => !r.skippedOnly);
+    if (checked.length === 0) return skippedResult(skipped);
+    if (checked.some((r) => r.ok)) return { ok: true, why: "", skipped, skippedOnly: false };
+    return {
+      ok: false,
+      why: "OR: " + checked.map((r) => r.why).join(" | "),
+      skipped,
+      skippedOnly: false,
+    };
   }
   if (expr.includes(" AND ")) {
-    const parts = splitOutsideQuotesAndRegex(expr, " AND ");
-    for (const p of parts) {
-      const r = evaluate(p, probe, serverMetric);
-      if (!r.ok) return { ok: false, why: "AND: " + r.why };
-    }
-    return { ok: true, why: "" };
+    // A skipped leaf is neutral (true) in an AND; the other leaves are still
+    // enforced.
+    const parts = splitOutsideQuotesAndRegex(expr, " AND ").map((p) => evaluate(p, probe));
+    const skipped = parts.flatMap((r) => r.skipped);
+    const checked = parts.filter((r) => !r.skippedOnly);
+    if (checked.length === 0) return skippedResult(skipped);
+    const failed = checked.find((r) => !r.ok);
+    if (failed) return { ok: false, why: "AND: " + failed.why, skipped, skippedOnly: false };
+    return { ok: true, why: "", skipped, skippedOnly: false };
   }
-  return evalLeaf(expr, probe, serverMetric);
+  return evalLeaf(expr, probe);
 }
