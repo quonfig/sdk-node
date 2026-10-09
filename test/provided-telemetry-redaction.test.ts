@@ -1,9 +1,9 @@
-// ENV_VAR-provided values must never reach evaluation-summary telemetry
-// (qfg-goi1.2.47). The env var's contents are the secret the provided indirection
-// exists to keep out of the config repo, so `selectedValue` carries a redaction
-// over the stored (pre-resolution) descriptor, never the resolved env value.
-// Matches sdk-go, which records the evaluator's pre-resolution Value and
-// redacts confidential values (integration-test-data telemetry.yaml Category 7).
+// ENV_VAR-provided values in evaluation-summary telemetry (qfg-goi1.2.47).
+// A provided value marked `confidential: true` must never reach telemetry:
+// `selectedValue` carries a redaction over the stored (pre-resolution)
+// descriptor, never the resolved env value. A NON-confidential provided value
+// reports its resolved value like any ordinary value (Jeff, 2026-10-09: the
+// original 1.6.0 fix redacted every provided value, which was too broad).
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createHash } from "crypto";
 
@@ -75,12 +75,14 @@ describe("ENV_VAR-provided values in evaluation-summary telemetry", () => {
       .digest("hex")
       .slice(0, 5);
 
-  it.each([
-    ["confidential", true],
-    ["non-confidential", false],
-  ])("%s provided value: selectedValue is redacted, never the env contents", async (_, conf) => {
-    const { bodies, selected } = await postedTelemetry(conf as boolean);
+  it("confidential provided value: selectedValue is redacted, never the env contents", async () => {
+    const { bodies, selected } = await postedTelemetry(true);
     expect(selected).toEqual([{ string: expectedRedaction }]);
     expect(bodies).not.toContain(SECRET);
+  });
+
+  it("non-confidential provided value: selectedValue is the resolved value", async () => {
+    const { selected } = await postedTelemetry(false);
+    expect(selected).toEqual([{ string: SECRET }]);
   });
 });

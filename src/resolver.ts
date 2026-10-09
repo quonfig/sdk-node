@@ -79,18 +79,17 @@ export class Resolver {
         }
 
         const coerced = coerceValue(envValue, valueType);
-        // Telemetry must never carry the env var's contents: provided values
-        // exist to keep secrets out of the config repo, confidential or not.
-        // Report a redaction over the stored (pre-resolution) descriptor, the
-        // raw value as it appears in the config JSON (qfg-goi1.2.47; sdk-go
-        // records the pre-resolution Value and redacts confidential ones).
-        return {
-          resolved: {
-            type: valueTypeForCoerced(valueType),
-            value: coerced,
-          },
-          reportableValue: makeConfidential(JSON.stringify(provided)),
-        };
+        const resolved: Value = { type: valueTypeForCoerced(valueType), value: coerced };
+        // A confidential provided value must never put the env var's contents
+        // in telemetry: report a redaction over the stored (pre-resolution)
+        // descriptor, the raw value as it appears in the config JSON
+        // (qfg-goi1.2.47; sdk-go records the pre-resolution Value and redacts
+        // confidential ones). A non-confidential provided value reports its
+        // resolved value like any ordinary value (decision 2026-10-09).
+        if (val.confidential) {
+          return { resolved, reportableValue: makeConfidential(JSON.stringify(provided)) };
+        }
+        return { resolved };
       }
       return { resolved: val };
     }

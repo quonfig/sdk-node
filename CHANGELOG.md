@@ -77,13 +77,15 @@
   coalesce into one reload a full window after the last event, an event after a quiet window reloads
   again, and `close()` cancels a pending reload. No library change.
 
-- **Security: ENV_VAR-provided values are no longer sent in telemetry (qfg-goi1.2.47).** For a
-  `provided` value the SDK reported the resolved environment variable's contents as the evaluation
-  summary's `selectedValue`, even with `confidential: true`, so secrets supplied through `ENV_VAR`
-  (DB passwords, API keys) were POSTed to the telemetry endpoint every 60s. `selectedValue` for a
-  provided value is now a redaction (`{"string": "*****<first 5 hex of md5>"}`) computed over the
-  stored descriptor (`{"source":"ENV_VAR","lookup":"..."}`), never the env contents. The value
-  returned to the caller is unchanged. Upgrade if you use ENV_VAR-provided configs.
+- **Security: confidential ENV_VAR-provided values are no longer sent in telemetry
+  (qfg-goi1.2.47).** For a `provided` value the SDK reported the resolved environment variable's
+  contents as the evaluation summary's `selectedValue`, even with `confidential: true`, so secrets
+  supplied through `ENV_VAR` (DB passwords, API keys) were POSTed to the telemetry endpoint every
+  60s. `selectedValue` for a provided value marked `confidential: true` is now a redaction
+  (`{"string": "*****<first 5 hex of md5>"}`) computed over the stored descriptor
+  (`{"source":"ENV_VAR","lookup":"..."}`), never the env contents. A provided value that is not
+  confidential still reports its resolved value, like any other value. The value returned to the
+  caller is unchanged. Upgrade if you use confidential ENV_VAR-provided configs.
 
 ## 1.5.0 - 2026-10-02
 
