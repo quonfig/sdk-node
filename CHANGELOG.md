@@ -1,10 +1,6 @@
 # Changelog
 
-## Unreleased
-
-Recommended semver: minor (`isEnabled()` on a missing key now returns false instead of throwing, a
-rare-edge behavior change; the rest are bug fixes on error and edge paths, plus CI, chaos harness
-and tests with no library change).
+## 1.6.0 - 2026-10-09
 
 - **`isEnabled()` on a flag key that does not exist returns false (qfg-goi1.3).** It threw
   `No value found for key "..."` under the default `onNoDefault: "error"`, contradicting its own
