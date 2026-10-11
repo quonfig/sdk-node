@@ -5,8 +5,9 @@ that are obvious from the diff:
 
 1. Public API and semver breakage: a removed, renamed or changed signature on exported functions,
    classes, types and option fields (including TypeScript types, since a narrowed or renamed type
-   breaks customer builds); a changed default or a behavior change on the common path. Any of these needs a MAJOR version bump. Also flag a version
-   bump in the diff that does not match the change (e.g. a breaking change with only a patch bump).
+   breaks customer builds); a changed default or a behavior change on the common path. Any of these
+   needs a MAJOR version bump. Also flag a version bump in the diff that does not match the change
+   (e.g. a breaking change with only a patch bump).
 2. Obvious bugs: inverted conditions, wrong variable, unreachable code, a nil/null dereference, an
    off-by-one that is plainly wrong, a broken import.
 3. Leaked secrets: SDK keys, API keys or tokens (e.g. `sk_live_`, `qf_`, GitHub or registry publish
