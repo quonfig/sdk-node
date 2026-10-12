@@ -377,7 +377,7 @@ export class Quonfig {
     this.instanceHash = randomUUID();
 
     // Initialize core components
-    this.store = new ConfigStore();
+    this.store = new ConfigStore((message, ...args) => this.logger.warn(message, ...args));
     this.evaluator = new Evaluator(this.store);
     this.resolver = new Resolver(this.store, this.evaluator);
     this.dependencyResolver = new ConfigDependencyResolver(this.store, this.evaluator);

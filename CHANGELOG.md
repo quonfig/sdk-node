@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Minor: one config that fails to load no longer rejects the whole payload (qfg-goi1.10.1).** A
+  delivery payload or datadir envelope with one malformed config entry (for example one with no
+  `default`) threw while installing, so the SDK kept the previous configs, or failed `init()`, for
+  every key. That entry is now skipped with a WARN naming its key, the rest installs, and the
+  skipped key reads as not found (your default, or `FLAG_NOT_FOUND` in `get*Details()`). A payload
+  whose every entry fails is still rejected, so it cannot install as an empty workspace. Matches
+  sdk-go.
+
 ## 1.6.0 - 2026-10-09
 
 - **`isEnabled()` on a flag key that does not exist returns false (qfg-goi1.3).** It threw
