@@ -172,7 +172,10 @@ export class Resolver {
             "json value must be a native JSON type (object/array/number/boolean/null); stringified JSON is no longer allowed"
           );
         }
-        return val.value;
+        // Copy-on-return: hand out a deep copy so a caller mutating the result
+        // cannot rewrite the stored config for every later read
+        // (qfg-goi1.10.1, sdk-go 543ee9c).
+        return structuredClone(val.value);
       case "string_list":
         if (Array.isArray(val.value)) {
           return val.value.map((v: any) => String(v));

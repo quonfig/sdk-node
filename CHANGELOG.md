@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Minor: `getJSON()`, `get()` and `getJSONDetails()` return a copy of a json value
+  (qfg-goi1.10.1).** They returned the store's own object, so mutating the result rewrote that
+  config for every later read in the process until the next config update. Each call now returns a
+  deep copy. Matches sdk-go.
+
+  UPGRADE: may change returned values. A json value is a new object on every call, so code that
+  compared two reads with `===`, or that relied on mutating the returned object to change later
+  reads, behaves differently. Each call now pays a deep copy (`structuredClone`) of the value; for a
+  large json config read on a hot path, read it once and keep the result.
+
 - **Minor: one config that fails to load no longer rejects the whole payload (qfg-goi1.10.1).** A
   delivery payload or datadir envelope with one malformed config entry (for example one with no
   `default`) threw while installing, so the SDK kept the previous configs, or failed `init()`, for
