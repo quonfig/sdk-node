@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Minor: `getJSON()`, `get()` and `getJSONDetails()` return a copy of a json value
+  (qfg-goi1.10.1).** They returned the store's own object, so mutating the result rewrote that
+  config for every later read in the process until the next config update. Each call now returns a
+  deep copy. Matches sdk-go.
+
+  UPGRADE: may change returned values. A json value is a new object on every call, so code that
+  compared two reads with `===`, or that relied on mutating the returned object to change later
+  reads, behaves differently. Each call now pays a deep copy (`structuredClone`) of the value; for a
+  large json config read on a hot path, read it once and keep the result.
+
+- **Minor: one config that fails to load no longer rejects the whole payload (qfg-goi1.10.1).** A
+  delivery payload or datadir envelope with one malformed config entry (for example one with no
+  `default`) threw while installing, so the SDK kept the previous configs, or failed `init()`, for
+  every key. That entry is now skipped with a WARN naming its key, the rest installs, and the
+  skipped key reads as not found (your default, or `FLAG_NOT_FOUND` in `get*Details()`). A payload
+  whose every entry fails is still rejected, so it cannot install as an empty workspace. Matches
+  sdk-go.
+
 - **Patch: example-context telemetry snapshots the context when it is recorded (qfg-goi1.2.34).**
   The collector kept the caller's context objects until the next flush, so mutating a nested object
   or list after `get()` changed what was sent, and a cyclic value made the whole example-contexts

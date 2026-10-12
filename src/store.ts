@@ -16,6 +16,15 @@ export class ConfigStore {
   private configs: Map<string, ConfigResponse> = new Map();
   private version: string = "";
   private environmentId: string = "";
+  private warn: (message: string, ...args: unknown[]) => void;
+
+  /**
+   * `warn` receives the WARN for a config entry that is skipped because it
+   * failed to normalize (defaults to console.warn).
+   */
+  constructor(warn?: (message: string, ...args: unknown[]) => void) {
+    this.warn = warn ?? ((message, ...args) => console.warn(message, ...args));
+  }
 
   get(key: string): ConfigResponse | undefined {
     return this.configs.get(key);
@@ -36,14 +45,37 @@ export class ConfigStore {
   /**
    * Replace all configs with those from the given envelope.
    * Also normalizes values that need special deserialization (weighted_values, provided).
+   *
+   * An entry that fails to normalize (for example a config with no `default`)
+   * is skipped with a WARN naming its key, and the rest installs; the skipped
+   * key reads as not found (qfg-goi1.10.1, sdk-go 2f6b98b). If every entry
+   * fails, the envelope is rejected and the previous configs stay, so an
+   * undecodable payload can never install as an empty workspace.
    */
   update(envelope: ConfigEnvelope): void {
     const next = new Map<string, ConfigResponse>();
+    const configs = envelope.configs ?? [];
+    let firstErr: unknown;
 
-    for (const cfg of envelope.configs) {
-      // Normalize the config's values to ensure proper typing
-      normalizeConfigResponse(cfg);
-      next.set(cfg.key, cfg);
+    for (const cfg of configs) {
+      try {
+        if (!cfg || typeof cfg.key !== "string") {
+          throw new Error("config entry has no key");
+        }
+        // Normalize the config's values to ensure proper typing
+        normalizeConfigResponse(cfg);
+        next.set(cfg.key, cfg);
+      } catch (err) {
+        firstErr ??= err;
+        const key = cfg && typeof cfg.key === "string" ? cfg.key : "";
+        this.warn(
+          `[quonfig] skipping config "${key}" that failed to load (version ${envelope.meta?.version ?? ""}); other configs are unaffected:`,
+          err
+        );
+      }
+    }
+    if (next.size === 0 && firstErr !== undefined) {
+      throw firstErr;
     }
 
     this.configs = next;
