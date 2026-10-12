@@ -78,7 +78,7 @@ export class Resolver {
           );
         }
 
-        const coerced = coerceValue(envValue, valueType);
+        const coerced = coerceValue(envValue, valueType, provided.lookup, configKey);
         const resolved: Value = { type: valueTypeForCoerced(valueType), value: coerced };
         // A confidential provided value must never put the env var's contents
         // in telemetry: report a redaction over the stored (pre-resolution)
@@ -199,7 +199,14 @@ export class Resolver {
 const INT_PATTERN = /^[+-]?[0-9]+$/;
 const DOUBLE_PATTERN = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
 
-function coerceValue(value: string, valueType: ValueType): any {
+// The coercion error names the env var, the target type and the config key,
+// never the env var's contents (which may be a secret such as a connection
+// string): qfg-goi1.2.31, template pinned across SDKs (sdk-go 4178377).
+function coercionError(lookup: string, valueType: ValueType, configKey: string): string {
+  return `environment variable "${lookup}" cannot be converted to ${valueType} for config "${configKey}"`;
+}
+
+function coerceValue(value: string, valueType: ValueType, lookup: string, configKey: string): any {
   switch (valueType) {
     case "string":
       return value;
@@ -207,12 +214,12 @@ function coerceValue(value: string, valueType: ValueType): any {
     // read the numeric prefix of "30s" as 30 (qfg-2agi.22).
     case "int": {
       const t = value.trim();
-      if (!INT_PATTERN.test(t)) throw new Error(`Cannot convert "${value}" to int`);
+      if (!INT_PATTERN.test(t)) throw new Error(coercionError(lookup, valueType, configKey));
       return parseInt(t, 10);
     }
     case "double": {
       const t = value.trim();
-      if (!DOUBLE_PATTERN.test(t)) throw new Error(`Cannot convert "${value}" to double`);
+      if (!DOUBLE_PATTERN.test(t)) throw new Error(coercionError(lookup, valueType, configKey));
       return parseFloat(t);
     }
     case "bool":
@@ -224,7 +231,7 @@ function coerceValue(value: string, valueType: ValueType): any {
       // string is kept as a "duration" Value, so unwrapValue turns it into
       // integer ms exactly like a stored duration (qfg-2agi.22).
       if (parseDurationMillis(value) === undefined) {
-        throw new InvalidDurationError("Cannot convert environment variable to duration");
+        throw new InvalidDurationError(coercionError(lookup, valueType, configKey));
       }
       return value;
     default:
