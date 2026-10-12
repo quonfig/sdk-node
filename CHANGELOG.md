@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Patch: an ENV_VAR coercion error no longer echoes the env var's contents (qfg-goi1.2.31).** An
+  int or double config backed by an env var that did not parse threw
+  `Cannot convert "<value>" to int`, so a secret such as a connection string reached thrown errors,
+  `get*Details().errorMessage` and the OpenFeature provider's logs. The message is now
+  `environment variable "<NAME>" cannot be converted to <type> for config "<key>"`, the same
+  template as sdk-go and sdk-net, and names only the env var, the type and the key. A malformed
+  ENV_VAR duration uses the same message.
+
 ## 1.6.0 - 2026-10-09
 
 - **`isEnabled()` on a flag key that does not exist returns false (qfg-goi1.3).** It threw
