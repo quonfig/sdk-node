@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Patch: example-context telemetry snapshots the context when it is recorded (qfg-goi1.2.34).**
+  The collector kept the caller's context objects until the next flush, so mutating a nested object
+  or list after `get()` changed what was sent, and a cyclic value made the whole example-contexts
+  event fail to serialize. The context is now copied at record time, following `JSON.stringify`:
+  `toJSON()` runs then (a `Date`, or an ObjectId/UUID-like key, becomes its string, so the example
+  keeps its identifying key), plain objects and arrays are copied, and `undefined`, functions and
+  symbols are dropped. Dropped instead of failing the event: the edge that closes a cycle, values
+  nested more than 32 levels deep, and a value whose `toJSON()` or getter throws. BigInt values are
+  kept as before. Context shapes already recorded only the field type and are unchanged.
+
 ## 1.6.0 - 2026-10-09
 
 - **`isEnabled()` on a flag key that does not exist returns false (qfg-goi1.3).** It threw
