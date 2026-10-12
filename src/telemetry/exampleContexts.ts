@@ -38,7 +38,8 @@ export class ExampleContextCollector {
     if (!this.enabled) return;
     if (this.data.length >= this.maxDataSize) return;
 
-    const key = this.groupedKey(contexts);
+    const snapshot = snapshotContexts(contexts);
+    const key = this.groupedKey(snapshot);
     if (key.length === 0) return;
 
     // Rate limit: skip if seen recently
@@ -52,7 +53,7 @@ export class ExampleContextCollector {
       if (this.seen.size >= this.maxSeen) return;
     }
 
-    this.data.push([Date.now(), contexts]);
+    this.data.push([Date.now(), snapshot]);
     this.seen.set(key, Date.now());
   }
 
@@ -115,5 +116,82 @@ export class ExampleContextCollector {
         this.seen.delete(key);
       }
     }
+  }
+}
+
+/**
+ * Values nested deeper than this are dropped from an example context. It bounds
+ * the recursion for a pathological (non-cyclic) value; real contexts are a few
+ * levels deep.
+ */
+const MAX_SNAPSHOT_DEPTH = 32;
+
+const OMIT = Symbol("omit");
+
+/**
+ * Copy `contexts` into data that shares nothing with the caller, so a mutation
+ * after the evaluation cannot change what the next flush sends (qfg-goi1.2.34,
+ * port of sdk-go qfg-goi1.2.4 / qfg-goi1.2.44 / qfg-goi1.2.46). The copy
+ * follows JSON.stringify, which is what the flush would have run: `toJSON()`
+ * is called now (a Date or an ObjectId/UUID-like key becomes its string, so the
+ * example keeps its identifying key), plain objects and arrays are copied, and
+ * undefined, functions and symbols are dropped (null inside an array). The
+ * edge that closes a cycle and anything deeper than MAX_SNAPSHOT_DEPTH are
+ * dropped instead of failing the whole event. A value whose toJSON() or getter
+ * throws is dropped. BigInt is kept as is (how it is sent is still open).
+ */
+function snapshotContexts(contexts: Contexts): Contexts {
+  const out: Contexts = {};
+  for (const [name, ctx] of Object.entries(contexts)) {
+    const copied = snapshotValue(ctx, 0, []);
+    if (
+      copied !== OMIT &&
+      copied !== null &&
+      typeof copied === "object" &&
+      !Array.isArray(copied)
+    ) {
+      out[name] = copied as Record<string, unknown>;
+    }
+  }
+  return out;
+}
+
+function snapshotValue(value: unknown, depth: number, path: object[]): unknown {
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+    case "bigint":
+      return value;
+    case "undefined":
+    case "function":
+    case "symbol":
+      return OMIT;
+  }
+  if (value === null) return null;
+  const obj = value as object;
+  if (depth > MAX_SNAPSHOT_DEPTH || path.includes(obj)) return OMIT;
+  path.push(obj);
+  try {
+    const toJSON = (obj as { toJSON?: unknown }).toJSON;
+    if (typeof toJSON === "function") {
+      return snapshotValue(toJSON.call(obj), depth + 1, path);
+    }
+    if (Array.isArray(obj)) {
+      return obj.map((e) => {
+        const c = snapshotValue(e, depth + 1, path);
+        return c === OMIT ? null : c;
+      });
+    }
+    const copy: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      const c = snapshotValue(v, depth + 1, path);
+      if (c !== OMIT) copy[k] = c;
+    }
+    return copy;
+  } catch {
+    return OMIT;
+  } finally {
+    path.pop();
   }
 }
