@@ -27,11 +27,73 @@ export interface EventSourceLike {
 /**
  * Factory for constructing an EventSource. Defaults to dynamic-importing the
  * `eventsource` package; overridable for tests.
+ *
+ * `onCommentFrame` must be called each time the stream delivers a complete
+ * comment-only block (the server's `: keepalive`). eventsource@4 does not
+ * surface comment lines (its parser is created with only onEvent/onRetry), so
+ * the default factory detects them on the response body; see
+ * {@link CommentFrameDetector}. A config envelope delivered through
+ * `onmessage` is detected by SSEConnection itself.
  */
 export type EventSourceFactory = (
   url: string,
-  init: { headers: Record<string, string> }
+  init: { headers: Record<string, string>; onCommentFrame?: () => void }
 ) => EventSourceLike;
+
+/**
+ * Detects complete comment-only SSE blocks in a raw byte stream (qfg-goi1.10.40).
+ *
+ * A block is the run of lines up to a blank line. It is a comment frame when it
+ * holds at least one comment line (`:` first) and no other field. `: keepalive\n\n`
+ * and `:\n\n` count; a comment cut off by EOF, a bare blank line, or a block that
+ * also carries `data:`/`id:`/any other field does not. Lines end in CRLF, LF or
+ * CR, and a line ending may be split across chunks.
+ */
+export class CommentFrameDetector {
+  private decoder = new TextDecoder();
+  private pendingCR = false;
+  private inLine = false;
+  private lineIsComment = false;
+  private sawComment = false;
+  private sawField = false;
+
+  /** Feed one body chunk; returns the number of comment frames it completed. */
+  push(chunk: Uint8Array): number {
+    const text = this.decoder.decode(chunk, { stream: true });
+    let frames = 0;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (this.pendingCR) {
+        this.pendingCR = false;
+        if (ch === "\n") continue;
+      }
+      if (ch === "\r" || ch === "\n") {
+        if (this.endLine()) frames++;
+        if (ch === "\r") this.pendingCR = true;
+        continue;
+      }
+      if (!this.inLine) {
+        this.inLine = true;
+        this.lineIsComment = ch === ":";
+      }
+    }
+    return frames;
+  }
+
+  /** Close the current line; returns true when it was the blank line ending a comment frame. */
+  private endLine(): boolean {
+    if (this.inLine) {
+      if (this.lineIsComment) this.sawComment = true;
+      else this.sawField = true;
+      this.inLine = false;
+      return false;
+    }
+    const frame = this.sawComment && !this.sawField;
+    this.sawComment = false;
+    this.sawField = false;
+    return frame;
+  }
+}
 
 export interface SSEConnectionOptions {
   /** Optional listener for SSE lifecycle transitions. See {@link SSEConnectionState}. */
@@ -58,7 +120,8 @@ export interface SSEConnectionOptions {
  */
 export function wrapFetchWithReadDeadline(
   innerFetch: typeof fetch,
-  deadlineMs: number
+  deadlineMs: number,
+  onCommentFrame?: () => void
 ): typeof fetch {
   return (async (input: any, init?: RequestInit): Promise<Response> => {
     const controller = new AbortController();
@@ -96,8 +159,15 @@ export function wrapFetchWithReadDeadline(
 
     // Wrap the body in a TransformStream that resets the deadline on every
     // chunk. The eventsource library reads from `response.body`, so this is
-    // the only seam we need.
+    // the only seam we need. It is also where keepalives are seen: the
+    // library drops comment lines, so a comment-only block is detected here
+    // (first-frame rule, qfg-goi1.10.40). Only a 200 event stream counts.
     const reader = response.body.getReader();
+    const contentType = response.headers.get("content-type") ?? "";
+    const detector =
+      onCommentFrame && response.status === 200 && contentType.startsWith("text/event-stream")
+        ? new CommentFrameDetector()
+        : null;
     const monitored = new ReadableStream<Uint8Array>({
       async pull(controllerOut) {
         try {
@@ -108,6 +178,13 @@ export function wrapFetchWithReadDeadline(
             return;
           }
           resetDeadline();
+          if (detector && detector.push(value) > 0) {
+            try {
+              onCommentFrame!();
+            } catch {
+              /* never break the stream over a state callback */
+            }
+          }
           controllerOut.enqueue(value);
         } catch (err) {
           if (timer !== null) clearTimeout(timer);
@@ -160,6 +237,8 @@ export class SSEConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelayMs: number = SSE_RECONNECT_INITIAL_DELAY_MS;
   private closed = false;
+  /** Whether the current connection has delivered its first valid frame. */
+  private frameSeen = false;
   private waitHook?: (kind: string, ms: number) => number;
 
   constructor(transport: Transport, logger?: Logger, options?: SSEConnectionOptions) {
@@ -195,22 +274,27 @@ export class SSEConnection {
       const url = this.transport.getSSEUrl();
       const headers = this.transport.getSSEHeaders();
 
-      const es = factory(url, { headers });
-      this.eventSource = es;
-
-      es.onopen = () => {
-        // A live stream resets the backoff so the next retry is snappy — a
-        // server-initiated close is normal (the LB recycles connections
-        // periodically); don't punish it. Mirrors sdk-go's runLoop.
-        this.reconnectDelayMs = SSE_RECONNECT_INITIAL_DELAY_MS;
-        this.setState("connected");
+      // First-frame rule (qfg-goi1.10.40): the 200 response headers (onopen)
+      // are NOT "connected". Only the connection's first valid frame — a
+      // comment-only block or a config envelope — resets the backoff and
+      // reports `connected`. A connection that ends before it is a failed
+      // attempt: onerror reports `error` and the backoff keeps growing.
+      this.frameSeen = false;
+      let es: EventSourceLike | null = null;
+      const onFrame = (): void => {
+        if (es !== null && es === this.eventSource) this.markFirstFrame();
       };
+      es = factory(url, { headers, onCommentFrame: onFrame });
+      this.eventSource = es;
 
       es.onmessage = (event: any) => {
         try {
           // A non-envelope event is dropped exactly like malformed JSON
-          // (qfg-9dxb.3 Fix B): it never reaches the install guard.
+          // (qfg-9dxb.3 Fix B): it never reaches the install guard, and it is
+          // not a frame.
           const envelope: ConfigEnvelope = parseConfigEnvelope(JSON.parse(event.data));
+          // The connected edge fires before the envelope is installed.
+          onFrame();
           onUpdate(envelope);
         } catch (err) {
           this.logger.warn("SSE message parse error:", err);
@@ -234,6 +318,19 @@ export class SSEConnection {
       this.setState("error");
       this.scheduleReconnect();
     }
+  }
+
+  /**
+   * The current connection delivered its first valid frame: once per
+   * connection, reset the backoff (a server-initiated close after a live
+   * session is the normal LB recycle; don't punish it — mirrors sdk-go's
+   * runLoop) and report `connected`.
+   */
+  private markFirstFrame(): void {
+    if (this.frameSeen || this.closed) return;
+    this.frameSeen = true;
+    this.reconnectDelayMs = SSE_RECONNECT_INITIAL_DELAY_MS;
+    this.setState("connected");
   }
 
   /**
@@ -265,7 +362,8 @@ export class SSEConnection {
     const delay = this.reconnectDelayMs;
     // Uniform sleep in [delay/2, delay], mirroring sdk-go's runLoop jitter.
     const sleep = delay / 2 + Math.random() * (delay / 2);
-    // Exponential backoff for the next attempt; onopen resets it.
+    // Exponential backoff for the next attempt; a connection's first valid
+    // frame resets it (markFirstFrame).
     this.reconnectDelayMs = Math.min(delay * 2, SSE_RECONNECT_MAX_DELAY_MS);
     const wait = this.waitHook ? this.waitHook("sse", sleep) : sleep;
 
@@ -295,12 +393,13 @@ export class SSEConnection {
     const deadlineMs = this.readDeadlineMs;
     return (url, init) => {
       const headers = init.headers;
+      const onCommentFrame = init.onCommentFrame;
       const baseFetch: typeof fetch = (input, fetchInit) =>
         fetch(input, {
           ...fetchInit,
           headers: { ...(fetchInit?.headers as Record<string, string>), ...headers },
         });
-      const customFetch = wrapFetchWithReadDeadline(baseFetch, deadlineMs);
+      const customFetch = wrapFetchWithReadDeadline(baseFetch, deadlineMs, onCommentFrame);
       return new EventSource(url, { fetch: customFetch }) as EventSourceLike;
     };
   }

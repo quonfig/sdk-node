@@ -29,15 +29,18 @@ function envelope(version: string): ConfigEnvelope {
 
 interface FakeEventSource {
   onopen: ((evt: any) => void) | null;
+  /** Deliver a `: keepalive` frame (the SDK's comment-frame hook). */
+  keepalive?: () => void;
   onmessage: ((evt: any) => void) | null;
   onerror: ((evt: any) => void) | null;
   close: () => void;
 }
 
 function makeEventSourceFactory(out: { value: FakeEventSource | null }) {
-  return (_url: string, _init: { headers: Record<string, string> }) => {
+  return (_url: string, init: { headers: Record<string, string>; onCommentFrame?: () => void }) => {
     const es: FakeEventSource = {
       onopen: null,
+      keepalive: () => init.onCommentFrame?.(),
       onmessage: null,
       onerror: null,
       close: () => {},
@@ -69,7 +72,7 @@ describe("Quonfig.connectionState()", () => {
     expect(quonfig.connectionState()).toBe("initializing");
   });
 
-  it("transitions to 'connected' after successful SSE onopen", async () => {
+  it("transitions to 'connected' after the SSE stream's first frame", async () => {
     vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
       result: {
         envelope: envelope("v1"),
@@ -92,10 +95,10 @@ describe("Quonfig.connectionState()", () => {
     await quonfig.init();
     await vi.advanceTimersByTimeAsync(10);
 
-    // Before onopen, SSE is connecting — connectionState reports 'disconnected'.
+    // Before the first frame, SSE is connecting — connectionState reports 'disconnected'.
     expect(quonfig.connectionState()).toBe("disconnected");
 
-    fakeOut.value!.onopen?.({});
+    fakeOut.value!.keepalive?.();
     expect(quonfig.connectionState()).toBe("connected");
 
     await quonfig.close();
@@ -123,7 +126,7 @@ describe("Quonfig.connectionState()", () => {
 
     await quonfig.init();
     await vi.advanceTimersByTimeAsync(10);
-    fakeOut.value!.onopen?.({});
+    fakeOut.value!.keepalive?.();
     expect(quonfig.connectionState()).toBe("connected");
 
     // SSE errors: connection dropped, fallback grace timer running.
@@ -135,7 +138,7 @@ describe("Quonfig.connectionState()", () => {
     expect(quonfig.connectionState()).toBe("falling_back");
 
     // SSE recovers, fallback disengages.
-    fakeOut.value!.onopen?.({});
+    fakeOut.value!.keepalive?.();
     expect(quonfig.connectionState()).toBe("connected");
 
     await quonfig.close();
@@ -192,7 +195,7 @@ describe("Quonfig.connectionState()", () => {
 
     await quonfig.init();
     await vi.advanceTimersByTimeAsync(10);
-    fakeOut.value!.onopen?.({});
+    fakeOut.value!.keepalive?.();
     expect(quonfig.connectionState()).toBe("connected");
 
     await quonfig.close();

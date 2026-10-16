@@ -29,15 +29,18 @@ function envelopeWithFlag(version: string, value: boolean): ConfigEnvelope {
 
 interface FakeEventSource {
   onopen: ((evt: any) => void) | null;
+  /** Deliver a `: keepalive` frame (the SDK's comment-frame hook). */
+  keepalive?: () => void;
   onmessage: ((evt: any) => void) | null;
   onerror: ((evt: any) => void) | null;
   close: () => void;
 }
 
 function makeEventSourceFactory(out: { value: FakeEventSource | null }) {
-  return (_url: string, _init: { headers: Record<string, string> }) => {
+  return (_url: string, init: { headers: Record<string, string>; onCommentFrame?: () => void }) => {
     const es: FakeEventSource = {
       onopen: null,
+      keepalive: () => init.onCommentFrame?.(),
       onmessage: null,
       onerror: null,
       close: () => {},
@@ -83,7 +86,7 @@ describe("Quonfig — Layer 2 fallback poller", () => {
     expect(quonfig.isFeatureEnabled("build.dark-mode")).toBe(false);
 
     // Let the SSE factory resolve and produce an EventSource, then fail it
-    // before any onopen — initial failure path.
+    // before any frame — initial failure path.
     await vi.advanceTimersByTimeAsync(10);
     expect(fakeOut.value).not.toBeNull();
     fakeOut.value!.onerror?.({ type: "error" });
@@ -123,7 +126,7 @@ describe("Quonfig — Layer 2 fallback poller", () => {
 
     await quonfig.init();
     await vi.advanceTimersByTimeAsync(10);
-    fakeOut.value!.onopen?.({}); // SSE successfully connected.
+    fakeOut.value!.keepalive?.(); // SSE successfully connected.
 
     expect((quonfig as any).fallbackPollerActive()).toBe(false);
 
@@ -141,7 +144,7 @@ describe("Quonfig — Layer 2 fallback poller", () => {
     expect((quonfig as any).fallbackPollerActive()).toBe(true);
 
     // Recover SSE — fallback poller stops.
-    fakeOut.value!.onopen?.({});
+    fakeOut.value!.keepalive?.();
     expect((quonfig as any).fallbackPollerActive()).toBe(false);
 
     await quonfig.close();
@@ -170,7 +173,7 @@ describe("Quonfig — Layer 2 fallback poller", () => {
 
     await quonfig.init();
     await vi.advanceTimersByTimeAsync(10);
-    fakeOut.value!.onopen?.({}); // SSE successfully connected.
+    fakeOut.value!.keepalive?.(); // SSE successfully connected.
     expect(fetchSpy).toHaveBeenCalledTimes(1); // init fetch only
 
     // Drop the connection, then let the 120s grace window elapse.
@@ -211,7 +214,7 @@ describe("Quonfig — Layer 2 fallback poller", () => {
 
     await quonfig.init();
     await vi.advanceTimersByTimeAsync(10);
-    fakeOut.value!.onopen?.({});
+    fakeOut.value!.keepalive?.();
 
     await vi.advanceTimersByTimeAsync(10_000);
     expect((quonfig as any).fallbackPollerActive()).toBe(false);

@@ -94,7 +94,7 @@ describe("get_or_raise", () => {
     await assertClientConstructionRaises(
       "any-key",
       0.01,
-      "https://app.staging-prefab.cloud",
+      "http://192.0.2.1:1",
       "return",
       "get_or_raise",
       /^No value found for key "/
@@ -102,12 +102,7 @@ describe("get_or_raise", () => {
   });
 
   it("get_or_raise can raise an error if the client does not initialize in time", async () => {
-    await assertInitializationTimeoutError(
-      "any-key",
-      0.01,
-      "https://app.staging-prefab.cloud",
-      "raise"
-    );
+    await assertInitializationTimeoutError("any-key", 0.01, "http://192.0.2.1:1", "raise");
   });
 
   it("raises an error if a config is provided by a missing environment variable", async () => {
