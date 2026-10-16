@@ -43,6 +43,14 @@ import * as yaml from "js-yaml";
 
 import { Quonfig } from "../src/quonfig";
 import type { SSEConnectionState } from "../src/types";
+import {
+  isTerminal,
+  loadExpectations,
+  newTimelineState,
+  stepExpectation,
+  type ChaosExpectation,
+  type TimelineState,
+} from "./timeline";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -64,7 +72,7 @@ interface RigRun {
   description?: string;
   setup?: RigSetup;
   chaos?: RigEvent[];
-  expectations?: RigExpectation[];
+  expectations?: unknown;
 }
 interface RigSetup {
   sdk?: string;
@@ -88,11 +96,6 @@ interface RigInject {
   primary_hang_ms?: number;
   primary_latency_ms?: number;
   sse_down_ms?: number;
-}
-interface RigExpectation {
-  within_ms: number;
-  must_hold_for_ms?: number;
-  assert: string;
 }
 
 // ----- toxiproxy admin client -----
@@ -441,14 +444,12 @@ async function applyInject(tp: Toxiproxy, inj: RigInject): Promise<void> {
 
 // ----- runner -----
 
-interface ExpState {
+interface ExpState extends TimelineState {
   idx: number;
-  exp: RigExpectation;
-  hitAt?: number;
-  heldSince?: number;
-  passed: boolean;
-  failed: boolean;
-  lastReason: string;
+}
+
+function afterLabel(exp: ChaosExpectation): string {
+  return exp.after_ms ? ` after=${exp.after_ms}ms` : "";
 }
 
 /**
@@ -459,6 +460,7 @@ interface ExpState {
 async function runRigScenario(
   tp: Toxiproxy,
   run: RigRun,
+  expectations: ChaosExpectation[],
   driveRefresh: boolean
 ): Promise<{ pass: number; fail: number; details: string[] }> {
   // Clean proxy state — no leftover toxics, all legs enabled.
@@ -539,33 +541,14 @@ async function runRigScenario(
   }
 
   const wallClock = (run.setup?.wall_clock_seconds ?? 30) * 1000;
-  const states: ExpState[] = (run.expectations ?? []).map((e, i) => ({
-    idx: i,
-    exp: e,
-    passed: false,
-    failed: false,
-    lastReason: "",
-  }));
+  const states: ExpState[] = expectations.map((e, i) => ({ ...newTimelineState(e), idx: i }));
 
   while (Date.now() - baseline < wallClock) {
     const elapsed = Date.now() - baseline;
     let allTerminal = true;
     for (const s of states) {
-      if (s.passed || s.failed) continue;
-      const r = evaluate(s.exp.assert, probe);
-      s.lastReason = r.why;
-      if (r.ok) {
-        if (s.heldSince === undefined) {
-          s.heldSince = Date.now();
-          s.hitAt = elapsed;
-        }
-        const holdFor = s.exp.must_hold_for_ms ?? 0;
-        if (holdFor <= 0 || Date.now() - s.heldSince >= holdFor) s.passed = true;
-      } else {
-        s.heldSince = undefined;
-      }
-      if (!s.passed && elapsed > s.exp.within_ms) s.failed = true;
-      if (!s.passed && !s.failed) allTerminal = false;
+      stepExpectation(s, () => evaluate(s.exp.assert, probe), elapsed, Date.now());
+      if (!isTerminal(s)) allTerminal = false;
     }
     if (allTerminal) break;
     await sleep(POLL_MS);
@@ -582,12 +565,12 @@ async function runRigScenario(
     if (s.passed) {
       pass++;
       details.push(
-        `PASS  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms: ${s.exp.assert} (hit at ${s.hitAt}ms)`
+        `PASS  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms${afterLabel(s.exp)}: ${s.exp.assert} (hit at ${s.hitAt}ms)`
       );
     } else {
       fail++;
       details.push(
-        `FAIL  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms: ${s.exp.assert} — last: ${s.lastReason}`
+        `FAIL  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms${afterLabel(s.exp)}: ${s.exp.assert} — last: ${s.lastReason}`
       );
     }
   }
@@ -650,11 +633,13 @@ describe("failover + ordering chaos (qfg-7h5d.1.7)", { timeout: 30 * 60 * 1000 }
       if (SKIP.includes(num)) continue;
       describe(base, () => {
         for (const run of scenario.tests) {
+          // Rule 4: an unknown expectation key fails the run at load, naming it.
+          const expectations = loadExpectations(run.expectations, `${base} / ${run.name}`);
           it(run.name, async () => {
             const port = await freePort();
             await spawnUpstream(port, 0);
             await reconfigureProxies(tp, port, port);
-            const result = await runRigScenario(tp, run, false);
+            const result = await runRigScenario(tp, run, expectations, false);
             for (const line of result.details) console.log(line);
             killSpawned();
             expect(result.fail, `${result.fail} expectation(s) failed`).toBe(0);
@@ -674,6 +659,8 @@ describe("failover + ordering chaos (qfg-7h5d.1.7)", { timeout: 30 * 60 * 1000 }
       if (SKIP.includes(num)) continue;
       describe(base, () => {
         for (const run of scenario.tests) {
+          // Rule 4: an unknown expectation key fails the run at load, naming it.
+          const expectations = loadExpectations(run.expectations, `${base} / ${run.name}`);
           it(run.name, async () => {
             const { primary, secondary } = upstreamGenerations(run.setup?.upstreams);
             const primaryPort = await freePort();
@@ -681,7 +668,7 @@ describe("failover + ordering chaos (qfg-7h5d.1.7)", { timeout: 30 * 60 * 1000 }
             await spawnUpstream(primaryPort, primary);
             await spawnUpstream(secondaryPort, secondary);
             await reconfigureProxies(tp, primaryPort, secondaryPort);
-            const result = await runRigScenario(tp, run, true);
+            const result = await runRigScenario(tp, run, expectations, true);
             for (const line of result.details) console.log(line);
             killSpawned();
             expect(result.fail, `${result.fail} expectation(s) failed`).toBe(0);
