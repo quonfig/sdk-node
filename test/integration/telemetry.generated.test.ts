@@ -425,4 +425,62 @@ describe("telemetry", () => {
       },
     ]);
   });
+
+  it("confidential weighted variant is redacted in selectedValue", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      const scope = client.withContext({ user: { tracking_id: "92a202f2" } });
+      observed.set("confidential.weighted.variant", scope.get("confidential.weighted.variant"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
+      {
+        key: "confidential.weighted.variant",
+        type: "CONFIG",
+        value: "weighted-secret-variant",
+        value_type: "string",
+        count: 1,
+        reason: 3,
+        selected_value: { string: "*****364b0" },
+        summary: { config_row_index: 0, conditional_value_index: 0, weighted_value_index: 0 },
+      },
+    ]);
+  });
+
+  it("confidential ENV_VAR-provided value is redacted in selectedValue", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("confidential.provided.a.number", client.get("confidential.provided.a.number"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
+      {
+        key: "confidential.provided.a.number",
+        type: "CONFIG",
+        value: "1234",
+        value_type: "string",
+        count: 1,
+        reason: 1,
+        selected_value: { string: expect.stringMatching(/^\*{5}[0-9a-f]{5}$/) },
+        summary: { config_row_index: 0, conditional_value_index: 0 },
+      },
+    ]);
+  });
+
+  it("non-confidential ENV_VAR-provided value is reported as its resolved value", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      observed.set("provided.a.number", client.get("provided.a.number"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
+      {
+        key: "provided.a.number",
+        type: "CONFIG",
+        value: 1234,
+        value_type: "int",
+        count: 1,
+        reason: 1,
+        selected_value: { int: 1234 },
+        summary: { config_row_index: 0, conditional_value_index: 0 },
+      },
+    ]);
+  });
 });

@@ -39,7 +39,7 @@ describe("Resolver ENV_VAR coercion", () => {
   });
 
   it.each(["30s", "1.5", "12abc", "", "abc", "0x10"])("int: %j fails coercion", (raw) => {
-    expect(() => resolveEnv(raw, "int")).toThrow(/Cannot convert/);
+    expect(() => resolveEnv(raw, "int")).toThrow(/cannot be converted to/);
   });
 
   it.each([
@@ -52,7 +52,7 @@ describe("Resolver ENV_VAR coercion", () => {
   });
 
   it.each(["30s", "1.5x", "", "abc", "0x10", "Infinity"])("double: %j fails coercion", (raw) => {
-    expect(() => resolveEnv(raw, "double")).toThrow(/Cannot convert/);
+    expect(() => resolveEnv(raw, "double")).toThrow(/cannot be converted to/);
   });
 
   it("duration: a valid ENV_VAR value unwraps to integer milliseconds", () => {

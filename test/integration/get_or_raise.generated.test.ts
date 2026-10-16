@@ -121,8 +121,52 @@ describe("get_or_raise", () => {
   it("raises an error if an env-var-provided config cannot be coerced to configured type", async () => {
     await withClient({}, (client) => {
       expect(() => client.getNumber("provided.not.a.number")).toThrow(
-        /^(Cannot convert ".*" to (int|double)|\[quonfig\] Config ".*" has a malformed duration value)$/
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
       );
+    });
+  });
+
+  it("coercion error for an int env var names the variable and never its value", async () => {
+    await withEnv({ QUONFIG_ITD_SECRET_ENV: "postgres://admin:hunter2@db" }, async () => {
+      await withClient({}, (client) => {
+        expect(() => client.getNumber("provided.secret.not.an.int")).toThrow(
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+        );
+        let raised: unknown;
+        try {
+          client.getNumber("provided.secret.not.an.int");
+        } catch (e) {
+          raised = e;
+        }
+        const raisedMessage = String((raised as Error | undefined)?.message);
+        expect(raisedMessage).toContain(
+          'environment variable "QUONFIG_ITD_SECRET_ENV" cannot be converted to int for config "provided.secret.not.an.int"'
+        );
+        expect(raisedMessage).not.toContain("hunter2");
+        expect(raisedMessage).not.toContain("postgres://");
+      });
+    });
+  });
+
+  it("coercion error for a double env var names the variable and never its value", async () => {
+    await withEnv({ QUONFIG_ITD_SECRET_ENV: "postgres://admin:hunter2@db" }, async () => {
+      await withClient({}, (client) => {
+        expect(() => client.getNumber("provided.secret.not.a.double")).toThrow(
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+        );
+        let raised: unknown;
+        try {
+          client.getNumber("provided.secret.not.a.double");
+        } catch (e) {
+          raised = e;
+        }
+        const raisedMessage = String((raised as Error | undefined)?.message);
+        expect(raisedMessage).toContain(
+          'environment variable "QUONFIG_ITD_SECRET_ENV" cannot be converted to double for config "provided.secret.not.a.double"'
+        );
+        expect(raisedMessage).not.toContain("hunter2");
+        expect(raisedMessage).not.toContain("postgres://");
+      });
     });
   });
 
@@ -138,7 +182,7 @@ describe("get_or_raise", () => {
     await withEnv({ QUONFIG_ITD_DURATION_30S: "30s" }, async () => {
       await withClient({}, (client) => {
         expect(() => client.getDuration("provided.duration.malformed.30s")).toThrow(
-          /^(Cannot convert ".*" to (int|double)|\[quonfig\] Config ".*" has a malformed duration value)$/
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
         );
       });
     });
@@ -148,7 +192,7 @@ describe("get_or_raise", () => {
     await withEnv({ QUONFIG_ITD_DURATION_PT0_5H: "PT0.5H" }, async () => {
       await withClient({}, (client) => {
         expect(() => client.getDuration("provided.duration.malformed.PT0.5H")).toThrow(
-          /^(Cannot convert ".*" to (int|double)|\[quonfig\] Config ".*" has a malformed duration value)$/
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
         );
       });
     });
@@ -158,7 +202,7 @@ describe("get_or_raise", () => {
     await withEnv({ QUONFIG_ITD_DURATION_P1DT: "P1DT" }, async () => {
       await withClient({}, (client) => {
         expect(() => client.getDuration("provided.duration.malformed.P1DT")).toThrow(
-          /^(Cannot convert ".*" to (int|double)|\[quonfig\] Config ".*" has a malformed duration value)$/
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
         );
       });
     });
@@ -168,7 +212,7 @@ describe("get_or_raise", () => {
     await withEnv({ QUONFIG_ITD_DURATION_GARBAGE: "garbage" }, async () => {
       await withClient({}, (client) => {
         expect(() => client.getDuration("provided.duration.malformed.garbage")).toThrow(
-          /^(Cannot convert ".*" to (int|double)|\[quonfig\] Config ".*" has a malformed duration value)$/
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
         );
       });
     });
@@ -177,7 +221,7 @@ describe("get_or_raise", () => {
   it("raises an error if a stored duration 30s cannot be coerced", async () => {
     await withClient({}, (client) => {
       expect(() => client.getDuration("test.duration.malformed.30s")).toThrow(
-        /^(Cannot convert ".*" to (int|double)|\[quonfig\] Config ".*" has a malformed duration value)$/
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
       );
     });
   });
@@ -185,7 +229,7 @@ describe("get_or_raise", () => {
   it("raises an error if a stored duration PT0.5H cannot be coerced", async () => {
     await withClient({}, (client) => {
       expect(() => client.getDuration("test.duration.malformed.PT0.5H")).toThrow(
-        /^(Cannot convert ".*" to (int|double)|\[quonfig\] Config ".*" has a malformed duration value)$/
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
       );
     });
   });
@@ -193,7 +237,7 @@ describe("get_or_raise", () => {
   it("raises an error if a stored duration P1DT cannot be coerced", async () => {
     await withClient({}, (client) => {
       expect(() => client.getDuration("test.duration.malformed.P1DT")).toThrow(
-        /^(Cannot convert ".*" to (int|double)|\[quonfig\] Config ".*" has a malformed duration value)$/
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
       );
     });
   });
@@ -201,7 +245,7 @@ describe("get_or_raise", () => {
   it("raises an error if a stored duration garbage cannot be coerced", async () => {
     await withClient({}, (client) => {
       expect(() => client.getDuration("test.duration.malformed.garbage")).toThrow(
-        /^(Cannot convert ".*" to (int|double)|\[quonfig\] Config ".*" has a malformed duration value)$/
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
       );
     });
   });
@@ -209,7 +253,7 @@ describe("get_or_raise", () => {
   it("raises an error if a stored duration empty cannot be coerced", async () => {
     await withClient({}, (client) => {
       expect(() => client.getDuration("test.duration.malformed.empty")).toThrow(
-        /^(Cannot convert ".*" to (int|double)|\[quonfig\] Config ".*" has a malformed duration value)$/
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
       );
     });
   });

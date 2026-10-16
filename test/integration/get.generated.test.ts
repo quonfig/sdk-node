@@ -63,6 +63,12 @@ describe("get", () => {
     });
   });
 
+  it("decrypts a secret whose key config has an environment rule", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("env.scoped.secret")).toBe("hello.world");
+    });
+  });
+
   it("duration 200 ms", async () => {
     await withClient({}, (client) => {
       expect(client.getDuration("test.duration.PT0.2S")).toBe(200);
