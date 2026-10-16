@@ -59,6 +59,16 @@ const DEFAULT_DATADIR_AUTORELOAD_DEBOUNCE_MS = 200;
 const AUTH_PROBE_MIN_MS = 150_000;
 const AUTH_PROBE_MAX_MS = 300_000;
 
+/**
+ * The installed value an evaluation's eval-summary counter identity can be
+ * cached on (qfg-23uf), or undefined when the resolved value is not the stored
+ * one: an ENV_VAR or decrypted value is resolved per read and can change while
+ * the stored descriptor stays the same, so it must not hit a cached key.
+ */
+function summaryValueRef(match: EvalMatch, resolved: Value): object | undefined {
+  return resolved === match.value ? match.storedValue : undefined;
+}
+
 /** R1: the statuses on a config fetch leg that make up the auth class. */
 function isAuthClassStatus(status: number | undefined): boolean {
   return status === 401 || status === 403 || status === 404 || status === 410;
@@ -664,7 +674,7 @@ export class Quonfig {
       weightedValueIndex: match.weightedValueIndex >= 0 ? match.weightedValueIndex : undefined,
       reason: computeReason(match, config),
     };
-    this.evaluationSummaries.push(evaluation);
+    this.evaluationSummaries.push(evaluation, summaryValueRef(match, resolved));
 
     return unwrapped;
   }
@@ -1206,7 +1216,7 @@ export class Quonfig {
         weightedValueIndex: match.weightedValueIndex >= 0 ? match.weightedValueIndex : undefined,
         reason: reasonNum,
       };
-      this.evaluationSummaries.push(evaluation);
+      this.evaluationSummaries.push(evaluation, summaryValueRef(match, resolved));
 
       return {
         value: unwrapped,

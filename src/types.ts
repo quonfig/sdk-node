@@ -423,6 +423,13 @@ export interface EvalMatch {
    * missing from the context and configKey + "" was hashed (qfg-9dxb.8).
    */
   missingHashProperty?: string;
+  /**
+   * @internal The installed Value object `value` was copied from. Configs are
+   * replaced, never mutated, on install, so its identity is stable for as long
+   * as the config is installed; eval-summary telemetry caches per-value counter
+   * keys on it (qfg-23uf).
+   */
+  storedValue?: Value;
 }
 
 // ---- Public Evaluation Details (for *Details API) ----

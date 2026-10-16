@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fix: eval-summary telemetry no longer serializes the value on every read (qfg-23uf).** Each
+  per-value counter was keyed by `JSON.stringify` of the selected value on every evaluation, so a
+  large JSON or string config paid a full serialization per `get()` (about 50us per read for a 60KB
+  JSON config). The counter identity is now computed once per installed value, and a repeat read in
+  the same telemetry window is a counter increment. Counters and the telemetry payload are
+  unchanged.
+
 - **UPGRADE: SSE reports `connected` at the first frame, not at the 200 response (qfg-goi1.10.9).**
   A stream connection now counts as connected, for `connectionState()`,
   `onSSEConnectionStateChange`, the reconnect backoff and the fallback poller, only after it
