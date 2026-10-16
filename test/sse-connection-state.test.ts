@@ -5,6 +5,8 @@ import { Transport } from "../src/transport";
 
 interface FakeEventSource {
   onopen: ((evt: any) => void) | null;
+  /** Deliver a `: keepalive` frame (the SDK's comment-frame hook). */
+  keepalive?: () => void;
   onmessage: ((evt: any) => void) | null;
   onerror: ((evt: any) => void) | null;
   close: () => void;
@@ -15,9 +17,13 @@ function makeTransport(): Transport {
 }
 
 function makeSSE(states: SSEConnectionState[], factoryOut: { value: FakeEventSource | null }) {
-  const factory = (_url: string, _init: { headers: Record<string, string> }) => {
+  const factory = (
+    _url: string,
+    init: { headers: Record<string, string>; onCommentFrame?: () => void }
+  ) => {
     const es: FakeEventSource = {
       onopen: null,
+      keepalive: () => init.onCommentFrame?.(),
       onmessage: null,
       onerror: null,
       close: () => {},
@@ -33,7 +39,7 @@ function makeSSE(states: SSEConnectionState[], factoryOut: { value: FakeEventSou
 }
 
 describe("SSEConnection — connection-state callback", () => {
-  it("emits 'connecting' immediately on start(), then 'connected' on onopen", async () => {
+  it("emits 'connecting' immediately on start(), then 'connected' on the first frame", async () => {
     const states: SSEConnectionState[] = [];
     const fake: { value: FakeEventSource | null } = { value: null };
     const sse = makeSSE(states, fake);
@@ -46,7 +52,7 @@ describe("SSEConnection — connection-state callback", () => {
     await new Promise((r) => setImmediate(r));
     expect(fake.value).not.toBeNull();
 
-    fake.value!.onopen?.({});
+    fake.value!.keepalive?.();
     expect(states).toEqual(["connecting", "connected"]);
 
     sse.close();
@@ -60,13 +66,13 @@ describe("SSEConnection — connection-state callback", () => {
       const sse = makeSSE(states, fake);
 
       sse.start(() => {});
-      fake.value!.onopen?.({});
+      fake.value!.keepalive?.();
       fake.value!.onerror?.({ type: "error" });
 
       // The SDK owns reconnection (eventsource@4 never reconnects after a
       // non-200): a NEW EventSource is created after the backoff sleep.
       await vi.advanceTimersByTimeAsync(500);
-      fake.value!.onopen?.({}); // the recreated EventSource connects
+      fake.value!.keepalive?.(); // the recreated EventSource connects
 
       expect(states).toEqual(["connecting", "connected", "error", "connecting", "connected"]);
 
@@ -83,7 +89,7 @@ describe("SSEConnection — connection-state callback", () => {
 
     sse.start(() => {});
     await new Promise((r) => setImmediate(r));
-    fake.value!.onopen?.({});
+    fake.value!.keepalive?.();
 
     sse.close();
 
@@ -98,8 +104,8 @@ describe("SSEConnection — connection-state callback", () => {
     sse.start(() => {});
     await new Promise((r) => setImmediate(r));
 
-    fake.value!.onopen?.({});
-    fake.value!.onopen?.({}); // duplicate
+    fake.value!.keepalive?.();
+    fake.value!.keepalive?.(); // duplicate
     fake.value!.onerror?.({});
     fake.value!.onerror?.({}); // duplicate
 
@@ -127,10 +133,14 @@ describe("SSEConnection — reconnect supervisor (recreate on failure)", () => {
   function makeRecordingFactory(): RecordingFactory {
     const created: FakeEventSource[] = [];
     const closedIndexes: number[] = [];
-    const factory = (_url: string, _init: { headers: Record<string, string> }) => {
+    const factory = (
+      _url: string,
+      init: { headers: Record<string, string>; onCommentFrame?: () => void }
+    ) => {
       const idx = created.length;
       const es: FakeEventSource = {
         onopen: null,
+        keepalive: () => init.onCommentFrame?.(),
         onmessage: null,
         onerror: null,
         close: () => closedIndexes.push(idx),
@@ -176,9 +186,9 @@ describe("SSEConnection — reconnect supervisor (recreate on failure)", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(rec.created.length).toBe(2);
 
-    // The recreated EventSource is fully wired: onopen transitions to
+    // The recreated EventSource is fully wired: its first frame transitions to
     // connected and onmessage delivers updates.
-    rec.created[1].onopen?.({});
+    rec.created[1].keepalive?.();
     expect(states).toEqual(["connecting", "error", "connecting", "connected"]);
 
     sse.close();
@@ -198,7 +208,7 @@ describe("SSEConnection — reconnect supervisor (recreate on failure)", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(rec.created.length).toBe(2);
 
-    rec.created[1].onopen?.({});
+    rec.created[1].keepalive?.();
     rec.created[1].onmessage?.({
       data: JSON.stringify({ meta: { version: "v9", environment: "Production" }, configs: [] }),
     });
@@ -241,7 +251,7 @@ describe("SSEConnection — reconnect supervisor (recreate on failure)", () => {
     expect(rec.created.length).toBe(4);
 
     // Success resets the backoff: the next failure reconnects within 500ms.
-    rec.created[3].onopen?.({});
+    rec.created[3].keepalive?.();
     rec.created[3].onerror?.({ type: "error" });
     await vi.advanceTimersByTimeAsync(500);
     expect(rec.created.length).toBe(5);

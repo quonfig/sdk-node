@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- **UPGRADE: SSE reports `connected` at the first frame, not at the 200 response (qfg-goi1.10.9).**
+  A stream connection now counts as connected, for `connectionState()`,
+  `onSSEConnectionStateChange`, the reconnect backoff and the fallback poller, only after it
+  delivers its first valid frame: a config envelope or a keepalive. Before, it counted as soon as
+  the 200 response headers arrived.
+  - Against Quonfig's servers the headers and the first frame arrive together, so you should see no
+    difference.
+  - Behind a proxy or server that sends 200 headers early, `connected` is reported when the first
+    frame arrives: at most one keepalive interval (30 s) later.
+  - A connection that closes before any frame is now a failed attempt. The reconnect delay grows,
+    the client reports disconnected (`onSSEConnectionStateChange` gets `error`; `connectionState()`
+    is `disconnected`), and the fallback poller takes over after its usual threshold. If the very
+    first connection after boot delivers no frame, the poller engages at once, as for any other
+    initial connect failure.
+
+  Before this change, a server that answered 200 and closed at once made the SDK reconnect in a
+  tight loop and keep stale config indefinitely.
+
+- **Changed (minor, qfg-goi1.10.40):** the SSE `connected` edge and the reconnect-backoff reset
+  moved from eventsource's `onopen` to the connection's first valid frame. eventsource@4 does not
+  surface SSE comment lines, so keepalives are detected on the response body the SDK already wraps
+  for the read deadline. Keepalives do not advance `lastSuccessfulRefresh()`. No new dependency.
+- **Tests:** supervisor Test 9 (a)-(d), the Test 2 reset amendment and a first-frame parser table
+  against a local 127.0.0.1 server (`test/sse-first-frame.test.ts`); integration-test-data pin
+  bumped to v2026.10.16.4 (get_or_raise init-timeout cases now use `http://192.0.2.1:1`).
+
 ## 1.7.0 - 2026-10-16
 
 - **Minor: a rejected SDK key slows down instead of retrying at the normal cadence (auth-failure

@@ -213,6 +213,8 @@ describe("qfg serve payloads (version + environment, no generation)", () => {
 
 interface FakeEventSource {
   onopen: ((evt: any) => void) | null;
+  /** Deliver a `: keepalive` frame (the SDK's comment-frame hook). */
+  keepalive?: () => void;
   onmessage: ((evt: any) => void) | null;
   onerror: ((evt: any) => void) | null;
   close: () => void;
@@ -229,9 +231,10 @@ describe("SSE: a non-envelope event", () => {
     const out: { value: FakeEventSource | null } = { value: null };
     const client = makeClient([url], {
       enableSSE: true,
-      __testEventSourceFactory: () => {
+      __testEventSourceFactory: (_url: string, init: { onCommentFrame?: () => void }) => {
         const es: FakeEventSource = {
           onopen: null,
+          keepalive: () => init.onCommentFrame?.(),
           onmessage: null,
           onerror: null,
           close: () => {},
@@ -244,7 +247,7 @@ describe("SSE: a non-envelope event", () => {
       await client.init();
       for (let i = 0; i < 50 && !out.value; i++) await new Promise((r) => setTimeout(r, 10));
       expect(out.value).not.toBeNull();
-      out.value!.onopen?.({});
+      out.value!.keepalive?.();
       const installs = client.configInstallCount();
       const refreshedAt = client.lastSuccessfulRefresh();
 
