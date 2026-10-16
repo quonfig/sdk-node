@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Minor: one strict timestamp grammar for `PROP_BEFORE` / `PROP_AFTER` (qfg-goi1.5.6).** Both the
+  context value and the rule value were read with `Date.parse`, so date-only strings
+  (`"2020-01-01"`), offset-less strings (read as host local time), free-form strings
+  (`"Jan 1 2020"`) and short digit strings (a rule value of `"999"` became the year 999) all parsed.
+  A timestamp is now, on both sides, a finite number (epoch ms, truncated), an all-digit string
+  (epoch ms), or an RFC3339 string with an uppercase `T` and a `Z` or numeric offset (fractional
+  seconds allowed). Anything else does not match. Matches sdk-go, sdk-java and `qfg verify`.
+
+  UPGRADE: pass dates as epoch ms or ISO 8601 with Z/offset (for example `Date.now()`,
+  `date.getTime()` or `date.toISOString()`). A context date such as `"2024-11-01"` or
+  `"2024-11-01T00:00:00"` now fails `PROP_BEFORE` / `PROP_AFTER` instead of matching.
+
+- **Minor: abbreviated versions in `PROP_SEMVER_*` (qfg-goi1.5.6).** `"2"` and `"2.0"` now read as
+  `2.0.0`, on both the context and rule sides, as LaunchDarkly and Statsig do. A `v` prefix is still
+  not a version. The exported `parseSemver()` is unchanged (strict SemVer 2.0).
+
+  UPGRADE: changes who matches. A context such as `appVersion: "4.1"` used to fail every
+  `PROP_SEMVER_*` rule and now compares as `4.1.0`, so it can start matching.
+
 - **Minor: `getJSON()`, `get()` and `getJSONDetails()` return a copy of a json value
   (qfg-goi1.10.1).** They returned the store's own object, so mutating the result rewrote that
   config for every later read in the process until the next config update. Each call now returns a

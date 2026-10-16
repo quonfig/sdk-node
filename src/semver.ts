@@ -39,6 +39,27 @@ export function parseSemver(version: string): SemanticVersion | undefined {
   };
 }
 
+const ABBREVIATED_PATTERN = /^(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?$/;
+
+/**
+ * Parse a version for the PROP_SEMVER_* operators (qfg-goi1.5 Q5): full
+ * SemVer 2.0 as {@link parseSemver}, plus the abbreviated forms "x" and "x.y",
+ * read as x.0.0 and x.y.0. A "v" prefix is not a version.
+ */
+export function parseSemverAllowAbbreviated(version: string): SemanticVersion | undefined {
+  const full = parseSemver(version);
+  if (full !== undefined) return full;
+  const match = ABBREVIATED_PATTERN.exec(version ?? "");
+  if (!match) return undefined;
+  return {
+    major: parseInt(match[1]!, 10),
+    minor: match[2] === undefined ? 0 : parseInt(match[2], 10),
+    patch: 0,
+    prerelease: "",
+    buildMetadata: "",
+  };
+}
+
 function isNumeric(s: string): boolean {
   return /^\d+$/.test(s);
 }

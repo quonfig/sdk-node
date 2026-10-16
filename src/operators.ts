@@ -1,5 +1,5 @@
 import type { Criterion, Value } from "./types";
-import { parseSemver, compareSemver } from "./semver";
+import { parseSemverAllowAbbreviated, compareSemver } from "./semver";
 
 // ---- Operator Constants ----
 
@@ -90,15 +90,51 @@ function compareNumbers(a: any, b: any): number | undefined {
   return 0;
 }
 
+// The ONE timestamp grammar for PROP_BEFORE / PROP_AFTER (qfg-goi1.5 R5),
+// identical on the context and criterion sides: a finite JSON number (epoch
+// ms, truncated), an all-digit string (epoch ms), or RFC3339 with an
+// uppercase T and a Z or numeric offset (fractional seconds allowed).
+// Date-only, offset-less and free-form strings are not timestamps.
+const DIGITS_PATTERN = /^-?\d+$/;
+const RFC3339_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|([+-])(\d{2}):(\d{2}))$/;
+
+function rfc3339ToMillis(val: string): number | undefined {
+  const m = RFC3339_PATTERN.exec(val);
+  if (!m) return undefined;
+  const [y, mo, d, h, mi, s] = m.slice(1, 7).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  if (mo < 1 || mo > 12 || d < 1 || d > daysInMonth || h > 23 || mi > 59 || s > 59) {
+    return undefined;
+  }
+  let offsetMinutes = 0;
+  if (m[8] !== "Z") {
+    const oh = Number(m[10]);
+    const om = Number(m[11]);
+    if (oh > 23 || om > 59) return undefined;
+    offsetMinutes = (m[9] === "-" ? -1 : 1) * (oh * 60 + om);
+  }
+  const fracMillis = m[7] ? Math.trunc(Number(`0${m[7]}`) * 1000) : 0;
+  const utc = new Date(0);
+  utc.setUTCFullYear(y, mo - 1, d);
+  utc.setUTCHours(h, mi, s, fracMillis);
+  return utc.getTime() - offsetMinutes * 60_000;
+}
+
 function dateToMillis(val: any): number | undefined {
-  if (typeof val === "number") return val;
+  if (typeof val === "number") {
+    return Number.isFinite(val) ? Math.trunc(val) : undefined;
+  }
   if (typeof val === "string") {
-    // Try RFC3339 / ISO 8601
-    const d = Date.parse(val);
-    if (!isNaN(d)) return d;
-    // Try as a plain number string
-    const n = parseInt(val, 10);
-    if (!isNaN(n)) return n;
+    if (DIGITS_PATTERN.test(val)) return Number(val);
+    return rfc3339ToMillis(val);
   }
   return undefined;
 }
@@ -310,8 +346,8 @@ export function evaluateCriterion(
         isString(contextValue) &&
         isString(matchValue.value)
       ) {
-        const svContext = parseSemver(contextValue);
-        const svMatch = parseSemver(matchValue.value);
+        const svContext = parseSemverAllowAbbreviated(contextValue);
+        const svMatch = parseSemverAllowAbbreviated(matchValue.value);
         if (svContext !== undefined && svMatch !== undefined) {
           const cmp = compareSemver(svContext, svMatch);
           switch (criterion.operator) {
