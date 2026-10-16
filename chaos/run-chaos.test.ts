@@ -30,6 +30,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { Quonfig } from "../src/quonfig";
 import type { SSEConnectionState } from "../src/types";
 import { evaluate } from "./expressions";
+import { ChaosProbe } from "./probe";
+import {
+  isTerminal,
+  loadExpectations,
+  newTimelineState,
+  stepExpectation,
+  type ChaosExpectation,
+  type TimelineState,
+} from "./timeline";
 
 // ----- scenario YAML types -----
 
@@ -42,7 +51,7 @@ interface ChaosScenarioRun {
   description?: string;
   setup?: ChaosSetup;
   chaos?: ChaosEvent[];
-  expectations?: ChaosExpectation[];
+  expectations?: unknown;
 }
 interface ChaosSetup {
   sdk?: string;
@@ -74,12 +83,6 @@ interface ChaosProc {
   count?: number;
   interval_ms?: number;
 }
-interface ChaosExpectation {
-  within_ms: number;
-  must_hold_for_ms?: number;
-  assert: string;
-}
-
 // ----- toxiproxy admin client -----
 
 class Toxiproxy {
@@ -229,81 +232,6 @@ async function applyProcess(tp: Toxiproxy, p: ChaosProc): Promise<void> {
   }
 }
 
-// ----- SDK probe -----
-
-class ChaosProbe {
-  // Same vocabulary as sdk-go's chaosProbe; values that the SDK does not yet
-  // expose stay at sentinel defaults.
-  connState: "initializing" | "connected" | "reconnecting" | "falling_back" | "disconnected" =
-    "initializing";
-  lastRefresh: number = 0;
-  connAttempts = 0;
-  restartLayer1 = 0;
-  restartLayer2 = 0;
-  fallbackActive = false;
-  processCrashed = false;
-  logs: string[] = [];
-
-  onSSEState(state: SSEConnectionState): void {
-    if (state === "connected") {
-      if (this.connState === "connected" || this.connState === "reconnecting") {
-        // already connected once; reconnect counts as a restart
-      }
-      this.connState = "connected";
-      this.connAttempts++;
-    } else if (state === "error" || state === "connecting") {
-      if (this.connState === "connected") {
-        // connected → error edge counts as a Layer 1 worker restart.
-        this.restartLayer1++;
-      }
-      this.connState = "reconnecting";
-    } else if (state === "disconnected") {
-      this.connState = "disconnected";
-    }
-  }
-  onConfigUpdate(): void {
-    this.lastRefresh = Date.now();
-  }
-  setFallbackActive(active: boolean): void {
-    this.fallbackActive = active;
-    if (active) {
-      this.connState = "falling_back";
-    }
-  }
-  log(level: string, msg: string): void {
-    this.logs.push(`level=${level.toLowerCase()} ${msg}`);
-    // Map "onConfigUpdate callback threw" to a Layer 1 restart so chaos
-    // scenario 10 (callback throw) sees worker_restart_total increment per
-    // panic. The supervisor-test-contract notes the increment is optional, but
-    // the chaos scenario requires it. The SDK's invokeOnConfigUpdate emits
-    // `[quonfig] onConfigUpdate callback threw:` on each catch.
-    if (/onConfigUpdate callback threw/i.test(msg)) {
-      this.restartLayer1++;
-    }
-  }
-  // known is false for a metric name the probe does not implement, so the
-  // evaluator fails the expectation instead of reading a silent 0.
-  sdkMetric(name: string, labels: Record<string, string>): { value: number; known: boolean } {
-    if (name === "quonfig_sdk_worker_restart_total") {
-      if (labels.layer === "1") return { value: this.restartLayer1, known: true };
-      if (labels.layer === "2") return { value: this.restartLayer2, known: true };
-      return { value: this.restartLayer1 + this.restartLayer2, known: true };
-    }
-    if (name === "quonfig_sse_connect_attempts_total") {
-      return { value: this.connAttempts, known: true };
-    }
-    return { value: 0, known: false };
-  }
-  logMatches(level: string, re: RegExp): number {
-    let n = 0;
-    for (const line of this.logs) {
-      if (level && !line.toLowerCase().includes(`level=${level.toLowerCase()}`)) continue;
-      if (re.test(line)) n++;
-    }
-    return n;
-  }
-}
-
 // ----- helpers -----
 
 function sleep(ms: number): Promise<void> {
@@ -334,23 +262,20 @@ function chaosScenariosDir(): string {
 
 // ----- runner -----
 
-interface ExpectationState {
+function afterLabel(exp: ChaosExpectation): string {
+  return exp.after_ms ? ` after=${exp.after_ms}ms` : "";
+}
+
+interface ExpectationState extends TimelineState {
   idx: number;
-  exp: ChaosExpectation;
-  hitAt?: number;
-  heldSince?: number;
-  passed: boolean;
-  failed: boolean;
-  // Every leaf is unevaluable (server_metric): reported SKIPPED, never PASS.
-  skipped: boolean;
   // Unevaluable leaves of this expectation, each with its reason.
   skippedLeaves: string[];
-  lastReason: string;
 }
 
 async function runScenario(
   tp: Toxiproxy,
   run: ChaosScenarioRun,
+  expectations: ChaosExpectation[],
   apiUrl: string,
   ssePort: number,
   pollMs: number
@@ -382,7 +307,6 @@ async function runScenario(
     contextUploadMode: "none",
     onSSEConnectionStateChange: (s: SSEConnectionState) => probe.onSSEState(s),
     onConfigUpdate: () => {
-      probe.onConfigUpdate();
       if (run.setup?.user_callback === "throw") {
         // Throw on every invocation. The SDK supervisor MUST catch this (Tier 1
         // supervisor contract Test 5; chaos scenario 10). If the SDK does not
@@ -402,12 +326,50 @@ async function runScenario(
   // Build the client first then reach into transport.
   const quonfig = new Quonfig(opts);
   (quonfig as any).transport.__testStreamUrlOverride = sseUrl;
+  probe.attach(quonfig);
 
   // Track fallback poller state by polling the internal accessor.
   const fallbackTracker = setInterval(() => {
     const active = (quonfig as any).fallbackPollerActive?.() ?? false;
     if (active !== probe.fallbackActive) probe.setFallbackActive(active);
   }, 100);
+
+  // t=0 (README "Timeline rules", rule 2): init() is awaited (blocking), so the
+  // baseline is taken BEFORE it and the initial fetch falls inside the window;
+  // the [0] "connected within N" rows include init. Every at_ms, after_ms and
+  // within_ms counts from here. Pre-init injects (at_ms <= 0) are applied
+  // before the first fetch; the rest are scheduled relative to t=0.
+  const baseline = Date.now();
+  const wallClock = (run.setup?.wall_clock_seconds ?? 30) * 1000;
+
+  const injectionStates: Record<string, InjectionState | null> = {};
+  const fire = async (ev: ChaosEvent): Promise<void> => {
+    const at = ev.at_ms ?? 0;
+    try {
+      if (ev.inject) {
+        const st = await applyInject(tp, ev.inject);
+        if (ev.inject.name) injectionStates[ev.inject.name] = st;
+        console.log(`[${at}ms] inject ${JSON.stringify(ev.inject)}`);
+      } else if (ev.clear) {
+        await clearInject(tp, injectionStates[ev.clear] ?? null);
+        delete injectionStates[ev.clear];
+        console.log(`[${at}ms] clear ${ev.clear}`);
+      } else if (ev.process) {
+        await applyProcess(tp, ev.process);
+        console.log(`[${at}ms] process ${JSON.stringify(ev.process)}`);
+      }
+    } catch (err) {
+      console.log(`[${at}ms] chaos event failed: ${(err as Error).message}`);
+    }
+  };
+  for (const ev of run.chaos ?? []) {
+    if ((ev.at_ms ?? 0) <= 0) await fire(ev);
+  }
+  for (const ev of run.chaos ?? []) {
+    const at = ev.at_ms ?? 0;
+    if (at <= 0) continue;
+    setTimeout(() => void fire(ev), Math.max(0, at - (Date.now() - baseline))).unref();
+  }
 
   try {
     await quonfig.init();
@@ -416,73 +378,19 @@ async function runScenario(
     probe.log("error", `init failed: ${(err as Error).message}`);
   }
 
-  const baseline = Date.now();
-  const wallClock = (run.setup?.wall_clock_seconds ?? 30) * 1000;
-
-  // Schedule chaos events.
-  const injectionStates: Record<string, InjectionState | null> = {};
-  for (const ev of run.chaos ?? []) {
-    const at = ev.at_ms ?? 0;
-    setTimeout(() => {
-      void (async () => {
-        try {
-          if (ev.inject) {
-            const st = await applyInject(tp, ev.inject);
-            if (ev.inject.name) injectionStates[ev.inject.name] = st;
-            console.log(`[${at}ms] inject ${JSON.stringify(ev.inject)}`);
-          } else if (ev.clear) {
-            await clearInject(tp, injectionStates[ev.clear] ?? null);
-            delete injectionStates[ev.clear];
-            console.log(`[${at}ms] clear ${ev.clear}`);
-          } else if (ev.process) {
-            await applyProcess(tp, ev.process);
-            console.log(`[${at}ms] process ${JSON.stringify(ev.process)}`);
-          }
-        } catch (err) {
-          console.log(`[${at}ms] chaos event failed: ${(err as Error).message}`);
-        }
-      })();
-    }, at).unref();
-  }
-
-  const states: ExpectationState[] = (run.expectations ?? []).map((e, i) => ({
+  const states: ExpectationState[] = expectations.map((e, i) => ({
+    ...newTimelineState(e),
     idx: i,
-    exp: e,
-    passed: false,
-    failed: false,
-    skipped: false,
     skippedLeaves: [],
-    lastReason: "",
   }));
 
   while (Date.now() - baseline < wallClock) {
     const elapsed = Date.now() - baseline;
     let allTerminal = true;
     for (const s of states) {
-      if (s.passed || s.failed || s.skipped) continue;
-      const r = evaluate(s.exp.assert, probe);
-      s.lastReason = r.why;
-      s.skippedLeaves = r.skipped;
-      if (r.skippedOnly) {
-        s.skipped = true;
-        continue;
-      }
-      if (r.ok) {
-        if (s.heldSince === undefined) {
-          s.heldSince = Date.now();
-          s.hitAt = elapsed;
-        }
-        const holdFor = s.exp.must_hold_for_ms ?? 0;
-        if (holdFor <= 0 || Date.now() - s.heldSince >= holdFor) {
-          s.passed = true;
-        }
-      } else {
-        s.heldSince = undefined;
-      }
-      if (!s.passed && elapsed > s.exp.within_ms) {
-        s.failed = true;
-      }
-      if (!s.passed && !s.failed && !s.skipped) allTerminal = false;
+      const r = stepExpectation(s, () => evaluate(s.exp.assert, probe), elapsed, Date.now());
+      if (r) s.skippedLeaves = r.skipped;
+      if (!isTerminal(s)) allTerminal = false;
     }
     if (allTerminal) break;
     await sleep(pollMs);
@@ -506,17 +414,17 @@ async function runScenario(
     if (s.skipped) {
       skippedCount++;
       details.push(
-        `SKIP  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms: ${s.exp.assert} — ${s.lastReason}`
+        `SKIP  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms${afterLabel(s.exp)}: ${s.exp.assert} — ${s.lastReason}`
       );
     } else if (s.passed) {
       pass++;
       details.push(
-        `PASS  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms: ${s.exp.assert} (hit at ${s.hitAt}ms)${partial}`
+        `PASS  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms${afterLabel(s.exp)}: ${s.exp.assert} (hit at ${s.hitAt}ms)${partial}`
       );
     } else {
       fail++;
       details.push(
-        `FAIL  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms: ${s.exp.assert} — last: ${s.lastReason}${partial}`
+        `FAIL  exp[${s.idx}] within=${s.exp.within_ms}ms hold=${s.exp.must_hold_for_ms ?? 0}ms${afterLabel(s.exp)}: ${s.exp.assert} — last: ${s.lastReason}${partial}`
       );
     }
   }
@@ -581,9 +489,11 @@ describe("chaos harness (qfg-47c2.7)", { timeout: 30 * 60 * 1000 }, () => {
     const scenario = yaml.load(fs.readFileSync(file, "utf-8")) as ChaosScenario;
     describe(base, () => {
       for (const run of scenario.tests) {
+        // Rule 4: an unknown expectation key fails the run at load, naming it.
+        const expectations = loadExpectations(run.expectations, `${base} / ${run.name}`);
         it(run.name, async () => {
           const apiURL = process.env.CHAOS_API_DELIVERY_URL!;
-          const result = await runScenario(tp, run, apiURL, SSE_PORT, POLL_MS);
+          const result = await runScenario(tp, run, expectations, apiURL, SSE_PORT, POLL_MS);
           for (const line of result.details) console.log(line);
           for (const leaf of result.skipped) skipTally.push(`${base} / ${run.name}: ${leaf}`);
           expect(result.fail, `${result.fail} expectation(s) failed`).toBe(0);
