@@ -646,10 +646,10 @@ describe("enabled", () => {
     });
   });
 
-  it("returns false for PROP_SEMVER_EQUAL rule when the given prop is not a valid semver", async () => {
+  it("returns true for PROP_SEMVER_EQUAL rule when the given prop is an abbreviated major.minor version", async () => {
     await withClient({}, (client) => {
       const scope = client.withContext({ app: { version: "2.0" } });
-      expect(scope.isEnabled("feature-flag.semver-equal")).toBe(false);
+      expect(scope.isEnabled("feature-flag.semver-equal")).toBe(true);
     });
   });
 
@@ -692,6 +692,237 @@ describe("enabled", () => {
     await withClient({}, (client) => {
       const scope = client.withContext({ app: { version: "0.0.5" } });
       expect(scope.isEnabled("feature-flag.semver-greater-than")).toBe(false);
+    });
+  });
+
+  it('returns true for PROP_IS_ONE_OF ["true"] when the context value is boolean true', async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { beta: true } });
+      expect(scope.isEnabled("feature-flag.is-one-of.bool")).toBe(true);
+    });
+  });
+
+  it('returns false for PROP_IS_ONE_OF ["true"] when the context value is boolean false', async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { beta: false } });
+      expect(scope.isEnabled("feature-flag.is-one-of.bool")).toBe(false);
+    });
+  });
+
+  it('returns true for PROP_IS_ONE_OF ["true"] when the context value is the string "true"', async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { beta: "true" } });
+      expect(scope.isEnabled("feature-flag.is-one-of.bool")).toBe(true);
+    });
+  });
+
+  it('returns false for PROP_IS_NOT_ONE_OF ["true"] when the context value is boolean true', async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { beta: true } });
+      expect(scope.isEnabled("feature-flag.is-not-one-of.bool")).toBe(false);
+    });
+  });
+
+  it("returns true for PROP_IS_ONE_OF number strings when the context value is the integer 1", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: 1 } });
+      expect(scope.isEnabled("feature-flag.is-one-of.number")).toBe(true);
+    });
+  });
+
+  it("returns true for PROP_IS_ONE_OF number strings when the context value is the number 1.5", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: 1.5 } });
+      expect(scope.isEnabled("feature-flag.is-one-of.number")).toBe(true);
+    });
+  });
+
+  it("returns true for PROP_IS_ONE_OF number strings when the context value is the integer 1234567", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: 1234567 } });
+      expect(scope.isEnabled("feature-flag.is-one-of.number")).toBe(true);
+    });
+  });
+
+  it("returns false for PROP_IS_ONE_OF number strings when the context value is the integer 2", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: 2 } });
+      expect(scope.isEnabled("feature-flag.is-one-of.number")).toBe(false);
+    });
+  });
+
+  it('returns true for PROP_ENDS_WITH_ONE_OF ["3"] when the context value is the integer 123', async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: 123 } });
+      expect(scope.isEnabled("feature-flag.ends-with-one-of.number")).toBe(true);
+    });
+  });
+
+  it('returns false for PROP_ENDS_WITH_ONE_OF ["3"] when the context value is the integer 124', async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: 124 } });
+      expect(scope.isEnabled("feature-flag.ends-with-one-of.number")).toBe(false);
+    });
+  });
+
+  it("returns true for IN_INT_RANGE [0, 10) when the context value is the start bound 0", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: 0 } });
+      expect(scope.isEnabled("feature-flag.in-int-range")).toBe(true);
+    });
+  });
+
+  it("returns true for IN_INT_RANGE [0, 10) when the context value is 9", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: 9 } });
+      expect(scope.isEnabled("feature-flag.in-int-range")).toBe(true);
+    });
+  });
+
+  it("returns false for IN_INT_RANGE [0, 10) when the context value is the end bound 10", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: 10 } });
+      expect(scope.isEnabled("feature-flag.in-int-range")).toBe(false);
+    });
+  });
+
+  it("returns false for IN_INT_RANGE [0, 10) when the context value is -1", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: -1 } });
+      expect(scope.isEnabled("feature-flag.in-int-range")).toBe(false);
+    });
+  });
+
+  it("returns true for IN_INT_RANGE with no end when the context value is 5000000000", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: 5000000000 } });
+      expect(scope.isEnabled("feature-flag.in-int-range.open-end")).toBe(true);
+    });
+  });
+
+  it("returns true for IN_INT_RANGE with no start when the context value is -5", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { n: -5 } });
+      expect(scope.isEnabled("feature-flag.in-int-range.open-start")).toBe(true);
+    });
+  });
+
+  it("returns false for PROP_SEMVER_EQUAL 2.0.0 when the given prop is the prerelease 2.0.0-beta.1", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ app: { version: "2.0.0-beta.1" } });
+      expect(scope.isEnabled("feature-flag.semver-equal")).toBe(false);
+    });
+  });
+
+  it("returns true for PROP_SEMVER_LESS_THAN 2.0.0 when the given prop is the prerelease 2.0.0-beta.1", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ app: { version: "2.0.0-beta.1" } });
+      expect(scope.isEnabled("feature-flag.semver-less-than")).toBe(true);
+    });
+  });
+
+  it("returns false for PROP_SEMVER_GREATER_THAN 2.0.0 when the given prop is the prerelease 2.0.0-beta.1", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ app: { version: "2.0.0-beta.1" } });
+      expect(scope.isEnabled("feature-flag.semver-greater-than")).toBe(false);
+    });
+  });
+
+  it("returns true for PROP_SEMVER_EQUAL 2.0.0 when the given prop differs only by build metadata", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ app: { version: "2.0.0+build.5" } });
+      expect(scope.isEnabled("feature-flag.semver-equal")).toBe(true);
+    });
+  });
+
+  it("returns true for PROP_SEMVER_LESS_THAN 2.0.0-beta when the given prop is the prerelease 2.0.0-alpha", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ app: { version: "2.0.0-alpha" } });
+      expect(scope.isEnabled("feature-flag.semver-less-than.prerelease")).toBe(true);
+    });
+  });
+
+  it("returns true for PROP_SEMVER_EQUAL 2.0.0 when the given prop is the abbreviated major version 2", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ app: { version: "2" } });
+      expect(scope.isEnabled("feature-flag.semver-equal")).toBe(true);
+    });
+  });
+
+  it("returns false for PROP_SEMVER_EQUAL 2.0.0 when the given prop has a v prefix", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ app: { version: "v2.0.0" } });
+      expect(scope.isEnabled("feature-flag.semver-equal")).toBe(false);
+    });
+  });
+
+  it("returns false for PROP_BEFORE when the given prop is a date-only string", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { creation_date: "2024-11-01" } });
+      expect(scope.isEnabled("feature-flag.before")).toBe(false);
+    });
+  });
+
+  it("returns false for PROP_BEFORE when the given prop is an RFC3339 string without an offset", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { creation_date: "2024-11-01T00:00:00" } });
+      expect(scope.isEnabled("feature-flag.before")).toBe(false);
+    });
+  });
+
+  it("returns false for PROP_BEFORE when the given prop is a free-form date string", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { creation_date: "Nov 1 2024" } });
+      expect(scope.isEnabled("feature-flag.before")).toBe(false);
+    });
+  });
+
+  it("returns true for PROP_BEFORE when the given prop is an RFC3339 string with a numeric offset", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { creation_date: "2024-11-01T02:00:00+02:00" } });
+      expect(scope.isEnabled("feature-flag.before")).toBe(true);
+    });
+  });
+
+  it("returns true for PROP_BEFORE when the given prop is an all-digit epoch-ms string", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { creation_date: "1730419200000" } });
+      expect(scope.isEnabled("feature-flag.before")).toBe(true);
+    });
+  });
+
+  it("returns true for PROP_BEFORE an RFC3339 criterion when the given prop is an earlier epoch-ms number", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { creation_date: 1730419200000 } });
+      expect(scope.isEnabled("feature-flag.before.rfc3339-criterion")).toBe(true);
+    });
+  });
+
+  it("returns false for PROP_BEFORE an RFC3339 criterion when the given prop is a later RFC3339 string", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { creation_date: "2025-01-01T00:00:00Z" } });
+      expect(scope.isEnabled("feature-flag.before.rfc3339-criterion")).toBe(false);
+    });
+  });
+
+  it('returns false for PROP_AFTER an all-digit criterion "999" when the given prop is 500', async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { creation_date: 500 } });
+      expect(scope.isEnabled("feature-flag.after.numeric-string-criterion")).toBe(false);
+    });
+  });
+
+  it('returns true for PROP_AFTER an all-digit criterion "999" when the given prop is 1000', async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { creation_date: 1000 } });
+      expect(scope.isEnabled("feature-flag.after.numeric-string-criterion")).toBe(true);
+    });
+  });
+
+  it("returns false for PROP_GREATER_THAN 30 when the given prop is a numeric string above the threshold", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { age: "35" } });
+      expect(scope.isEnabled("feature-flag.greater-than")).toBe(false);
     });
   });
 });
