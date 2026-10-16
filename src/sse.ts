@@ -40,6 +40,11 @@ export interface SSEConnectionOptions {
   eventSourceFactory?: EventSourceFactory;
   /** Read deadline in ms. Defaults to {@link DEFAULT_SSE_READ_DEADLINE_MS}. */
   readDeadlineMs?: number;
+  /**
+   * Private test seam (qfg-goi1.10.24): sees every reconnect sleep the
+   * supervisor requests (kind "sse") and returns the delay actually used.
+   */
+  waitHook?: (kind: string, ms: number) => number;
 }
 
 /**
@@ -155,6 +160,7 @@ export class SSEConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelayMs: number = SSE_RECONNECT_INITIAL_DELAY_MS;
   private closed = false;
+  private waitHook?: (kind: string, ms: number) => number;
 
   constructor(transport: Transport, logger?: Logger, options?: SSEConnectionOptions) {
     this.transport = transport;
@@ -162,6 +168,7 @@ export class SSEConnection {
     this.onConnectionStateChange = options?.onConnectionStateChange;
     this.eventSourceFactory = options?.eventSourceFactory;
     this.readDeadlineMs = options?.readDeadlineMs ?? DEFAULT_SSE_READ_DEADLINE_MS;
+    this.waitHook = options?.waitHook;
   }
 
   /**
@@ -260,6 +267,7 @@ export class SSEConnection {
     const sleep = delay / 2 + Math.random() * (delay / 2);
     // Exponential backoff for the next attempt; onopen resets it.
     this.reconnectDelayMs = Math.min(delay * 2, SSE_RECONNECT_MAX_DELAY_MS);
+    const wait = this.waitHook ? this.waitHook("sse", sleep) : sleep;
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -270,7 +278,7 @@ export class SSEConnection {
         this.setState("error");
         this.scheduleReconnect();
       });
-    }, sleep);
+    }, wait);
     if (
       this.reconnectTimer &&
       typeof this.reconnectTimer === "object" &&

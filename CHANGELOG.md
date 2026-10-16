@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Minor: a rejected SDK key slows down instead of retrying at the normal cadence (auth-failure
+  rule, qfg-goi1.10.24).** When a fallback-poll cycle (or a poll with `enableSSE: false`) gets no
+  200/304 on any leg and the primary leg answered 401, 403, 404 or 410, the client enters an
+  internal auth-failed regime: SSE and the fallback poller stop, and the client sends one fetch
+  probe across every leg every 150-300s (uniform, no doubling, never giving up; with
+  `enableSSE: false` the wait is the larger of that and `fallbackPollIntervalMs`). It logs one ERROR
+  naming the status and host (never the key) in place of that cycle's "Fallback poll error" WARN,
+  DEBUG per probe, and one INFO on exit. The first probe that gets a valid 200 or a 304 on any leg
+  installs it, leaves auth-failed and restarts SSE from its base backoff; a later rejected cycle
+  enters again. `connectionState()` reports `disconnected` while auth-failed (never `falling_back`);
+  there is no new state or getter. A primary 503 with a secondary 401, a 200 on any leg, an SSE 401
+  on its own, `init()` and `updateIfStalerThan()` never enter; SSE behavior and its log lines before
+  entry are unchanged. Pinned by supervisor Test 8 (integration-test-data v2026.10.16), matching
+  sdk-go.
+
+  UPGRADE: retry cadence and log levels change after a rejected 401/403/404/410 fetch cycle; a
+  revoked key logs one config ERROR.
+
 - **Minor: one strict timestamp grammar for `PROP_BEFORE` / `PROP_AFTER` (qfg-goi1.5.6).** Both the
   context value and the rule value were read with `Date.parse`, so date-only strings
   (`"2020-01-01"`), offset-less strings (read as host local time), free-form strings

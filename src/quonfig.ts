@@ -52,6 +52,35 @@ const DEFAULT_INIT_TIMEOUT = 10000;
 const DEFAULT_LOG_LEVEL: LogLevelNumber = 5; // warn
 const DEFAULT_DATADIR_AUTORELOAD_DEBOUNCE_MS = 200;
 
+// Auth-failure rule (qfg-goi1.10.24; plan 2026-10-07-sdk-auth-failure-rule.md
+// R1-R6): the auth-failed probe period T is uniform in [min, max], fixed (no
+// doubling). Internal: tests reach it through the private wait hook, never an
+// option.
+const AUTH_PROBE_MIN_MS = 150_000;
+const AUTH_PROBE_MAX_MS = 300_000;
+
+/** R1: the statuses on a config fetch leg that make up the auth class. */
+function isAuthClassStatus(status: number | undefined): boolean {
+  return status === 401 || status === 403 || status === 404 || status === 410;
+}
+
+/**
+ * Rejection of a fetch cycle in which no leg returned 200/304 and the primary
+ * leg returned an auth-class status (R2). Carries the usual error's message,
+ * so init() and updateIfStalerThan() callers see the same text as before;
+ * only the fallback poller acts on it.
+ */
+class AuthRejectedError extends Error {
+  readonly status: number;
+  readonly host: string;
+  constructor(status: number, host: string, cause: Error) {
+    super(cause.message);
+    this.name = "AuthRejectedError";
+    this.status = status;
+    this.host = host;
+  }
+}
+
 /** Caller-side type token used by the *Details API for type-mismatch detection. */
 type RequestedType = "bool" | "string" | "number" | "string_list" | "json";
 
@@ -230,6 +259,12 @@ export class Quonfig {
   private readonly loggerKey?: string;
   private readonly logger: NormalizedLogger;
   private readonly testEventSourceFactory?: EventSourceFactory;
+  /**
+   * Private test seam (qfg-goi1.10.24): sees every background wait the client
+   * requests ("sse", "engage", "poll", "probe") and returns the delay actually
+   * used. NOT part of the public API.
+   */
+  private readonly testWaitHook?: (kind: string, ms: number) => number;
 
   private store: ConfigStore;
   private evaluator: Evaluator;
@@ -244,6 +279,12 @@ export class Quonfig {
   private fallbackPollerEngaged: boolean = false;
   private fallbackEngageTimer?: ReturnType<typeof setTimeout>;
   private sseEverConnected: boolean = false;
+  /**
+   * True while the client is in the auth-failed regime (R3): SSE and the
+   * fallback poller are off and one probe cycle runs per auth period.
+   */
+  private authFailed: boolean = false;
+  private authProbeTimer?: ReturnType<typeof setTimeout>;
   private lastSSEState?: SSEConnectionState;
   private lastSuccessfulRefreshAt?: Date;
   private inFlightRefresh?: Promise<void>;
@@ -336,6 +377,7 @@ export class Quonfig {
     this.fallbackPollIntervalMs = fallbackInterval;
     this.sseReadDeadlineMs = options.sseReadDeadlineMs;
     this.testEventSourceFactory = (options as any).__testEventSourceFactory;
+    this.testWaitHook = (options as any).__testWaitHook;
     this.testTelemetryClock = (options as any).__testTelemetryClock;
 
     this.namespace = options.namespace;
@@ -954,7 +996,8 @@ export class Quonfig {
    * - `connected` — SSE is live, or the SDK is running from a local
    *   datadir/datafile and has loaded its envelope.
    * - `disconnected` — no channel is currently delivering updates (SSE has
-   *   errored but the fallback grace timer has not elapsed yet, or `close()`
+   *   errored but the fallback grace timer has not elapsed yet, the client is
+   *   auth-failed after a rejected fetch cycle (401/403/404/410), or `close()`
    *   has been called).
    * - `falling_back` — the Layer 2 HTTP fallback poller is the active update
    *   channel.
@@ -965,6 +1008,8 @@ export class Quonfig {
   connectionState(): ConnectionState {
     if (this.closed) return "disconnected";
     if (!this.initialized) return "initializing";
+    // R6: auth-failed reports disconnected, never falling_back.
+    if (this.authFailed) return "disconnected";
     if (this.fallbackPollerEngaged) return "falling_back";
     if (this.sseConnection && this.lastSSEState !== "connected") return "disconnected";
     return "connected";
@@ -1039,6 +1084,10 @@ export class Quonfig {
     }
     this.cancelPendingFallbackEngage();
     this.fallbackPollerEngaged = false;
+    if (this.authProbeTimer) {
+      clearTimeout(this.authProbeTimer);
+      this.authProbeTimer = undefined;
+    }
 
     this.closed = true;
   }
@@ -1600,6 +1649,7 @@ export class Quonfig {
     let installedOnce = false;
     let fired = 0;
     let failures = 0;
+    let primaryStatus: number | undefined;
     let lastError: Error | undefined;
     let resolveFirstInstall!: () => void;
     let rejectAllFailed!: (err: Error) => void;
@@ -1613,6 +1663,7 @@ export class Quonfig {
     // against every other install path (SSE, datadir, a concurrent hedge).
     const onLeg = (leg: LegResult): void => {
       fired++;
+      if (leg.sourceIndex === 0) primaryStatus = leg.status;
       if (leg.error) {
         failures++;
         lastError = leg.error;
@@ -1692,7 +1743,16 @@ export class Quonfig {
       if (fired > 1) this.failover.recordHedgeFired();
       if (installedOnce) return;
       if (fired > 0 && failures === fired) {
-        rejectAllFailed(lastError ?? new Error("All API URLs failed"));
+        const err = lastError ?? new Error("All API URLs failed");
+        // Auth-failure rule R2: no leg returned 200/304 and the primary leg
+        // returned an auth-class status. Primary 503 + secondary 401 is not
+        // this (a new key can lag the secondary's manifest). Only the fallback
+        // poller acts on it; init and updateIfStalerThan see the usual error.
+        if (isAuthClassStatus(primaryStatus)) {
+          rejectAllFailed(new AuthRejectedError(primaryStatus!, this.transport.primaryHost(), err));
+        } else {
+          rejectAllFailed(err);
+        }
       } else {
         resolveFirstInstall();
       }
@@ -1709,6 +1769,7 @@ export class Quonfig {
       onConnectionStateChange: (state) => this.handleSSEStateChange(state),
       eventSourceFactory: this.testEventSourceFactory,
       readDeadlineMs: this.sseReadDeadlineMs,
+      waitHook: this.testWaitHook,
     });
     this.sseConnection.start((envelope: ConfigEnvelope) => this.handleSSEEnvelope(envelope));
   }
@@ -1767,6 +1828,9 @@ export class Quonfig {
     }
 
     if (!this.fallbackPollEnabled) return;
+    // SSE is stopped while auth-failed; a late edge from the stream being torn
+    // down changes nothing.
+    if (this.authFailed) return;
 
     switch (state) {
       case "connected":
@@ -1785,11 +1849,14 @@ export class Quonfig {
           // supervisor 2x the poll interval to re-establish the stream
           // (default 120s) before falling back to HTTP polling.
           const grace = this.fallbackPollIntervalMs * 2;
-          this.fallbackEngageTimer = setTimeout(() => {
-            this.fallbackEngageTimer = undefined;
-            // Immediate first poll: the store is already `grace` stale.
-            this.engageFallbackPoller("sse-disconnected-grace-elapsed", true);
-          }, grace);
+          this.fallbackEngageTimer = setTimeout(
+            () => {
+              this.fallbackEngageTimer = undefined;
+              // Immediate first poll: the store is already `grace` stale.
+              this.engageFallbackPoller("sse-disconnected-grace-elapsed", true);
+            },
+            this.requestWait("engage", grace)
+          );
           if (
             this.fallbackEngageTimer &&
             typeof this.fallbackEngageTimer === "object" &&
@@ -1850,11 +1917,17 @@ export class Quonfig {
       if (!this.fallbackPollerEngaged) return;
       this.fetchAndInstall()
         .catch((err) => {
+          if (err instanceof AuthRejectedError && this.fallbackPollerEngaged && !this.closed) {
+            // R2: this cycle enters auth-failed; its ERROR replaces the usual
+            // "Fallback poll error" line, and the poller stops.
+            this.enterAuthFailed(err);
+            return;
+          }
           this.logger.warn("Fallback poll error:", err);
         })
         .finally(() => {
           if (!this.fallbackPollerEngaged) return;
-          this.pollTimer = setTimeout(poll, this.fallbackPollIntervalMs);
+          this.pollTimer = setTimeout(poll, this.requestWait("poll", this.fallbackPollIntervalMs));
           if (this.pollTimer && typeof this.pollTimer === "object" && "unref" in this.pollTimer) {
             this.pollTimer.unref();
           }
@@ -1869,9 +1942,108 @@ export class Quonfig {
       return;
     }
 
-    this.pollTimer = setTimeout(poll, this.fallbackPollIntervalMs);
+    this.pollTimer = setTimeout(poll, this.requestWait("poll", this.fallbackPollIntervalMs));
     if (this.pollTimer && typeof this.pollTimer === "object" && "unref" in this.pollTimer) {
       this.pollTimer.unref();
+    }
+  }
+
+  /** Apply the private test wait hook, if any (see `testWaitHook`). */
+  private requestWait(kind: string, ms: number): number {
+    return this.testWaitHook ? this.testWaitHook(kind, ms) : ms;
+  }
+
+  /**
+   * Enter the auth-failed regime (R3-R6) from the poller cycle that qualified:
+   * stop the poller and SSE (state reads disconnected), log ONE config ERROR
+   * naming the status and host (never the key), and arm the first probe.
+   */
+  private enterAuthFailed(err: AuthRejectedError): void {
+    this.authFailed = true;
+    this.fallbackPollerEngaged = false;
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+    this.cancelPendingFallbackEngage();
+    if (this.sseConnection) {
+      const sse = this.sseConnection;
+      this.sseConnection = undefined;
+      sse.close();
+    }
+    this.logger.error(
+      `[quonfig] config fetch rejected: the SDK key is invalid or revoked (check the SDK key); streaming and polling stopped, retrying every few minutes until it is accepted (status=${err.status} host=${err.host})`
+    );
+    this.armAuthProbe();
+  }
+
+  /**
+   * Wait before the next auth-failed probe: T uniform in [150s, 300s], re-drawn
+   * each time, no doubling. With SSE disabled (polling mode) the wait is
+   * max(T, poll interval).
+   */
+  private authProbeWaitMs(): number {
+    const t =
+      AUTH_PROBE_MIN_MS + Math.floor(Math.random() * (AUTH_PROBE_MAX_MS - AUTH_PROBE_MIN_MS + 1));
+    return !this.enableSSE ? Math.max(t, this.fallbackPollIntervalMs) : t;
+  }
+
+  private armAuthProbe(): void {
+    this.authProbeTimer = setTimeout(
+      () => {
+        this.authProbeTimer = undefined;
+        this.runAuthProbe();
+      },
+      this.requestWait("probe", this.authProbeWaitMs())
+    );
+    if (
+      this.authProbeTimer &&
+      typeof this.authProbeTimer === "object" &&
+      "unref" in this.authProbeTimer
+    ) {
+      (this.authProbeTimer as any).unref();
+    }
+  }
+
+  /**
+   * One auth-failed probe: one fetch cycle across every leg. A rejected probe
+   * logs DEBUG and re-arms (forever, no latch). The first 200 or 304 on any
+   * leg (fetchAndInstall resolves) installs and exits (R4).
+   */
+  private runAuthProbe(): void {
+    if (this.closed || !this.authFailed) return;
+    this.fetchAndInstall().then(
+      () => {
+        if (this.closed) return;
+        this.exitAuthFailed();
+      },
+      (err) => {
+        if (this.closed) return;
+        this.logger.debug(
+          "[quonfig] auth-failed probe rejected; retrying later:",
+          err instanceof Error ? err.message : String(err)
+        );
+        this.armAuthProbe();
+      }
+    );
+  }
+
+  /**
+   * Leave auth-failed (R4): one INFO, then SSE restarts as a brand-new
+   * connection (base backoff) and the poller is back on its normal engage
+   * rule. In polling mode, polling resumes at the interval (the probe just
+   * fetched, so no immediate fetch).
+   */
+  private exitAuthFailed(): void {
+    this.authFailed = false;
+    this.logger.info(
+      "[quonfig] config fetch accepted; leaving auth-failed and resuming streaming and polling"
+    );
+    if (this.enableSSE) {
+      this.startSSE();
+    } else if (this.fallbackPollEnabled) {
+      this.fallbackPollerEngaged = true;
+      this.startFallbackPolling(false);
     }
   }
 

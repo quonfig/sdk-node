@@ -20,6 +20,13 @@ export interface LegResult {
   error?: Error;
   sourceIndex: number;
   /**
+   * HTTP status the leg got (200, 304, 401, 503, ...), or 0 when it got no
+   * response (network error, timeout/abort). A 200 whose body is not a valid
+   * envelope carries 200 AND `error`. The client reads the primary leg's
+   * status for the auth-failure rule (qfg-goi1.10.24).
+   */
+  status?: number;
+  /**
    * Set on a 200 that stored a new ETag in this leg's slot. Undoes that store
    * (restores the previous ETag) if the slot still holds it. The caller uses it
    * when the payload is ignored as unversioned (gen<=0) so the ignored
@@ -264,6 +271,7 @@ export class Transport {
    */
   private async fetchFromUrlAt(i: number, abortMs: number): Promise<LegResult> {
     const baseUrl = this.baseUrls[i];
+    let status = 0;
     try {
       const headers = this.getHeaders();
       // Per-leg ETag: read only this leg's slot so a 304 from the other leg can
@@ -295,9 +303,10 @@ export class Transport {
         fetchInit.cache = "no-store";
       }
       const response = await fetch(configUrl, fetchInit as RequestInit);
+      status = response.status;
 
       if (response.status === 304) {
-        return { result: { notChanged: true }, sourceIndex: i };
+        return { result: { notChanged: true }, sourceIndex: i, status };
       }
 
       if (!response.ok) {
@@ -321,9 +330,21 @@ export class Transport {
         };
       }
 
-      return { result: { envelope, notChanged: false }, sourceIndex: i, rollbackEtag };
+      return { result: { envelope, notChanged: false }, sourceIndex: i, status, rollbackEtag };
     } catch (err) {
-      return { error: err instanceof Error ? err : new Error(String(err)), sourceIndex: i };
+      return { error: err instanceof Error ? err : new Error(String(err)), sourceIndex: i, status };
+    }
+  }
+
+  /**
+   * `host[:port]` of the primary (first) config leg, for log lines that must
+   * name the upstream without naming the SDK key.
+   */
+  primaryHost(): string {
+    try {
+      return new URL(this.baseUrls[0]).host;
+    } catch {
+      return this.baseUrls[0];
     }
   }
 
