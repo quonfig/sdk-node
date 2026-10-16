@@ -206,7 +206,7 @@ State semantics:
 | `connecting`   | `init()` has started SSE; or after an error while the library retries. |
 | `connected`    | The SSE stream is open and receiving events.                           |
 | `error`        | The transport surfaced an error. The library will auto-reconnect.      |
-| `disconnected` | `quonfig.close()` was called.                                          |
+| `disconnected` | `quonfig.close()` was called, or the SDK key was rejected (SSE stops). |
 
 The callback is fired only on transitions — duplicate consecutive states are suppressed. During a
 disconnect, `get*` calls keep returning the last-known config from the in-memory store.
@@ -221,12 +221,16 @@ quonfig.connectionState();
 // "initializing" | "connected" | "disconnected" | "falling_back"
 ```
 
-| State          | Meaning                                                                                     |
-| -------------- | ------------------------------------------------------------------------------------------- |
-| `initializing` | `init()` has not yet returned.                                                              |
-| `connected`    | SSE is live, or the SDK is running from a local `datadir`/`datafile`.                       |
-| `disconnected` | SSE has errored and the fallback grace timer has not elapsed, or `close()` has been called. |
-| `falling_back` | The Layer 2 HTTP fallback poller is the active update channel.                              |
+| State          | Meaning                                                                                                          |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `initializing` | `init()` has not yet returned.                                                                                   |
+| `connected`    | SSE is live, or the SDK is running from a local `datadir`/`datafile`.                                            |
+| `disconnected` | SSE has errored and the fallback grace timer has not elapsed, the SDK key was rejected, or `close()` was called. |
+| `falling_back` | The Layer 2 HTTP fallback poller is the active update channel.                                                   |
+
+A fetch cycle that gets no 200/304 on any leg and a 401, 403, 404 or 410 from the primary means the
+SDK key was rejected: the SDK logs one error, stops SSE and polling, and sends one fetch every
+150-300s until one is accepted, then resumes streaming. It reports `disconnected` meanwhile.
 
 > Do not wire `lastSuccessfulRefresh()` or `connectionState()` directly into a Kubernetes liveness
 > probe. These signals are diagnostic, not pass/fail. A liveness probe based on SDK freshness will
