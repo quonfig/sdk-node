@@ -24,7 +24,12 @@ export class WeightedValueResolver {
     wv: WeightedValuesData,
     configKey: string,
     contexts: Contexts
-  ): { value: Value | undefined; index: number; missingHashProperty?: string } {
+  ): {
+    value: Value | undefined;
+    stored?: Value;
+    index: number;
+    missingHashProperty?: string;
+  } {
     const hashValue = wv.hashByPropertyName
       ? contextLookup(contexts, wv.hashByPropertyName)
       : undefined;
@@ -43,13 +48,15 @@ export class WeightedValueResolver {
     for (let i = 0; i < wv.weightedValues.length; i++) {
       runningSum += wv.weightedValues[i]!.weight;
       if (runningSum >= threshold) {
-        return { value: { ...wv.weightedValues[i]!.value }, index: i, missingHashProperty };
+        const stored = wv.weightedValues[i]!.value;
+        return { value: { ...stored }, stored, index: i, missingHashProperty };
       }
     }
 
     // Fallback: return the first value (should not normally be reached)
     if (wv.weightedValues.length > 0) {
-      return { value: { ...wv.weightedValues[0]!.value }, index: 0, missingHashProperty };
+      const stored = wv.weightedValues[0]!.value;
+      return { value: { ...stored }, stored, index: 0, missingHashProperty };
     }
     return { value: undefined, index: -1 };
   }

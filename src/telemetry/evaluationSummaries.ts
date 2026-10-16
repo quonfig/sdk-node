@@ -15,9 +15,26 @@ function wrapperKeyForValue(v: unknown): string {
   return "string";
 }
 
+type Counter = { count: number; reason: number };
+
+// A per-value counter identity, cached on the installed value it came from,
+// plus the live counter it maps to in `window`.
+type CounterSlot = {
+  key: string;
+  counterKey: string;
+  configId: string;
+  ruleIndex: number;
+  weightedValueIndex: number | undefined;
+  window: number;
+  counter?: Counter;
+};
+
 export class EvaluationSummaryCollector {
   private enabled: boolean;
-  private data: Map<string, Map<string, { count: number; reason: number }>> = new Map();
+  private data: Map<string, Map<string, Counter>> = new Map();
+  // Weak, so a replaced config's values (and their cached keys) are collected.
+  private slots: WeakMap<object, CounterSlot> = new WeakMap();
+  private window = 0;
   private startAt: number | undefined;
   private maxDataSize: number;
 
@@ -30,17 +47,65 @@ export class EvaluationSummaryCollector {
     return this.enabled;
   }
 
-  push(evaluation: Evaluation): void {
+  /**
+   * Count one evaluation. `valueRef` is the installed (stored) value object the
+   * evaluation resolved to. Stored values are replaced, never mutated, on each
+   * install, so the counter identity is computed once per installed value and
+   * a repeat read in the same window is a counter increment instead of a
+   * serialization of the selected value (qfg-23uf). A value resolved fresh on
+   * each read (ENV_VAR, decryption) is a different object every time and
+   * simply never hits the cache.
+   */
+  push(evaluation: Evaluation, valueRef?: object): void {
     if (!this.enabled) return;
     if (evaluation.unwrappedValue === undefined) return;
     if (evaluation.configType === "log_level") return;
 
-    const key = JSON.stringify([evaluation.configKey, evaluation.configType]);
+    let slot = valueRef === undefined ? undefined : this.slots.get(valueRef);
+    if (
+      slot !== undefined &&
+      (slot.configId !== evaluation.configId ||
+        slot.ruleIndex !== evaluation.ruleIndex ||
+        slot.weightedValueIndex !== evaluation.weightedValueIndex)
+    ) {
+      slot = undefined;
+    }
+    if (slot?.window === this.window && slot.counter) {
+      slot.counter.count++;
+      return;
+    }
+
+    if (slot === undefined) {
+      slot = this.newSlot(evaluation);
+      if (valueRef !== undefined) this.slots.set(valueRef, slot);
+    }
+
+    const { key, counterKey } = slot;
     // Cap on distinct (configKey, configType) per window: a NEW key beyond the
     // cap is dropped, an existing key keeps counting (P6).
     if (!this.data.has(key) && this.data.size >= this.maxDataSize) return;
 
     this.startAt = this.startAt ?? Date.now();
+
+    let countersForKey = this.data.get(key);
+    if (countersForKey === undefined) {
+      countersForKey = new Map();
+      this.data.set(key, countersForKey);
+    }
+
+    let counter = countersForKey.get(counterKey);
+    if (counter === undefined) {
+      counter = { count: 1, reason: evaluation.reason };
+      countersForKey.set(counterKey, counter);
+    } else {
+      counter.count++;
+    }
+    slot.window = this.window;
+    slot.counter = counter;
+  }
+
+  private newSlot(evaluation: Evaluation): CounterSlot {
+    const key = JSON.stringify([evaluation.configKey, evaluation.configType]);
 
     // For redacted (confidential / decryptWith) values, the wire shape is
     // always `{string: "*****<md5>"}` regardless of the underlying type —
@@ -57,19 +122,14 @@ export class EvaluationSummaryCollector {
       selectedRaw,
       evaluation.weightedValueIndex,
     ]);
-
-    let countersForKey = this.data.get(key);
-    if (countersForKey === undefined) {
-      countersForKey = new Map();
-      this.data.set(key, countersForKey);
-    }
-
-    const existing = countersForKey.get(counterKey);
-    if (existing === undefined) {
-      countersForKey.set(counterKey, { count: 1, reason: evaluation.reason });
-    } else {
-      existing.count++;
-    }
+    return {
+      key,
+      counterKey,
+      configId: evaluation.configId,
+      ruleIndex: evaluation.ruleIndex,
+      weightedValueIndex: evaluation.weightedValueIndex,
+      window: -1,
+    };
   }
 
   /**
@@ -80,6 +140,7 @@ export class EvaluationSummaryCollector {
   disable(): void {
     this.enabled = false;
     this.data.clear();
+    this.window++;
     this.startAt = undefined;
   }
 
@@ -128,6 +189,7 @@ export class EvaluationSummaryCollector {
     };
 
     this.data.clear();
+    this.window++;
     this.startAt = undefined;
 
     return event;

@@ -78,6 +78,7 @@ export class Evaluator {
         const match: EvalMatch = {
           isMatch: true,
           value,
+          storedValue: rule.value,
           ruleIndex: ruleIndexOffset + i,
           weightedValueIndex: -1,
         };
@@ -89,6 +90,7 @@ export class Evaluator {
             const resolved = this.weighted.resolve(wvData, cfg.key, contexts);
             if (resolved.value !== undefined) {
               match.value = resolved.value;
+              match.storedValue = resolved.stored;
               match.weightedValueIndex = resolved.index;
               if (resolved.missingHashProperty !== undefined) {
                 match.missingHashProperty = resolved.missingHashProperty;
