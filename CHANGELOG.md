@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0 - 2026-10-16
 
 - **Minor: a rejected SDK key slows down instead of retrying at the normal cadence (auth-failure
   rule, qfg-goi1.10.24).** When a fallback-poll cycle (or a poll with `enableSSE: false`) gets no
