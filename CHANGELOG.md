@@ -1,13 +1,6 @@
 # Changelog
 
-## Unreleased
-
-- **Fix: eval-summary telemetry no longer serializes the value on every read (qfg-23uf).** Each
-  per-value counter was keyed by `JSON.stringify` of the selected value on every evaluation, so a
-  large JSON or string config paid a full serialization per `get()` (about 50us per read for a 60KB
-  JSON config). The counter identity is now computed once per installed value, and a repeat read in
-  the same telemetry window is a counter increment. Counters and the telemetry payload are
-  unchanged.
+## 1.8.0 - 2026-10-20
 
 - **UPGRADE: SSE reports `connected` at the first frame, not at the 200 response (qfg-goi1.10.9).**
   A stream connection now counts as connected, for `connectionState()`,
@@ -31,11 +24,22 @@
   moved from eventsource's `onopen` to the connection's first valid frame. eventsource@4 does not
   surface SSE comment lines, so keepalives are detected on the response body the SDK already wraps
   for the read deadline. Keepalives do not advance `lastSuccessfulRefresh()`. No new dependency.
+
+- **Fix: eval-summary telemetry no longer serializes the value on every read (qfg-23uf).** Each
+  per-value counter was keyed by `JSON.stringify` of the selected value on every evaluation, so a
+  large JSON or string config paid a full serialization per `get()` (about 50us per read for a 60KB
+  JSON config). The counter identity is now computed once per installed value, and a repeat read in
+  the same telemetry window is a counter increment. Counters and the telemetry payload are
+  unchanged.
+
 - **Tests:** supervisor Test 9 (a)-(d), the Test 2 reset amendment and a first-frame parser table
   against a local 127.0.0.1 server (`test/sse-first-frame.test.ts`); integration-test-data pin
   bumped to v2026.10.16.4 (get_or_raise init-timeout cases now use `http://192.0.2.1:1`).
 
 ## 1.7.0 - 2026-10-16
+
+Approved as minors under Decision 1 (qfg-goi1.5, 2026-10-09; prod corpus scan: 0 affected criteria):
+the timestamp grammar and abbreviated semver changes below, which change who matches.
 
 - **Minor: a rejected SDK key slows down instead of retrying at the normal cadence (auth-failure
   rule, qfg-goi1.10.24).** When a fallback-poll cycle (or a poll with `enableSSE: false`) gets no
