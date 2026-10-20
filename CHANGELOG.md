@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Patch
+
+- **A caught `init()` failure no longer leaves a dead client (qfg-9p4i.2).** Before, if `init()`
+  rejected (both delivery legs down, or `initTimeout` elapsed) and the app caught the error and kept
+  the client, nothing ever retried and every getter threw `[quonfig] Not initialized` until the app
+  called `init()` again. Now the client keeps retrying in the background (jittered backoff 0.5 s
+  doubling to 30 s; the auth-probe period after a 401/403), heals on the first successful fetch,
+  logs `[quonfig] init recovered: ...` at WARN, and starts SSE/polling and telemetry as a normal
+  init would. Until it heals, `get(key, ctx, default)` returns the default, `isEnabled` returns
+  `false`, and a getter without a default follows `onNoDefault`. `init()` still rejects exactly as
+  before, and `close()` stops the retry loop. Getters called before any `init()` still throw.
+
 ## 1.8.0 - 2026-10-20
 
 - **UPGRADE: SSE reports `connected` at the first frame, not at the 200 response (qfg-goi1.10.9).**

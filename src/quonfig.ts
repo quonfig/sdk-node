@@ -57,6 +57,13 @@ const DEFAULT_DATADIR_AUTORELOAD_DEBOUNCE_MS = 200;
 // doubling). Internal: tests reach it through the private wait hook, never an
 // option.
 const AUTH_PROBE_MIN_MS = 150_000;
+/** Background init-retry backoff after a rejected init() (design B.3). */
+const INIT_RETRY_BASE_MS = 500;
+const INIT_RETRY_MAX_MS = 30_000;
+/** Not-ready WARN cadence (design section C): every 30s for 5 min, then every 5 min. */
+const INIT_RETRY_WARN_FIRST_MS = 30_000;
+const INIT_RETRY_WARN_FAST_WINDOW_MS = 5 * 60_000;
+const INIT_RETRY_WARN_SLOW_MS = 5 * 60_000;
 const AUTH_PROBE_MAX_MS = 300_000;
 
 /**
@@ -313,6 +320,18 @@ export class Quonfig {
   private instanceHash: string;
   private environmentId: string = "";
   private initialized: boolean = false;
+  /**
+   * True once an init() call has rejected (qfg-9p4i.2). The client is kept
+   * alive: getters serve the caller default / `onNoDefault` instead of throwing
+   * "Not initialized", and a background retry loop runs until config loads.
+   */
+  private initFailed: boolean = false;
+  /** When the first init() started (ms epoch), for the heal / retry log lines. */
+  private initStartedAt?: number;
+  /** True while the background init-retry loop owns retrying (qfg-9p4i.2). */
+  private initRetryActive: boolean = false;
+  private initRetryTimer?: ReturnType<typeof setTimeout>;
+  private initRetryNextWarnAt?: number;
 
   // ---- canonical-ordering + failover observability (qfg-7h5d.1.7) ----
   /** Highest positive Meta.generation installed (0 until a versioned install; never lowered). */
@@ -554,6 +573,11 @@ export class Quonfig {
       return;
     }
 
+    // The background retry loop (qfg-9p4i.2) may already have healed the
+    // client after an earlier rejection; nothing more to start.
+    if (this.initialized) return;
+    this.initStartedAt ??= Date.now();
+
     // Fetch configs with a timeout
     const fetchPromise = this.fetchAndInstall();
     let initTimer: ReturnType<typeof setTimeout> | undefined;
@@ -565,6 +589,13 @@ export class Quonfig {
       await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
       this.logger.warn("Initialization failed:", err);
+      // No permanently dead clients (init-failure design, Decisions 4): the
+      // caller may catch this and keep the object, so keep retrying in the
+      // background and heal once config loads.
+      if (!this.closed && !this.initialized) {
+        this.initFailed = true;
+        this.startInitRetry(fetchPromise, err);
+      }
       throw err;
     } finally {
       // An armed timer would keep the event loop alive for initTimeout ms
@@ -572,11 +603,20 @@ export class Quonfig {
       clearTimeout(initTimer);
     }
 
+    this.completeInit();
+  }
+
+  /**
+   * Flip ready and start the update channel and telemetry. Idempotent: an
+   * explicit init() retry and the background retry loop can both land here.
+   */
+  private completeInit(): void {
     // close() ran while the fetch was in flight: don't start SSE, the poller
     // or the telemetry reporter that nothing would ever stop.
-    if (this.closed) return;
+    if (this.closed || this.initialized) return;
 
     this.initialized = true;
+    this.stopInitRetry();
 
     // Boot log: announce the chosen update mode so deployers can see the new
     // SSE-with-fallback behavior at startup. Per qfg-47c2.7 acceptance.
@@ -592,6 +632,99 @@ export class Quonfig {
 
     // Start telemetry reporter
     this.startTelemetry();
+  }
+
+  /**
+   * Background retry after a rejected init() (qfg-9p4i.2). First lets the
+   * attempt init() gave up on settle (its late install heals at once), then
+   * retries with jittered backoff 0.5s, 1s, 2s, ... capped at 30s (design B.3).
+   * An auth-class rejection (401/403 from the primary) waits the auth-probe
+   * period instead, like the existing auth-failed regime. Stops on heal or
+   * close().
+   */
+  private startInitRetry(inFlight: Promise<void>, firstErr: unknown): void {
+    if (this.initRetryActive) return;
+    this.initRetryActive = true;
+    this.initRetryNextWarnAt = Date.now() + INIT_RETRY_WARN_FIRST_MS;
+    let attempt = 0;
+    let lastErr: unknown = firstErr;
+
+    const onSettled = (p: Promise<void>): void => {
+      p.then(
+        () => {
+          if (!this.initRetryActive) return;
+          this.healFromInitRetry();
+        },
+        (err) => {
+          if (!this.initRetryActive || this.closed || this.initialized) return;
+          lastErr = err;
+          this.maybeWarnInitRetry(lastErr);
+          schedule();
+        }
+      );
+    };
+
+    const schedule = (): void => {
+      const base = Math.min(INIT_RETRY_MAX_MS, INIT_RETRY_BASE_MS * 2 ** attempt);
+      attempt++;
+      // Uniform in [base/2, base], mirroring the SSE reconnect jitter.
+      let wait = base / 2 + Math.random() * (base / 2);
+      if (lastErr instanceof AuthRejectedError) wait = this.authProbeWaitMs();
+      this.initRetryTimer = setTimeout(
+        () => {
+          this.initRetryTimer = undefined;
+          if (!this.initRetryActive || this.closed || this.initialized) return;
+          onSettled(this.fetchAndInstall());
+        },
+        this.requestWait("init-retry", wait)
+      );
+      const t = this.initRetryTimer as any;
+      if (t && typeof t === "object" && "unref" in t) t.unref();
+    };
+
+    onSettled(inFlight);
+  }
+
+  private stopInitRetry(): void {
+    this.initRetryActive = false;
+    if (this.initRetryTimer) {
+      clearTimeout(this.initRetryTimer);
+      this.initRetryTimer = undefined;
+    }
+  }
+
+  private healFromInitRetry(): void {
+    if (this.closed || this.initialized) {
+      this.stopInitRetry();
+      return;
+    }
+    const elapsed = ((Date.now() - (this.initStartedAt ?? Date.now())) / 1000).toFixed(1);
+    const via = this.resolvedFromIndex === 0 ? "primary" : "secondary";
+    const v = this.store.getVersion();
+    const version = v ? ` (version ${v})` : "";
+    // WARN, not INFO: the filter level that saw the failure must also see the
+    // recovery (design section C).
+    this.logger.warn(
+      `[quonfig] init recovered: config loaded after ${elapsed}s via ${via}${version}. Now serving live config.`
+    );
+    this.completeInit();
+  }
+
+  /** Throttled WARN while not ready: every 30s for 5 min, then every 5 min. */
+  private maybeWarnInitRetry(err: unknown): void {
+    const now = Date.now();
+    if (this.initRetryNextWarnAt === undefined || now < this.initRetryNextWarnAt) return;
+    const sinceStart = now - (this.initStartedAt ?? now);
+    this.initRetryNextWarnAt =
+      now +
+      (sinceStart < INIT_RETRY_WARN_FAST_WINDOW_MS
+        ? INIT_RETRY_WARN_FIRST_MS
+        : INIT_RETRY_WARN_SLOW_MS);
+    const secs = Math.floor(sinceStart / 1000);
+    const msg = err instanceof Error ? err.message : String(err);
+    this.logger.warn(
+      `[quonfig] still not connected to Quonfig delivery (${Math.floor(secs / 60)}m${secs % 60}s since start); serving defaults. ${msg}`
+    );
   }
 
   private logBootMode(): void {
@@ -1098,6 +1231,7 @@ export class Quonfig {
       clearTimeout(this.authProbeTimer);
       this.authProbeTimer = undefined;
     }
+    this.stopInitRetry();
 
     this.closed = true;
   }
@@ -1105,7 +1239,10 @@ export class Quonfig {
   // ---- Private methods ----
 
   private requireInitialized(): void {
-    if (!this.initialized) {
+    // After a caught init() rejection the client is kept alive (qfg-9p4i.2):
+    // getters evaluate against the (empty) store, so they return the caller
+    // default or apply `onNoDefault`, while the background retry heals it.
+    if (!this.initialized && !this.initFailed) {
       throw new Error("[quonfig] Not initialized. Call init() first.");
     }
   }
