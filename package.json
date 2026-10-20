@@ -86,7 +86,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.6.5",
     "js-yaml": "^4.1.1",
-    "pino": "10.3.1",
+    "pino": "10.4.0",
     "prettier": "^3.0.0",
     "tsup": "^9.0.0",
     "typescript": "^6.0.3",
