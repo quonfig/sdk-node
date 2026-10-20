@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Minor
+
+- **UPGRADE: `onInitFailure`, readiness API and `QuonfigInitError` (qfg-9p4i.10).** New option
+  `onInitFailure: "fail" | "wait" | "continue"` decides what `init()` does when no config has loaded
+  by `initTimeout`. The default is `"fail"`, which is what node already did, so most apps need no
+  change. What is new or different:
+  - `init()` now **retries through blips until `initTimeout`** (jittered backoff 0.5 s doubling to
+    30 s) instead of rejecting on the first attempt where both delivery legs fail. A fast failure,
+    such as connection refused, now rejects after `initTimeout` (10 s by default) instead of within
+    milliseconds. If every delivery leg rejects the SDK key (401/403), `init()` still rejects at
+    once.
+  - `init()` rejects with the new exported **`QuonfigInitError`** (`.reason`: `"timeout"`,
+    `"unavailable"` or `"unauthorized"`; `.cause`: the last delivery error). Its message names each
+    failed host and its error. A hang keeps the `Initialization timed out` text. Code that only
+    checks for a rejection is unaffected; code that matched the old raw error type or message
+    (`TypeError: fetch failed`, `AuthRejectedError`) should switch to `QuonfigInitError`.
+  - `"wait"` keeps `init()` blocking and retrying with no upper bound. `"continue"` resolves at the
+    timeout and starts on code defaults (logged at ERROR). Either way the client heals in the
+    background.
+  - New readiness API: `isReady()` and `waitForReady({ timeoutMs? })`. `waitForReady` rejects with
+    `QuonfigInitError` (reason `"timeout"`) when the deadline passes, or (reason `"unavailable"`)
+    when the client is closed first.
+  - `get*Details` before the client has config now return `errorCode: "PROVIDER_NOT_READY"` (was
+    `"GENERAL"`); `EvaluationErrorCode` gains that member.
+  - Init logging follows the shared contract: a DEBUG start line, one WARN on the first failed
+    attempt, WARN progress every 5 s, then one ERROR at the timeout naming
+    `primary=<host>: <error>; secondary=<host>: <error>` and the options. A healthy boot logs
+    nothing above DEBUG. The SDK key is never logged.
+  - An unknown `onInitFailure` value throws at construction. Node had no older spellings, so there
+    are no deprecated aliases.
+
 ### Patch
 
 - **A caught `init()` failure no longer leaves a dead client (qfg-9p4i.2).** Before, if `init()`

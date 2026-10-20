@@ -1,5 +1,7 @@
 // Main SDK exports
 export { Quonfig, BoundQuonfig } from "./quonfig";
+export { QuonfigInitError } from "./initError";
+export type { QuonfigInitErrorReason } from "./initError";
 
 // Types
 export type {
@@ -22,6 +24,7 @@ export type {
   ContextValue,
   GetValue,
   OnNoDefault,
+  OnInitFailure,
   ContextUploadMode,
   LogLevelName,
   LogLevelNumber,
