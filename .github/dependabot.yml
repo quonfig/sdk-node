@@ -29,3 +29,16 @@ updates:
     groups:
       npm-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Runtime and peer dependencies of the published package. The range we
+      # declare is the floor customers must install, so a major bump here
+      # forces every customer onto that major. Raise these floors
+      # deliberately in a release, not via Dependabot.
+      - dependency-name: "eventsource"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "murmurhash"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pino"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "winston"
+        update-types: ["version-update:semver-major"]
