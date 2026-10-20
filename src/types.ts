@@ -175,6 +175,21 @@ export type GetValue = string | number | boolean | string[] | undefined;
 
 export type OnNoDefault = "error" | "warn" | "ignore";
 
+// ---- On init failure behavior (init-failure design B.1/B.3) ----
+
+/**
+ * What `init()` does when no config has loaded by `initTimeout`:
+ *
+ * - `"fail"` (default): reject with `QuonfigInitError`. A 401/403 from every
+ *   delivery leg rejects at once. The client keeps retrying in the background.
+ * - `"wait"`: keep blocking and retrying with no upper bound; `init()` resolves
+ *   once config loads.
+ * - `"continue"`: resolve and start on code defaults; getters return the
+ *   caller default (or apply `onNoDefault`) and the client heals in the
+ *   background.
+ */
+export type OnInitFailure = "fail" | "wait" | "continue";
+
 // ---- Context upload mode ----
 
 export type ContextUploadMode = "none" | "shapes_only" | "periodic_example";
@@ -322,7 +337,16 @@ export interface QuonfigOptions {
    * "periodic_example"`). Default 10000. (qfg-mol-9u0)
    */
   telemetryMaxExampleContexts?: number;
+  /**
+   * How long (ms) `init()` waits and retries for the first config before
+   * applying `onInitFailure`. Default 10000.
+   */
   initTimeout?: number;
+  /**
+   * What `init()` does when no config has loaded by `initTimeout`. Default
+   * `"fail"`. See {@link OnInitFailure}.
+   */
+  onInitFailure?: OnInitFailure;
   datadir?: string;
   datafile?: string | object;
   /** Environment name to use in datadir mode. Supersedes the QUONFIG_ENVIRONMENT env var. */
@@ -438,7 +462,12 @@ export interface EvalMatch {
 export type EvaluationReason = "STATIC" | "TARGETING_MATCH" | "SPLIT" | "DEFAULT" | "ERROR";
 
 /** Error code returned alongside `reason: "ERROR"` from `get*Details` methods. */
-export type EvaluationErrorCode = "FLAG_NOT_FOUND" | "TYPE_MISMATCH" | "GENERAL";
+export type EvaluationErrorCode =
+  | "FLAG_NOT_FOUND"
+  | "TYPE_MISMATCH"
+  | "GENERAL"
+  /** The client has no config yet (init not complete, or failed and still retrying). */
+  | "PROVIDER_NOT_READY";
 
 /**
  * Result of a `get*Details` evaluation. Includes the resolved value (when

@@ -6,74 +6,53 @@
 import { describe, it, expect } from "vitest";
 import { withClient, withEnv } from "./setup";
 
-async function assertInitializationTimeoutError(
-  key: string,
-  timeoutSec: number,
-  apiURL: string,
-  onInitFailure: string
-): Promise<void> {
-  // sdk-node has no on_init_failure option; its only behaviour is :raise (init() rejects).
-  expect(onInitFailure).toBe("raise");
+async function initFailureClient(
+  onInitFailure: string | undefined,
+  apiUrls: string[],
+  apiStatus: number,
+  initTimeoutMs: number
+): Promise<{ client: any; error: unknown; elapsedMs: number; close: () => Promise<void> }> {
   const { Quonfig } = await import("../../src/quonfig");
-  // Use 10.255.255.1 (RFC5737-style unreachable IP) so the fetch hangs and the init timer wins.
-  const targetURL = "http://10.255.255.1:8080";
-  const client = new Quonfig({
-    sdkKey: "test-unused",
-    apiUrls: [targetURL],
+  const http = await import("node:http");
+  const servers: import("node:http").Server[] = [];
+  let urls = apiUrls;
+  if (apiStatus !== 0) {
+    urls = [];
+    for (let i = 0; i < 2; i++) {
+      const server = http.createServer((_req, res) => {
+        res.writeHead(apiStatus);
+        res.end();
+      });
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+      servers.push(server);
+      urls.push(`http://127.0.0.1:${(server.address() as import("node:net").AddressInfo).port}`);
+    }
+  }
+  const opts: Record<string, unknown> = {
+    sdkKey: "itd-init-failure",
+    apiUrls: urls,
+    initTimeout: initTimeoutMs,
     enableSSE: false,
     enablePolling: false,
-    initTimeout: Math.max(1, Math.floor(timeoutSec * 1000)),
-  });
-  await expect(client.init()).rejects.toThrow(/^Initialization timed out$/);
-}
-
-async function assertClientConstructionRaises(
-  key: string,
-  timeoutSec: number,
-  apiURL: string,
-  onInitFailure: string,
-  _fn: string,
-  errMatcher: RegExp
-): Promise<void> {
-  // sdk-node has no on_init_failure option, so :return (init failure -> keep
-  // going and evaluate with no config) cannot be expressed. Fail loudly
-  // rather than assert on whatever an uninitialized client throws.
-  if (onInitFailure !== "raise")
-    throw new Error(`sdk-node has no on_init_failure=${onInitFailure} option`);
-  const { Quonfig } = await import("../../src/quonfig");
-  const targetURL = "http://10.255.255.1:8080";
-  const client = new Quonfig({
-    sdkKey: "test-unused",
-    apiUrls: [targetURL],
-    enableSSE: false,
-    enablePolling: false,
-    initTimeout: Math.max(1, Math.floor(timeoutSec * 1000)),
+    collectEvaluationSummaries: false,
+    contextUploadMode: "none",
     onNoDefault: "error",
-  });
-  await expect(client.init()).rejects.toThrow();
-  expect(() => client.get(key)).toThrow(errMatcher);
-}
-
-async function assertClientConstructionValue(
-  key: string,
-  timeoutSec: number,
-  apiURL: string,
-  _onInitFailure: string,
-  _fn: string
-): Promise<unknown> {
-  const { Quonfig } = await import("../../src/quonfig");
-  const targetURL = "http://10.255.255.1:8080";
-  const client = new Quonfig({
-    sdkKey: "test-unused",
-    apiUrls: [targetURL],
-    enableSSE: false,
-    enablePolling: false,
-    initTimeout: Math.max(1, Math.floor(timeoutSec * 1000)),
-  });
+  };
+  if (onInitFailure !== undefined) opts.onInitFailure = onInitFailure;
+  const client = new Quonfig(opts as ConstructorParameters<typeof Quonfig>[0]);
+  const start = Date.now();
+  let error: unknown;
   try {
     await client.init();
-  } catch {}
-  return client.get(key);
+  } catch (e) {
+    error = e;
+  }
+  const elapsedMs = Date.now() - start;
+  const close = async (): Promise<void> => {
+    await client.close();
+    for (const s of servers) await new Promise<void>((r) => s.close(() => r()));
+  };
+  return { client, error, elapsedMs, close };
 }
 
 describe("get_or_raise", () => {
@@ -89,21 +68,135 @@ describe("get_or_raise", () => {
     });
   });
 
-  // unsupported by sdk-node: sdk-node has no on_init_failure option: init() always rejects when initTimeout elapses and the client stays uninitialized, so a getter throws "Not initialized", never the :return-mode missing_default error
-  it.skip("get_or_raise raises the correct error if it doesn't raise on init timeout", async () => {
-    await assertClientConstructionRaises(
-      "any-key",
-      0.01,
-      "http://192.0.2.1:1",
-      "return",
-      "get_or_raise",
-      /^No value found for key "/
+  it("init fails by default when every delivery leg refuses the connection", async () => {
+    const init = await initFailureClient(
+      undefined,
+      ["http://127.0.0.1:1", "http://127.0.0.1:2"],
+      0,
+      500
     );
-  });
+    try {
+      expect(init.error, "init() must reject (on_init_failure default = fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
+      expect(init.elapsedMs).toBeLessThan(5000);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
 
-  it("get_or_raise can raise an error if the client does not initialize in time", async () => {
-    await assertInitializationTimeoutError("any-key", 0.01, "http://192.0.2.1:1", "raise");
-  });
+  it("init with on_init_failure fail raises when every delivery leg refuses the connection", async () => {
+    const init = await initFailureClient(
+      "fail",
+      ["http://127.0.0.1:1", "http://127.0.0.1:2"],
+      0,
+      500
+    );
+    try {
+      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
+      expect(init.elapsedMs).toBeLessThan(5000);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("init with on_init_failure fail raises the init timeout when every delivery leg hangs", async () => {
+    const init = await initFailureClient(
+      "fail",
+      ["http://192.0.2.1:1", "http://192.0.2.1:2"],
+      0,
+      200
+    );
+    try {
+      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("timeout");
+      expect(init.elapsedMs).toBeLessThan(2000);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("init with on_init_failure fail raises at once when every delivery leg answers 401", async () => {
+    const init = await initFailureClient("fail", [], 401, 8000);
+    try {
+      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("unauthorized");
+      expect(init.elapsedMs).toBeLessThan(4000);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("get_or_raise returns the default after init continues past refused delivery legs", async () => {
+    const init = await initFailureClient(
+      "continue",
+      ["http://127.0.0.1:1", "http://127.0.0.1:2"],
+      0,
+      500
+    );
+    try {
+      expect(init.error, "on_init_failure continue: init() must resolve").toBeUndefined();
+      const client = init.client;
+      expect(client.get("any-key", undefined, "DEFAULT")).toBe("DEFAULT");
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("get_or_raise raises missing_default after init continues past refused delivery legs", async () => {
+    const init = await initFailureClient(
+      "continue",
+      ["http://127.0.0.1:1", "http://127.0.0.1:2"],
+      0,
+      500
+    );
+    try {
+      expect(init.error, "on_init_failure continue: init() must resolve").toBeUndefined();
+      const client = init.client;
+      expect(() => client.getString("any-key")).toThrow(/^No value found for key "/);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  // unsupported by sdk-node: sdk-node has no legacy on_init_failure spellings to keep as aliases (init-failure design B.2: "node: none")
+  it.skip("deprecated on_init_failure raise behaves as fail when every delivery leg refuses the connection", async () => {
+    const init = await initFailureClient(
+      "raise",
+      ["http://127.0.0.1:1", "http://127.0.0.1:2"],
+      0,
+      500
+    );
+    try {
+      expect(init.error, "init() must reject (on_init_failure raise)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
+      expect(init.elapsedMs).toBeLessThan(5000);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  // unsupported by sdk-node: sdk-node has no legacy on_init_failure spellings to keep as aliases (init-failure design B.2: "node: none")
+  it.skip("deprecated on_init_failure return behaves as continue when every delivery leg refuses the connection", async () => {
+    const init = await initFailureClient(
+      "return",
+      ["http://127.0.0.1:1", "http://127.0.0.1:2"],
+      0,
+      500
+    );
+    try {
+      expect(init.error, "on_init_failure continue: init() must resolve").toBeUndefined();
+      const client = init.client;
+      expect(() => client.getString("any-key")).toThrow(/^No value found for key "/);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
 
   it("raises an error if a config is provided by a missing environment variable", async () => {
     await withClient({}, (client) => {

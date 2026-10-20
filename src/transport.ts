@@ -341,11 +341,22 @@ export class Transport {
    * name the upstream without naming the SDK key.
    */
   primaryHost(): string {
+    return this.hostAt(0);
+  }
+
+  /** Host of `baseUrls[i]` for log lines (never the path or credentials). */
+  hostAt(i: number): string {
+    const raw = this.baseUrls[i] ?? "";
     try {
-      return new URL(this.baseUrls[0]).host;
+      return new URL(raw).host;
     } catch {
-      return this.baseUrls[0];
+      return raw;
     }
+  }
+
+  /** Number of configured delivery legs. */
+  legCount(): number {
+    return this.baseUrls.length;
   }
 
   /**

@@ -65,7 +65,8 @@ new Quonfig({
   fallbackPollIntervalMs: 60000, // Fallback poll interval in ms (default: 60000)
   sseReadDeadlineMs: 90000,      // Drop SSE socket if no chunk arrives within this window
                                  // (default 90000 = 3x the 30s server heartbeat).
-  initTimeout: 10000,            // Init timeout in ms (default: 10000)
+  initTimeout: 10000,            // How long init() retries for the first config, in ms (default: 10000)
+  onInitFailure: "fail",         // "fail" | "wait" | "continue" (default: "fail"); see below
   onNoDefault: "error",          // "error" | "warn" | "ignore" (default: "error")
   globalContext: { ... },        // Context applied to all evaluations
   datadir: "./workspace-data",   // Load local workspace directories instead of API
@@ -86,6 +87,44 @@ new Quonfig({
 ```
 
 See [Telemetry](#telemetry) for what these send and how failures are handled.
+
+## When init() cannot load config
+
+`init()` fetches config from the primary and secondary delivery hosts and retries through blips for
+`initTimeout` (10 s by default). If no config has loaded by then, `onInitFailure` decides what
+happens:
+
+| `onInitFailure`    | At the timeout                                                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `"fail"` (default) | `init()` rejects with `QuonfigInitError` (`.reason`: `"timeout"`, `"unavailable"` or `"unauthorized"`; `.cause`: the last error). |
+| `"wait"`           | `init()` keeps blocking and retrying with no upper bound, and resolves once config loads.                                         |
+| `"continue"`       | `init()` resolves and the client starts on your code defaults.                                                                    |
+
+If every delivery host rejects the SDK key (401/403), `"fail"` rejects at once instead of waiting
+out the timeout.
+
+The client object always keeps retrying in the background, including after you catch a
+`QuonfigInitError`, and heals on the first successful fetch. Until then getters return the default
+you pass (or follow `onNoDefault`), and `get*Details` return `reason: "ERROR"` with
+`errorCode: "PROVIDER_NOT_READY"`.
+
+```typescript
+import { Quonfig, QuonfigInitError } from "@quonfig/node";
+
+const quonfig = new Quonfig({ sdkKey, onInitFailure: "fail", initTimeout: 10_000 });
+try {
+  await quonfig.init();
+} catch (err) {
+  if (err instanceof QuonfigInitError) console.error(err.reason, err.message);
+  throw err; // let the orchestrator restart the process
+}
+
+quonfig.isReady(); // true once config is loaded
+await quonfig.waitForReady({ timeoutMs: 30_000 }); // rejects with QuonfigInitError on timeout
+```
+
+Under `"wait"`, wire your readiness probe to `isReady()` so the orchestrator holds traffic until
+config loads.
 
 ## Environment variables
 

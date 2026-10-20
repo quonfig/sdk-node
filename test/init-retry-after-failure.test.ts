@@ -50,6 +50,8 @@ function makeClient(opened: { count: number }, logger = silentLogger()): Quonfig
     fallbackPollEnabled: false,
     enableQuonfigUserContext: false,
     logger,
+    // init() now retries until initTimeout before rejecting (qfg-9p4i.10).
+    initTimeout: 100,
     // Shrink the background init-retry backoff so the test runs in ms.
     __testWaitHook: (kind: string, ms: number) => (kind === "init-retry" ? 5 : ms),
     __testEventSourceFactory: () => {
