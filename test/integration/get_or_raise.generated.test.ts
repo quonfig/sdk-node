@@ -9,19 +9,20 @@ import { withClient, withEnv } from "./setup";
 async function initFailureClient(
   onInitFailure: string | undefined,
   apiUrls: string[],
-  apiStatus: number,
+  apiStatuses: number[],
+  apiBody: string | undefined,
   initTimeoutMs: number
 ): Promise<{ client: any; error: unknown; elapsedMs: number; close: () => Promise<void> }> {
   const { Quonfig } = await import("../../src/quonfig");
   const http = await import("node:http");
   const servers: import("node:http").Server[] = [];
   let urls = apiUrls;
-  if (apiStatus !== 0) {
+  if (apiStatuses.length > 0) {
     urls = [];
-    for (let i = 0; i < 2; i++) {
+    for (const status of apiStatuses) {
       const server = http.createServer((_req, res) => {
-        res.writeHead(apiStatus);
-        res.end();
+        res.writeHead(status);
+        res.end(apiBody);
       });
       await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
       servers.push(server);
@@ -72,7 +73,8 @@ describe("get_or_raise", () => {
     const init = await initFailureClient(
       undefined,
       ["http://127.0.0.1:1", "http://127.0.0.1:2"],
-      0,
+      [],
+      undefined,
       500
     );
     try {
@@ -89,7 +91,8 @@ describe("get_or_raise", () => {
     const init = await initFailureClient(
       "fail",
       ["http://127.0.0.1:1", "http://127.0.0.1:2"],
-      0,
+      [],
+      undefined,
       500
     );
     try {
@@ -105,8 +108,9 @@ describe("get_or_raise", () => {
   it("init with on_init_failure fail raises the init timeout when every delivery leg hangs", async () => {
     const init = await initFailureClient(
       "fail",
-      ["http://192.0.2.1:1", "http://192.0.2.1:2"],
-      0,
+      ["http://192.0.2.1:8001", "http://192.0.2.1:8002"],
+      [],
+      undefined,
       200
     );
     try {
@@ -120,7 +124,7 @@ describe("get_or_raise", () => {
   }, 20000);
 
   it("init with on_init_failure fail raises at once when every delivery leg answers 401", async () => {
-    const init = await initFailureClient("fail", [], 401, 8000);
+    const init = await initFailureClient("fail", [], [401, 401], undefined, 8000);
     try {
       expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
       expect((init.error as Error).name).toBe("QuonfigInitError");
@@ -135,7 +139,8 @@ describe("get_or_raise", () => {
     const init = await initFailureClient(
       "continue",
       ["http://127.0.0.1:1", "http://127.0.0.1:2"],
-      0,
+      [],
+      undefined,
       500
     );
     try {
@@ -151,7 +156,8 @@ describe("get_or_raise", () => {
     const init = await initFailureClient(
       "continue",
       ["http://127.0.0.1:1", "http://127.0.0.1:2"],
-      0,
+      [],
+      undefined,
       500
     );
     try {
@@ -168,7 +174,8 @@ describe("get_or_raise", () => {
     const init = await initFailureClient(
       "raise",
       ["http://127.0.0.1:1", "http://127.0.0.1:2"],
-      0,
+      [],
+      undefined,
       500
     );
     try {
@@ -186,13 +193,164 @@ describe("get_or_raise", () => {
     const init = await initFailureClient(
       "return",
       ["http://127.0.0.1:1", "http://127.0.0.1:2"],
-      0,
+      [],
+      undefined,
       500
     );
     try {
       expect(init.error, "on_init_failure continue: init() must resolve").toBeUndefined();
       const client = init.client;
       expect(() => client.getString("any-key")).toThrow(/^No value found for key "/);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("init with on_init_failure fail raises at once when every delivery leg answers 404", async () => {
+    const init = await initFailureClient("fail", [], [404, 404], undefined, 8000);
+    try {
+      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("unauthorized");
+      expect(init.elapsedMs).toBeLessThan(4000);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("init with on_init_failure fail raises at once when every delivery leg answers 410", async () => {
+    const init = await initFailureClient("fail", [], [410, 410], undefined, 8000);
+    try {
+      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("unauthorized");
+      expect(init.elapsedMs).toBeLessThan(4000);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("init with on_init_failure fail raises unavailable when only the primary answers 401 and the secondary 503", async () => {
+    const init = await initFailureClient("fail", [], [401, 503], undefined, 1500);
+    try {
+      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
+      expect(init.elapsedMs).toBeLessThan(6000);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("init with init_timeout_ms 0 and on_init_failure fail raises after one attempt when every delivery leg refuses the connection", async () => {
+    const init = await initFailureClient(
+      "fail",
+      ["http://127.0.0.1:1", "http://127.0.0.1:2"],
+      [],
+      undefined,
+      0
+    );
+    try {
+      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
+      expect(init.elapsedMs).toBeLessThan(5000);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("get_or_raise returns the default after init with init_timeout_ms 0 continues past refused delivery legs", async () => {
+    const init = await initFailureClient(
+      "continue",
+      ["http://127.0.0.1:1", "http://127.0.0.1:2"],
+      [],
+      undefined,
+      0
+    );
+    try {
+      expect(init.error, "on_init_failure continue: init() must resolve").toBeUndefined();
+      const client = init.client;
+      expect(client.get("any-key", undefined, "DEFAULT")).toBe("DEFAULT");
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("init with on_init_failure fail raises the init timeout when every delivery leg hangs past its per-leg abort", async () => {
+    const init = await initFailureClient(
+      "fail",
+      ["http://192.0.2.1:8001", "http://192.0.2.1:8002"],
+      [],
+      undefined,
+      10000
+    );
+    try {
+      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("timeout");
+      expect(init.elapsedMs).toBeLessThan(14000);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("init error never carries the userinfo of a delivery URL", async () => {
+    const init = await initFailureClient(
+      "fail",
+      ["http://qfguser:qfgsecret@127.0.0.1:1", "http://qfguser:qfgsecret@127.0.0.1:2"],
+      [],
+      undefined,
+      500
+    );
+    try {
+      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
+      expect(init.elapsedMs).toBeLessThan(5000);
+      const messages: string[] = [];
+      for (
+        let e: unknown = init.error;
+        e !== undefined && e !== null;
+        e = (e as { cause?: unknown }).cause
+      ) {
+        messages.push(e instanceof Error ? e.message : String(e));
+        if (messages.length > 20) break;
+      }
+      for (const m of messages) {
+        expect(m).not.toContain("qfgsecret");
+        expect(m).not.toContain("qfguser");
+      }
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("init error never carries an upstream response body", async () => {
+    const init = await initFailureClient(
+      "fail",
+      [],
+      [503, 503],
+      "upstream exploded: qfg-upstream-body-marker",
+      500
+    );
+    try {
+      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
+      expect(init.elapsedMs).toBeLessThan(5000);
+      const messages: string[] = [];
+      for (
+        let e: unknown = init.error;
+        e !== undefined && e !== null;
+        e = (e as { cause?: unknown }).cause
+      ) {
+        messages.push(e instanceof Error ? e.message : String(e));
+        if (messages.length > 20) break;
+      }
+      for (const m of messages) {
+        expect(m).not.toContain("qfg-upstream-body-marker");
+      }
     } finally {
       await init.close();
     }
