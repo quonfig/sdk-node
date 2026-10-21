@@ -479,3 +479,101 @@ describe("heal line names the primary when no HTTP leg is recorded", () => {
     expect((q as any).healDetail()).toMatch(/^ via primary/);
   });
 });
+
+/**
+ * qfg-9p4i.17.12: the deadline-cut reason follows Decision 10 (sdk-go's
+ * rule), against real local servers. An attempt in flight at the deadline is
+ * the last attempt (attempt 1 included): timeout iff none of its legs has
+ * answered. A deadline in the backoff gap is decided by the last completed
+ * attempt: timeout iff every one of its legs timed out.
+ */
+describe("D10: deadline-cut reason follows the go rule", () => {
+  /** A server whose first `answers` requests get `status`; later ones hang. */
+  async function flaky(status: number, answers: number): Promise<string> {
+    let n = 0;
+    return serve((_req, res) => {
+      if (n++ < answers) {
+        res.writeHead(status, { "content-type": "text/plain" });
+        res.end("nope");
+      }
+      // else: accept, never answer
+    });
+  }
+  const blackhole = () => serve(() => {});
+
+  it("attempt 1 fast 503, a later attempt blackholed until the deadline: timeout", async () => {
+    spyOnSendTelemetry();
+    const primary = await flaky(503, 1);
+    const secondary = await flaky(503, 1);
+    const q = makeClient({
+      apiUrls: [`http://${primary}`, `http://${secondary}`],
+      initTimeout: 300,
+      configFetchHedgeAbortMs: 5000,
+      configFetchHedgeDelayMs: 30,
+    });
+    const err = await q.init().catch((e) => e);
+    expect(err).toBeInstanceOf(QuonfigInitError);
+    expect(err.reason).toBe("timeout");
+    expect(err.message).not.toContain("503");
+    await q.close();
+  });
+
+  it("deadline cuts attempt 1 while primary failed fast and secondary hangs: unavailable", async () => {
+    spyOnSendTelemetry();
+    const primary = await flaky(503, 1);
+    const secondary = await blackhole();
+    const q = makeClient({
+      apiUrls: [`http://${primary}`, `http://${secondary}`],
+      initTimeout: 300,
+      configFetchHedgeAbortMs: 5000,
+      configFetchHedgeDelayMs: 30,
+    });
+    const err = await q.init().catch((e) => e);
+    expect(err).toBeInstanceOf(QuonfigInitError);
+    expect(err.reason).toBe("unavailable");
+    expect(err.message).toContain(`primary=${primary}: HTTP 503`);
+    expect(err.message).toContain(`secondary=${secondary}: timed out`);
+    await q.close();
+  });
+
+  it.each([401, 503])(
+    "deadline in backoff after primary answered %i and secondary timed out: unavailable",
+    async (status) => {
+      spyOnSendTelemetry();
+      const primary = await flaky(status, 1);
+      const secondary = await blackhole();
+      const q = makeClient({
+        apiUrls: [`http://${primary}`, `http://${secondary}`],
+        initTimeout: 300,
+        configFetchHedgeAbortMs: 80,
+        configFetchHedgeDelayMs: 30,
+        // Back off far past the deadline: attempt 1 is the last completed one.
+        __testWaitHook: (kind: string, ms: number) => (kind === "init-retry" ? 60_000 : ms),
+      });
+      const err = await q.init().catch((e) => e);
+      expect(err).toBeInstanceOf(QuonfigInitError);
+      expect(err.reason).toBe("unavailable");
+      expect(err.message).toContain(`HTTP ${status}`);
+      await q.close();
+    }
+  );
+
+  it.each([
+    ["the deadline cuts attempt 1", 5000],
+    ["every attempt ends on the hedge abort", 60],
+  ])("all legs hung throughout (%s): timeout", async (_label, hedgeAbort) => {
+    spyOnSendTelemetry();
+    const primary = await blackhole();
+    const secondary = await blackhole();
+    const q = makeClient({
+      apiUrls: [`http://${primary}`, `http://${secondary}`],
+      initTimeout: 300,
+      configFetchHedgeAbortMs: hedgeAbort,
+      configFetchHedgeDelayMs: 30,
+    });
+    const err = await q.init().catch((e) => e);
+    expect(err).toBeInstanceOf(QuonfigInitError);
+    expect(err.reason).toBe("timeout");
+    await q.close();
+  });
+});
