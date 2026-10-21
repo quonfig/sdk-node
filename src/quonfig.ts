@@ -980,12 +980,16 @@ export class Quonfig {
   }
 
   /**
-   * Every configured leg answered auth-class (401/403/404/410, decision 6) in
-   * the cycle behind `err`. Never decided from the primary alone.
+   * Every fired leg (primary and, when configured, secondary) answered
+   * auth-class (401/403/404/410, decision 6) in the cycle behind `err`. Never
+   * decided from the primary alone.
    */
   private isUnauthorized(err: unknown): boolean {
     const legs = this.legsOf(err);
-    if (!legs || legs.length < this.transport.legCount()) return false;
+    // The hedge fires at most primary + secondary, so with more apiUrls those
+    // two are every leg that can answer.
+    const required = Math.min(2, this.transport.legCount());
+    if (!legs || new Set(legs.map((l) => l.index)).size < required) return false;
     return legs.every((l) => isAuthClassStatus(l.status));
   }
 

@@ -142,6 +142,26 @@ describe("D1: auth fast-fail needs every leg auth-class (401/403/404/410)", () =
     }
   );
 
+  it("decides from the two hedged legs when more than two apiUrls are configured", async () => {
+    spyOnSendTelemetry();
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockImplementation(async (i: number) =>
+      statusLeg(401)(i)
+    );
+    const q = makeClient({
+      initTimeout: 5000,
+      apiUrls: [
+        "https://primary.example.test",
+        "https://secondary.example.test",
+        "https://third.example.test",
+      ],
+    });
+    const start = Date.now();
+    const err = await q.init().catch((e) => e);
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(err.reason).toBe("unauthorized");
+    await q.close();
+  });
+
   it("does not decide from the primary alone (primary 401, secondary 503)", async () => {
     spyOnSendTelemetry();
     vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockImplementation(async (i: number) =>
