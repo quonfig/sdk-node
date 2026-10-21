@@ -11,8 +11,8 @@
   - `init()` now **retries through blips until `initTimeout`** (jittered backoff 0.5 s doubling to
     30 s) instead of rejecting on the first attempt where both delivery legs fail. A fast failure,
     such as connection refused, now rejects after `initTimeout` (10 s by default) instead of within
-    milliseconds. If every delivery leg rejects the SDK key (401/403), `init()` still rejects at
-    once.
+    milliseconds. If every delivery leg rejects the SDK key (401/403/404/410), `init()` still
+    rejects at once.
   - `init()` rejects with the new exported **`QuonfigInitError`** (`.reason`: `"timeout"`,
     `"unavailable"` or `"unauthorized"`; `.cause`: the last delivery error). Its message names each
     failed host and its error. A hang keeps the `Initialization timed out` text. Code that only
@@ -34,6 +34,26 @@
     are no deprecated aliases.
 
 ### Patch
+
+- **Init-failure conformance with the other SDKs (qfg-9p4i.17.6).** Unreleased behavior from
+  qfg-9p4i.10 brought in line with the cross-SDK decisions:
+  - `init()` rejects at once as `"unauthorized"` only when every delivery leg answers 401, 403, 404
+    or 410 (404/410 were missing). One leg alone never decides it.
+  - `QuonfigInitError.reason` is `"timeout"` when the last attempt hung or none completed, else
+    `"unavailable"`. A fully blackholed network at the default timeouts now reports `"timeout"` (it
+    reported `"unavailable"` because the per-leg hedge abort fired first), and the message describes
+    that last attempt rather than an older failure.
+  - `initTimeout` of 0 or less (or `NaN`) makes one attempt and then applies `onInitFailure`.
+    Before, it meant no deadline, so `"fail"` blocked forever.
+  - Init log lines and `QuonfigInitError` (its `cause` included) name hosts and `HTTP <status>`
+    only. They no longer carry URL credentials (`user:pass@`) or upstream response bodies; the
+    transport's `Unexpected status` error drops the body too.
+  - Calling `init()` again after a caught failure joins the background retry instead of starting a
+    second retry loop and repeating the init warnings.
+  - A client that is not ready (`"continue"`, or a caught `"fail"`) starts SSE/polling and telemetry
+    at the decision point instead of at heal, and config arriving over SSE or the poller heals it.
+  - Every init log line passes a structured `{ event: "quonfig.init.<name>" }` argument to the
+    logger. The default console logger leaves it out.
 
 - **A caught `init()` failure no longer leaves a dead client (qfg-9p4i.2).** Before, if `init()`
   rejected (both delivery legs down, or `initTimeout` elapsed) and the app caught the error and kept

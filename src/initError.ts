@@ -1,11 +1,13 @@
 /**
  * Why the client has no Quonfig config (init-failure design B.4):
  *
- * - `"timeout"`: no delivery leg answered within `initTimeout` (or the
+ * - `"timeout"`: the last attempt hung (every leg ran out of time without an
+ *   answer), or no attempt completed within `initTimeout` (or the
  *   `waitForReady` deadline).
- * - `"unavailable"`: every attempt failed (connection refused, DNS, 5xx, ...)
- *   until `initTimeout` ran out, or the client was closed first.
- * - `"unauthorized"`: every delivery leg rejected the SDK key (401/403).
+ * - `"unavailable"`: the last attempt failed with an answer or a fast error
+ *   (connection refused, DNS, 5xx, ...), or the client was closed first.
+ * - `"unauthorized"`: every delivery leg rejected the SDK key
+ *   (401/403/404/410).
  */
 export type QuonfigInitErrorReason = "timeout" | "unavailable" | "unauthorized";
 

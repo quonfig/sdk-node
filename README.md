@@ -100,8 +100,19 @@ happens:
 | `"wait"`           | `init()` keeps blocking and retrying with no upper bound, and resolves once config loads.                                         |
 | `"continue"`       | `init()` resolves and the client starts on your code defaults.                                                                    |
 
-If every delivery host rejects the SDK key (401/403), `"fail"` rejects at once instead of waiting
-out the timeout.
+If every delivery host rejects the SDK key (401, 403, 404 or 410), `"fail"` rejects at once instead
+of waiting out the timeout.
+
+`initTimeout: 0` (or any value of 0 or less) means one attempt, then the policy: `init()` makes a
+single fetch and, if it loads nothing, applies `onInitFailure` at once. It never means "no
+deadline"; use `onInitFailure: "wait"` to block until config loads.
+
+`QuonfigInitError.reason` is `"timeout"` when the last attempt hung (no host answered in time) and
+`"unavailable"` when it failed with an answer or a fast error. Its message and the init log lines
+name each host and its HTTP status, never URL credentials or response bodies.
+
+Calling `init()` again after catching a `QuonfigInitError` joins the background retry: it resolves
+when the client heals, or rejects again after `initTimeout`.
 
 The client object always keeps retrying in the background, including after you catch a
 `QuonfigInitError`, and heals on the first successful fetch. Until then getters return the default
