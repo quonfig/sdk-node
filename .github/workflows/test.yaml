@@ -35,7 +35,7 @@ jobs:
           # Pinned to a tag (not main) so a typo in shared YAML can't
           # break every SDK's CI at once. Bump to a newer tag when
           # adopting new test cases. See integration-test-data/RELEASING.md.
-          ref: v2026.10.21
+          ref: v2026.10.21.1
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:

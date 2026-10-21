@@ -309,7 +309,11 @@ describe("D4: no URL userinfo or upstream bodies in init lines or QuonfigInitErr
       res.end("upstream-secret-body <html>");
     });
     const log = logger();
-    const q = makeClient({ apiUrls: [`http://${host}/some/path`], initTimeout: 500 }, log);
+    // initTimeout 0 = exactly one attempt, then the policy (decision 8). A
+    // retry loop against a real socket can have an attempt in flight when the
+    // deadline fires, and decision 10 then reports "timed out" instead of the
+    // 503 this case asserts on. One attempt has no deadline to race.
+    const q = makeClient({ apiUrls: [`http://${host}/some/path`], initTimeout: 0 }, log);
     const err = await q.init().catch((e) => e);
     expect(err).toBeInstanceOf(QuonfigInitError);
     expect(err.message).toContain(`primary=${host}: HTTP 503`);
@@ -326,7 +330,8 @@ describe("D4: no URL userinfo or upstream bodies in init lines or QuonfigInitErr
       res.end();
     });
     const log = logger();
-    const q = makeClient({ apiUrls: [`http://user:s3cret@${host}`], initTimeout: 500 }, log);
+    // One attempt, no deadline race (see the case above).
+    const q = makeClient({ apiUrls: [`http://user:s3cret@${host}`], initTimeout: 0 }, log);
     const err = await q.init().catch((e) => e);
     expect(err).toBeInstanceOf(QuonfigInitError);
     expect(err.message).not.toContain("s3cret");
