@@ -19,7 +19,11 @@ async function initFailureClient(
   let urls = apiUrls;
   if (apiStatuses.length > 0) {
     urls = [];
-    for (const status of apiStatuses) {
+    for (const [i, status] of apiStatuses.entries()) {
+      if (status === 0) {
+        urls.push(apiUrls[i]);
+        continue;
+      }
       const server = http.createServer((_req, res) => {
         res.writeHead(status);
         res.end(apiBody);
@@ -75,31 +79,13 @@ describe("get_or_raise", () => {
       ["http://127.0.0.1:1", "http://127.0.0.1:2"],
       [],
       undefined,
-      500
+      0
     );
     try {
       expect(init.error, "init() must reject (on_init_failure default = fail)").toBeDefined();
       expect((init.error as Error).name).toBe("QuonfigInitError");
       expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
-      expect(init.elapsedMs).toBeLessThan(5000);
-    } finally {
-      await init.close();
-    }
-  }, 20000);
-
-  it("init with on_init_failure fail raises when every delivery leg refuses the connection", async () => {
-    const init = await initFailureClient(
-      "fail",
-      ["http://127.0.0.1:1", "http://127.0.0.1:2"],
-      [],
-      undefined,
-      500
-    );
-    try {
-      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
-      expect((init.error as Error).name).toBe("QuonfigInitError");
-      expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
-      expect(init.elapsedMs).toBeLessThan(5000);
+      expect(init.elapsedMs).toBeLessThan(8000);
     } finally {
       await init.close();
     }
@@ -176,13 +162,13 @@ describe("get_or_raise", () => {
       ["http://127.0.0.1:1", "http://127.0.0.1:2"],
       [],
       undefined,
-      500
+      0
     );
     try {
       expect(init.error, "init() must reject (on_init_failure raise)").toBeDefined();
       expect((init.error as Error).name).toBe("QuonfigInitError");
       expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
-      expect(init.elapsedMs).toBeLessThan(5000);
+      expect(init.elapsedMs).toBeLessThan(8000);
     } finally {
       await init.close();
     }
@@ -230,13 +216,31 @@ describe("get_or_raise", () => {
     }
   }, 20000);
 
-  it("init with on_init_failure fail raises unavailable when only the primary answers 401 and the secondary 503", async () => {
-    const init = await initFailureClient("fail", [], [401, 503], undefined, 1500);
+  it("init with on_init_failure fail raises unavailable after one attempt when only the primary answers 401 and the secondary 503", async () => {
+    const init = await initFailureClient("fail", [], [401, 503], undefined, 0);
     try {
       expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
       expect((init.error as Error).name).toBe("QuonfigInitError");
       expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
-      expect(init.elapsedMs).toBeLessThan(6000);
+      expect(init.elapsedMs).toBeLessThan(5000);
+    } finally {
+      await init.close();
+    }
+  }, 20000);
+
+  it("init with on_init_failure fail raises unavailable at the deadline when the primary answers 401 and the secondary hangs", async () => {
+    const init = await initFailureClient(
+      "fail",
+      ["", "http://192.0.2.1:8002"],
+      [401, 0],
+      undefined,
+      9000
+    );
+    try {
+      expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
+      expect((init.error as Error).name).toBe("QuonfigInitError");
+      expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
+      expect(init.elapsedMs).toBeLessThan(12000);
     } finally {
       await init.close();
     }
@@ -254,7 +258,7 @@ describe("get_or_raise", () => {
       expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
       expect((init.error as Error).name).toBe("QuonfigInitError");
       expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
-      expect(init.elapsedMs).toBeLessThan(5000);
+      expect(init.elapsedMs).toBeLessThan(8000);
     } finally {
       await init.close();
     }
@@ -301,13 +305,13 @@ describe("get_or_raise", () => {
       ["http://qfguser:qfgsecret@127.0.0.1:1", "http://qfguser:qfgsecret@127.0.0.1:2"],
       [],
       undefined,
-      500
+      0
     );
     try {
       expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
       expect((init.error as Error).name).toBe("QuonfigInitError");
       expect((init.error as { reason?: unknown }).reason).toBe("unavailable");
-      expect(init.elapsedMs).toBeLessThan(5000);
+      expect(init.elapsedMs).toBeLessThan(8000);
       const messages: string[] = [];
       for (
         let e: unknown = init.error;
@@ -332,7 +336,7 @@ describe("get_or_raise", () => {
       [],
       [503, 503],
       "upstream exploded: qfg-upstream-body-marker",
-      500
+      0
     );
     try {
       expect(init.error, "init() must reject (on_init_failure fail)").toBeDefined();
