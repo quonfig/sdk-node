@@ -704,10 +704,18 @@ export class Quonfig {
     let authLogged = false;
     let nextProgressAt = start + INIT_PROGRESS_MS;
 
-    const backoffSleep = async (): Promise<"slept" | "closed"> => {
+    // "deadline" when the deadline, not the backoff, ended the sleep (go's
+    // select on the deadline channel). Decided from the wake target, not by
+    // re-reading the clock: a timer can fire a millisecond before Date.now()
+    // reaches it, which would otherwise start one more doomed attempt.
+    const backoffSleep = async (): Promise<"slept" | "deadline" | "closed"> => {
       const base = Math.min(INIT_RETRY_MAX_MS, INIT_RETRY_BASE_MS * 2 ** (attempt - 1));
       const backoff = this.requestWait("init-retry", base / 2 + Math.random() * (base / 2));
-      return this.sleepUntil(Math.min(Date.now() + backoff, pastDeadline ? Infinity : deadline));
+      const wakeAt = Date.now() + backoff;
+      const cutByDeadline = !pastDeadline && wakeAt >= deadline;
+      const r = await this.sleepUntil(cutByDeadline ? deadline : wakeAt);
+      if (r === "closed") return "closed";
+      return cutByDeadline ? "deadline" : "slept";
     };
 
     // Attempts are hedged primary+secondary fetches. Between attempts: jittered
@@ -774,16 +782,18 @@ export class Quonfig {
           }
         }
         if (bounded || pastDeadline) {
-          if ((await backoffSleep()) === "closed") return;
-          if (Date.now() < deadline || pastDeadline) continue;
+          const slept = await backoffSleep();
+          if (slept === "closed") return;
+          // A new attempt starts whenever time remains before the deadline.
+          if (pastDeadline || (slept === "slept" && Date.now() < deadline)) continue;
         }
         // Unbounded (initTimeout <= 0): the one attempt is done; apply the policy.
       } else {
-        // The deadline fired mid-attempt: that attempt is the last one, and
-        // `<errs>` describe it, not an earlier completed attempt. Decision 7:
-        // timeout when no attempt completed (this is the first), or when this
-        // one hung (no leg has failed fast so far).
-        lastHung = attempt === 1 || attemptHung(legs);
+        // The deadline fired mid-attempt: that attempt is the last one (the
+        // first included), and `<errs>` describe it, not an earlier completed
+        // attempt. Decisions 7 and 10: timeout iff none of its legs has
+        // answered yet (every settled leg timed out, the rest still pending).
+        lastHung = attemptHung(legs);
         lastErrs = this.formatAttempt(legs);
       }
 

@@ -35,6 +35,13 @@
 
 ### Patch
 
+- **`QuonfigInitError.reason` at the init deadline follows the cross-SDK rule (qfg-9p4i.17.12).**
+  When `initTimeout` cuts an attempt in flight, including the first, the reason is `"timeout"` only
+  if none of its legs has answered; a leg that already failed fast (e.g. primary 503 while the
+  secondary hangs) now gives `"unavailable"`, matching sdk-go. A deadline that lands in the backoff
+  between attempts no longer starts one extra attempt when the backoff timer fires a millisecond
+  early, so the last completed attempt decides the reason.
+
 - **Init-failure conformance with the other SDKs (qfg-9p4i.17.6).** Unreleased behavior from
   qfg-9p4i.10 brought in line with the cross-SDK decisions:
   - `init()` rejects at once as `"unauthorized"` only when every delivery leg answers 401, 403, 404
