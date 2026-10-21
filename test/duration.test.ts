@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { resolve } from "path";
 import { existsSync, readFileSync } from "fs";
-import yaml from "js-yaml";
+import { load } from "js-yaml";
 import { Quonfig } from "../src/quonfig";
 import { durationToMilliseconds, parseDurationMillis } from "../src/duration";
 import type { Logger } from "../src/sdkLogger";
@@ -30,7 +30,7 @@ interface Grammar {
   valid: { value: string; millis: number }[];
   invalid: string[];
 }
-const grammar = yaml.load(readFileSync(GRAMMAR, "utf-8")) as Grammar;
+const grammar = load(readFileSync(GRAMMAR, "utf-8")) as Grammar;
 
 describe("duration grammar fixture (integration-test-data/tests/duration/grammar.yaml)", () => {
   it("fixture is non-empty", () => {
