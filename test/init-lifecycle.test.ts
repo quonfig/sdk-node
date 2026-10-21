@@ -93,10 +93,20 @@ describe("init() lifecycle (qfg-goi1.2.5)", () => {
 
   it("a rejected init() can be retried", async () => {
     spyOnSendTelemetry();
-    // First fetch hangs, so the first init() rejects on its timeout.
+    // First fetch hangs past initTimeout (then ends on its abort), so the
+    // first init() rejects on its timeout. The second init() joins the
+    // background retry, which heals on the next fetch (qfg-9p4i.17).
     const fetchSpy = vi
       .spyOn(Transport.prototype, "fetchFromUrlAt")
-      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () => resolve({ error: new Error("aborted"), status: 0, sourceIndex: 0, hung: true }),
+              80
+            )
+          )
+      )
       .mockResolvedValue(OK);
     const opened = { count: 0 };
     const quonfig = makeClient(opened, { initTimeout: 50 });

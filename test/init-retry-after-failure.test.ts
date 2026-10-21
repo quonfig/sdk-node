@@ -97,7 +97,9 @@ describe("background retry after a caught init() failure (qfg-9p4i.2)", () => {
 
     expect(quonfig.isEnabled("my.flag")).toBe(true);
     expect(opened.count).toBe(1);
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("[quonfig] init recovered"));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("[quonfig] init recovered"), {
+      event: "quonfig.init.recovered",
+    });
 
     // Healed: the retry loop stops.
     const calls = fetchSpy.mock.calls.length;

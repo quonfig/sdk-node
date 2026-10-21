@@ -102,23 +102,26 @@ describe("onInitFailure (qfg-9p4i.10)", () => {
     expect(err).toBeInstanceOf(QuonfigInitError);
     expect(err.name).toBe("QuonfigInitError");
     expect(err.reason).toBe("unavailable");
-    expect(err.message).toContain("primary=primary.example.test: Unexpected status 503: down");
+    expect(err.message).toContain("primary=primary.example.test: HTTP 503");
     expect(err.message).toContain("secondary=secondary.example.test");
     // It retried through the blip rather than failing on the first attempt.
     expect(fetchSpy.mock.calls.length).toBeGreaterThan(2);
 
     expect(log.debug).toHaveBeenCalledWith(
-      "[quonfig] init: fetching config (initTimeout=0.15s, onInitFailure=fail)"
+      "[quonfig] init: fetching config (initTimeout=0.15s, onInitFailure=fail)",
+      { event: "quonfig.init.start" }
     );
     expect(log.warn).toHaveBeenCalledWith(
       expect.stringContaining(
         "[quonfig] init: config not loaded yet, retrying until initTimeout (0.15s). primary=primary.example.test:"
-      )
+      ),
+      { event: "quonfig.init.retrying" }
     );
     expect(log.error).toHaveBeenCalledWith(
       expect.stringMatching(
         /^\[quonfig\] init FAILED: no config after 0\.\ds\. primary=.*onInitFailure=fail: raising QuonfigInitError\. Options: onInitFailure=wait to keep waiting, onInitFailure=continue to start on code defaults, or raise initTimeout\.$/
-      )
+      ),
+      { event: "quonfig.init.failed" }
     );
     for (const line of allLines(log)) expect(line).not.toContain("qf_sk_secret");
     expect(q.isReady()).toBe(false);
@@ -138,7 +141,8 @@ describe("onInitFailure (qfg-9p4i.10)", () => {
     expect(err).toBeInstanceOf(QuonfigInitError);
     expect(err.reason).toBe("unauthorized");
     expect(log.error).toHaveBeenCalledWith(
-      "[quonfig] init FAILED: SDK key rejected (401) by primary and secondary. Check the key and environment. onInitFailure=fail: raising now."
+      "[quonfig] init FAILED: SDK key rejected (401) by primary and secondary. Check the key and environment. onInitFailure=fail: raising now.",
+      { event: "quonfig.init.unauthorized" }
     );
     await q.close();
   });
@@ -169,7 +173,8 @@ describe("onInitFailure (qfg-9p4i.10)", () => {
     expect(log.warn).toHaveBeenCalledWith(
       expect.stringMatching(
         /^\[quonfig\] init: no config after 0\.\ds\. onInitFailure=wait: still blocking startup and retrying indefinitely\. primary=.*Use onInitFailure=fail or continue to bound startup\.$/
-      )
+      ),
+      { event: "quonfig.init.wait" }
     );
 
     down = false;
@@ -179,7 +184,8 @@ describe("onInitFailure (qfg-9p4i.10)", () => {
     expect(log.warn).toHaveBeenCalledWith(
       expect.stringMatching(
         /^\[quonfig\] init recovered: config loaded after \d+\.\ds via primary \(version v7\)\. Now serving live config\.$/
-      )
+      ),
+      { event: "quonfig.init.recovered" }
     );
     await q.close();
   });
@@ -214,7 +220,8 @@ describe("onInitFailure (qfg-9p4i.10)", () => {
     expect(log.error).toHaveBeenCalledWith(
       expect.stringMatching(
         /^\[quonfig\] init: no config after 0\.\ds\. onInitFailure=continue: STARTING ON CODE DEFAULTS\. This instance may disagree with the rest of your fleet\. Retrying in background\. primary=/
-      )
+      ),
+      { event: "quonfig.init.continue" }
     );
     expect(q.get("my.flag", {}, "fallback")).toBe("fallback");
     const details = q.getBoolDetails("my.flag");

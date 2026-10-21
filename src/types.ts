@@ -180,8 +180,8 @@ export type OnNoDefault = "error" | "warn" | "ignore";
 /**
  * What `init()` does when no config has loaded by `initTimeout`:
  *
- * - `"fail"` (default): reject with `QuonfigInitError`. A 401/403 from every
- *   delivery leg rejects at once. The client keeps retrying in the background.
+ * - `"fail"` (default): reject with `QuonfigInitError`. An auth-class answer
+ *   (401/403/404/410) from every delivery leg rejects at once. The client keeps retrying in the background.
  * - `"wait"`: keep blocking and retrying with no upper bound; `init()` resolves
  *   once config loads.
  * - `"continue"`: resolve and start on code defaults; getters return the
@@ -340,6 +340,12 @@ export interface QuonfigOptions {
   /**
    * How long (ms) `init()` waits and retries for the first config before
    * applying `onInitFailure`. Default 10000.
+   *
+   * `0` or less (or `NaN`) means "one attempt, then the policy": `init()`
+   * makes exactly one hedged fetch (bounded by `configFetchHedgeAbortMs`) and,
+   * if it loads nothing, applies `onInitFailure` at once (`"fail"` rejects,
+   * `"continue"` resolves on code defaults, `"wait"` keeps retrying). It never
+   * means "no deadline".
    */
   initTimeout?: number;
   /**

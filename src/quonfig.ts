@@ -29,7 +29,7 @@ import { ConfigStore } from "./store";
 import { Evaluator } from "./evaluator";
 import { Resolver } from "./resolver";
 import { ConfigDependencyResolver } from "./rawMatch";
-import { Transport, defaultApiUrls, type LegResult } from "./transport";
+import { Transport, defaultApiUrls, type LegResult, redactUrlCredentials } from "./transport";
 import { computeReason, ReasonStatic, ReasonTargetingMatch, ReasonSplit } from "./reason";
 import { SSEConnection, type EventSourceFactory } from "./sse";
 import { mergeContexts } from "./context";
@@ -77,6 +77,8 @@ interface LegFailure {
   index: number;
   status?: number;
   error: Error;
+  /** The leg ended on its own deadline (hedge abort), not on an answer. */
+  hung?: boolean;
 }
 
 /**
@@ -96,12 +98,41 @@ function secsShort(ms: number): string {
   return `${Number((ms / 1000).toFixed(3))}s`;
 }
 
-/** The error text for a log line, with the network cause code when there is one. */
+/**
+ * The error text for a log line, with the network cause code when there is
+ * one. URL userinfo is stripped (init-failure design, decision 9).
+ */
 function describeError(err: unknown): string {
-  if (!(err instanceof Error)) return String(err);
+  if (!(err instanceof Error)) return redactUrlCredentials(String(err));
   const cause = (err as { cause?: { code?: unknown; message?: unknown } }).cause;
   const code = cause && typeof cause.code === "string" ? cause.code : undefined;
-  return code && !err.message.includes(code) ? `${err.message} (${code})` : err.message;
+  const msg = redactUrlCredentials(err.message);
+  return code && !msg.includes(code) ? `${msg} (${code})` : msg;
+}
+
+/**
+ * One leg's error for `<errs>`: "timed out" for a leg that ended on its
+ * deadline, "HTTP <status>" for an HTTP answer, else the transport error.
+ * Never an upstream body or URL credentials (decision 9).
+ */
+function legErrorText(l: LegFailure): string {
+  if (l.hung) return "timed out";
+  if (l.status && l.status !== 200 && l.status !== 304) return `HTTP ${l.status}`;
+  return describeError(l.error);
+}
+
+/**
+ * Whether an attempt hung (decision 7): every leg that settled ended on its
+ * deadline. Legs still in flight count as hung, so an attempt with no settled
+ * leg at all hung.
+ */
+function attemptHung(legs: readonly LegFailure[]): boolean {
+  return legs.every((l) => l.hung === true);
+}
+
+/** Structured field for init log lines (design section C). */
+function initEvent(name: string): { event: string } {
+  return { event: `quonfig.init.${name}` };
 }
 
 /**
@@ -375,6 +406,14 @@ export class Quonfig {
   private initRetryActive: boolean = false;
   private initRetryTimer?: ReturnType<typeof setTimeout>;
   private initRetryNextWarnAt?: number;
+  /** The background init-retry loop's last failed cycle (for a joined init()). */
+  private initRetryLastErr?: unknown;
+  /** Settled by the background init-retry loop after each attempt. */
+  private initRetryAttemptWaiters: Array<() => void> = [];
+  /** Start the background loop's next attempt now, if it is backing off. */
+  private initRetryKick?: () => void;
+  /** SSE / poller and the telemetry reporter have been started (once per client). */
+  private backgroundWorkersStarted: boolean = false;
 
   // ---- canonical-ordering + failover observability (qfg-7h5d.1.7) ----
   /** Highest positive Meta.generation installed (0 until a versioned install; never lowered). */
@@ -468,7 +507,10 @@ export class Quonfig {
       ? loadQuonfigUserContext(this.apiUrls, options.logger)
       : undefined;
     this.globalContext = mergeContexts(devContext, options.globalContext);
-    this.initTimeout = options.initTimeout ?? DEFAULT_INIT_TIMEOUT;
+    // initTimeout <= 0 (and NaN) means "one attempt, then onInitFailure"
+    // (decision 8); normalize so every later check is `initTimeout > 0`.
+    const initTimeout = options.initTimeout ?? DEFAULT_INIT_TIMEOUT;
+    this.initTimeout = initTimeout > 0 ? initTimeout : 0;
     const onInitFailure = options.onInitFailure ?? "fail";
     if (!ON_INIT_FAILURE_VALUES.includes(onInitFailure)) {
       throw new Error(
@@ -603,9 +645,14 @@ export class Quonfig {
    * defaults. In every mode the client keeps retrying in the background and
    * heals; see {@link Quonfig.isReady} and {@link Quonfig.waitForReady}.
    *
+   * With `initTimeout <= 0` init() makes exactly one attempt and then applies
+   * `onInitFailure`.
+   *
    * Calling init() again (concurrently or after it succeeded) returns the same
    * promise rather than starting a second fetch, SSE stream and telemetry
-   * reporter. A rejected init() is not remembered, so it can be retried.
+   * reporter. A rejected init() is not remembered, so it can be called again:
+   * that call joins the background retry already running, resolving when it
+   * heals or applying `onInitFailure` again at `initTimeout`.
    */
   init(): Promise<void> {
     if (!this.initPromise) {
@@ -633,20 +680,35 @@ export class Quonfig {
     // The background retry loop (qfg-9p4i.2) may already have healed the
     // client after an earlier rejection; nothing more to start.
     if (this.initialized) return;
+    // A caught failure left the background retry running: join it rather
+    // than starting a second fetch loop beside it (qfg-9p4i.17).
+    if (this.initFailed && this.initRetryActive) return this.joinInitRetry();
     const start = Date.now();
     this.initStartedAt ??= start;
     const mode = this.onInitFailure;
-    const deadline = this.initTimeout > 0 ? start + this.initTimeout : Infinity;
+    // initTimeout <= 0: exactly one attempt, then the policy (decision 8).
+    const bounded = this.initTimeout > 0;
+    const deadline = bounded ? start + this.initTimeout : Infinity;
     this.logger.debug(
-      `[quonfig] init: fetching config (initTimeout=${secsShort(this.initTimeout)}, onInitFailure=${mode})`
+      `[quonfig] init: fetching config (initTimeout=${secsShort(this.initTimeout)}, onInitFailure=${mode})`,
+      initEvent("start")
     );
 
     let attempt = 0;
     let lastErr: unknown;
+    /** The last attempt hung (decision 7), and its `<errs>`. */
+    let lastHung = true;
+    let lastErrs = "";
     let warnedFailure = false;
     let pastDeadline = false;
     let authLogged = false;
     let nextProgressAt = start + INIT_PROGRESS_MS;
+
+    const backoffSleep = async (): Promise<"slept" | "closed"> => {
+      const base = Math.min(INIT_RETRY_MAX_MS, INIT_RETRY_BASE_MS * 2 ** (attempt - 1));
+      const backoff = this.requestWait("init-retry", base / 2 + Math.random() * (base / 2));
+      return this.sleepUntil(Math.min(Date.now() + backoff, pastDeadline ? Infinity : deadline));
+    };
 
     // Attempts are hedged primary+secondary fetches. Between attempts: jittered
     // backoff 0.5s, 1s, 2s, ... capped at 30s (design B.3), cut short by the
@@ -656,7 +718,8 @@ export class Quonfig {
       // starts nothing (completeInit is a no-op once closed).
       if (this.closed) return;
       attempt++;
-      const inFlight = this.fetchAndInstall();
+      const legs: LegFailure[] = [];
+      const inFlight = this.fetchAndInstall(legs);
       const outcome = await this.settleBefore(inFlight, pastDeadline ? Infinity : deadline);
 
       if (outcome.kind === "ok") break;
@@ -664,12 +727,15 @@ export class Quonfig {
 
       if (outcome.kind === "error") {
         lastErr = outcome.error;
+        lastHung = attemptHung(this.legsOf(lastErr) ?? []);
+        lastErrs = this.formatErrs(lastErr);
         if (this.isUnauthorized(lastErr)) {
           const status = this.rejectedStatus(lastErr);
           if (mode !== "wait") {
             const msg = `[quonfig] init FAILED: SDK key rejected (${status}) by ${this.legNames()}. Check the key and environment.`;
             this.logger.error(
-              `${msg} onInitFailure=${mode}: ${mode === "fail" ? "raising now" : "STARTING ON CODE DEFAULTS. Retrying in background"}.`
+              `${msg} onInitFailure=${mode}: ${mode === "fail" ? "raising now" : "STARTING ON CODE DEFAULTS. Retrying in background"}.`,
+              initEvent("unauthorized")
             );
             this.keepRetryingAfterInit(Promise.reject(lastErr), lastErr);
             if (mode === "continue") return;
@@ -678,87 +744,172 @@ export class Quonfig {
           if (!authLogged) {
             authLogged = true;
             this.logger.error(
-              `[quonfig] init: SDK key rejected (${status}) by ${this.legNames()}. Check the key and environment. onInitFailure=wait: still blocking startup and retrying.`
+              `[quonfig] init: SDK key rejected (${status}) by ${this.legNames()}. Check the key and environment. onInitFailure=wait: still blocking startup and retrying.`,
+              initEvent("unauthorized")
             );
           }
         }
         const now = Date.now();
         if (!warnedFailure) {
           warnedFailure = true;
-          if (!pastDeadline) {
+          if (!pastDeadline && bounded) {
             this.logger.warn(
-              `[quonfig] init: config not loaded yet, retrying until initTimeout (${secsShort(this.initTimeout)}). ${this.formatErrs(lastErr)}`
+              `[quonfig] init: config not loaded yet, retrying until initTimeout (${secsShort(this.initTimeout)}). ${lastErrs}`,
+              initEvent("retrying")
             );
           }
         } else if (now >= nextProgressAt) {
           if (pastDeadline) {
             nextProgressAt = now + INIT_WAIT_PROGRESS_MS;
             this.logger.warn(
-              `[quonfig] init: still blocked waiting for config (${Math.floor((now - start) / 1000)}s elapsed, attempt ${attempt}). ${this.formatErrs(lastErr)}`
+              `[quonfig] init: still blocked waiting for config (${Math.floor((now - start) / 1000)}s elapsed, attempt ${attempt}). ${lastErrs}`,
+              initEvent("waiting")
             );
           } else {
             nextProgressAt = now + INIT_PROGRESS_MS;
             this.logger.warn(
-              `[quonfig] init: still waiting for config (${secs1(now - start)} elapsed of ${secsShort(this.initTimeout)}, attempt ${attempt}). ${this.formatErrs(lastErr)}`
+              `[quonfig] init: still waiting for config (${secs1(now - start)} elapsed of ${secsShort(this.initTimeout)}, attempt ${attempt}). ${lastErrs}`,
+              initEvent("waiting")
             );
           }
         }
-        const base = Math.min(INIT_RETRY_MAX_MS, INIT_RETRY_BASE_MS * 2 ** (attempt - 1));
-        const backoff = this.requestWait("init-retry", base / 2 + Math.random() * (base / 2));
-        const slept = await this.sleepUntil(
-          Math.min(Date.now() + backoff, pastDeadline ? Infinity : deadline)
-        );
-        if (slept === "closed") return;
-        if (Date.now() < deadline || pastDeadline) continue;
+        if (bounded || pastDeadline) {
+          if ((await backoffSleep()) === "closed") return;
+          if (Date.now() < deadline || pastDeadline) continue;
+        }
+        // Unbounded (initTimeout <= 0): the one attempt is done; apply the policy.
+      } else {
+        // The deadline fired mid-attempt: that attempt is the last one, and
+        // `<errs>` describe it, not an earlier completed attempt. Decision 7:
+        // timeout when no attempt completed (this is the first), or when this
+        // one hung (no leg has failed fast so far).
+        lastHung = attempt === 1 || attemptHung(legs);
+        lastErrs = this.formatAttempt(legs);
       }
 
       // The deadline passed: either mid-attempt (outcome "timeout") or while
-      // backing off after a failed attempt.
+      // backing off after a failed attempt, or the one unbounded attempt failed.
       const pending = (): Promise<void> =>
         outcome.kind === "timeout" ? inFlight : Promise.reject(lastErr ?? new Error("no response"));
       const elapsed = secs1(Date.now() - start);
-      const errs = this.formatErrs(lastErr);
+      const errs = lastErrs;
       if (mode === "wait") {
         pastDeadline = true;
         nextProgressAt = Date.now() + INIT_WAIT_PROGRESS_MS;
         this.logger.warn(
-          `[quonfig] init: no config after ${elapsed}. onInitFailure=wait: still blocking startup and retrying indefinitely. ${errs}. Use onInitFailure=fail or continue to bound startup.`
+          `[quonfig] init: no config after ${elapsed}. onInitFailure=wait: still blocking startup and retrying indefinitely. ${errs}. Use onInitFailure=fail or continue to bound startup.`,
+          initEvent("wait")
         );
         if (outcome.kind === "timeout") {
           // Let the attempt in flight finish before starting the next one.
           const late = await this.settleBefore(inFlight, Infinity);
           if (late.kind === "ok") break;
           if (late.kind === "error") lastErr = late.error;
+        } else if (!bounded) {
+          if ((await backoffSleep()) === "closed") return;
         }
         continue;
       }
       if (mode === "continue") {
         this.logger.error(
-          `[quonfig] init: no config after ${elapsed}. onInitFailure=continue: STARTING ON CODE DEFAULTS. This instance may disagree with the rest of your fleet. Retrying in background. ${errs}`
+          `[quonfig] init: no config after ${elapsed}. onInitFailure=continue: STARTING ON CODE DEFAULTS. This instance may disagree with the rest of your fleet. Retrying in background. ${errs}`,
+          initEvent("continue")
         );
         this.keepRetryingAfterInit(pending(), lastErr);
         return;
       }
-      const reason: QuonfigInitErrorReason = lastErr === undefined ? "timeout" : "unavailable";
+      const reason: QuonfigInitErrorReason = lastHung ? "timeout" : "unavailable";
       this.logger.error(
-        `[quonfig] init FAILED: no config after ${elapsed}. ${errs}. onInitFailure=fail: raising QuonfigInitError. Options: onInitFailure=wait to keep waiting, onInitFailure=continue to start on code defaults, or raise initTimeout.`
+        `[quonfig] init FAILED: no config after ${elapsed}. ${errs}. onInitFailure=fail: raising QuonfigInitError. Options: onInitFailure=wait to keep waiting, onInitFailure=continue to start on code defaults, or raise initTimeout.`,
+        initEvent("failed")
       );
       this.keepRetryingAfterInit(pending(), lastErr);
-      const head =
-        reason === "timeout"
-          ? `[quonfig] Initialization timed out: no config after ${elapsed}`
-          : `[quonfig] init failed: no config after ${elapsed}`;
-      throw new QuonfigInitError(reason, `${head}. ${errs}`, lastErr);
+      throw this.initError(reason, elapsed, errs, lastErr);
     }
 
     if (warnedFailure || pastDeadline) {
       // WARN, not INFO: the filter level that saw the failure must also see
       // the recovery (design section C).
       this.logger.warn(
-        `[quonfig] init recovered: config loaded after ${secs1(Date.now() - start)}${this.healDetail()}. Now serving live config.`
+        `[quonfig] init recovered: config loaded after ${secs1(Date.now() - start)}${this.healDetail()}. Now serving live config.`,
+        initEvent("recovered")
       );
     }
     this.completeInit();
+  }
+
+  private initError(
+    reason: QuonfigInitErrorReason,
+    elapsed: string,
+    errs: string,
+    cause: unknown
+  ): QuonfigInitError {
+    const head =
+      reason === "timeout"
+        ? `[quonfig] Initialization timed out: no config after ${elapsed}`
+        : `[quonfig] init failed: no config after ${elapsed}`;
+    return new QuonfigInitError(reason, `${head}. ${errs}`, cause);
+  }
+
+  /**
+   * init() called again after a caught failure, while the background retry
+   * loop runs (qfg-9p4i.17, I5). Joins that loop instead of starting a second
+   * one: resolves when it heals, otherwise applies `onInitFailure` once at
+   * `initTimeout` (or after the loop's next attempt when initTimeout <= 0).
+   */
+  private async joinInitRetry(): Promise<void> {
+    const mode = this.onInitFailure;
+    const start = Date.now();
+    this.logger.debug(
+      `[quonfig] init: joining the background retry (initTimeout=${secsShort(this.initTimeout)}, onInitFailure=${mode})`,
+      initEvent("start")
+    );
+    let waiter!: { resolve: () => void; reject: (err: Error) => void };
+    const ready = new Promise<void>((resolve, reject) => {
+      waiter = { resolve, reject };
+      this.readyWaiters.push(waiter);
+    });
+    const attemptDone = Symbol("attempt-done");
+    let gate: Promise<void> = ready;
+    if (mode !== "wait" && this.initTimeout <= 0) {
+      const next = new Promise<void>((resolve) => this.initRetryAttemptWaiters.push(resolve));
+      gate = Promise.race([
+        ready,
+        next.then(() => {
+          if (!this.initialized) throw attemptDone;
+        }),
+      ]);
+    }
+    this.initRetryKick?.();
+    const outcome = await this.settleBefore(
+      gate,
+      mode === "wait" || this.initTimeout <= 0 ? Infinity : start + this.initTimeout
+    );
+    this.readyWaiters = this.readyWaiters.filter((w) => w !== waiter);
+    ready.catch(() => {});
+    if (outcome.kind === "ok" || outcome.kind === "closed" || this.closed || this.initialized) {
+      return;
+    }
+    if (outcome.kind === "error" && outcome.error !== attemptDone) return;
+
+    const elapsed = secs1(Date.now() - start);
+    const lastErr = this.initRetryLastErr;
+    const errs = this.formatErrs(lastErr);
+    if (mode === "continue") {
+      this.logger.error(
+        `[quonfig] init: no config after ${elapsed}. onInitFailure=continue: STARTING ON CODE DEFAULTS. This instance may disagree with the rest of your fleet. Retrying in background. ${errs}`,
+        initEvent("continue")
+      );
+      return;
+    }
+    const legs = this.legsOf(lastErr);
+    const reason: QuonfigInitErrorReason =
+      lastErr === undefined || attemptHung(legs ?? []) ? "timeout" : "unavailable";
+    this.logger.error(
+      `[quonfig] init FAILED: no config after ${elapsed}. ${errs}. onInitFailure=fail: raising QuonfigInitError. Options: onInitFailure=wait to keep waiting, onInitFailure=continue to start on code defaults, or raise initTimeout.`,
+      initEvent("failed")
+    );
+    throw this.initError(reason, elapsed, errs, lastErr);
   }
 
   /**
@@ -771,6 +922,10 @@ export class Quonfig {
     pending.catch(() => {});
     if (this.closed || this.initialized) return;
     this.initFailed = true;
+    // Start the update channel and telemetry now, like a healthy boot would,
+    // so a degraded client still reports telemetry and can heal from SSE or
+    // the poller (qfg-9p4i.17, I6). completeInit does not start them again.
+    this.startBackgroundWorkers();
     this.startInitRetry(pending, lastErr);
   }
 
@@ -819,16 +974,29 @@ export class Quonfig {
     return r.kind === "closed" ? "closed" : "slept";
   }
 
-  /** Every fired leg of the cycle behind `err` answered 401/403 (design B.3). */
-  private isUnauthorized(err: unknown): boolean {
-    const legs = err && typeof err === "object" ? cycleLegFailures.get(err) : undefined;
-    if (!legs || legs.length === 0) return false;
-    return legs.every((l) => l.status === 401 || l.status === 403);
+  /** The failed legs of the cycle behind `err`, when it was a fetch cycle. */
+  private legsOf(err: unknown): LegFailure[] | undefined {
+    return err && typeof err === "object" ? cycleLegFailures.get(err) : undefined;
   }
 
+  /**
+   * Every fired leg (primary and, when configured, secondary) answered
+   * auth-class (401/403/404/410, decision 6) in the cycle behind `err`. Never
+   * decided from the primary alone.
+   */
+  private isUnauthorized(err: unknown): boolean {
+    const legs = this.legsOf(err);
+    // The hedge fires at most primary + secondary, so with more apiUrls those
+    // two are every leg that can answer.
+    const required = Math.min(2, this.transport.legCount());
+    if (!legs || new Set(legs.map((l) => l.index)).size < required) return false;
+    return legs.every((l) => isAuthClassStatus(l.status));
+  }
+
+  /** The primary's auth-class status (else the first leg's) for the log line. */
   private rejectedStatus(err: unknown): number {
-    const legs = err && typeof err === "object" ? cycleLegFailures.get(err) : undefined;
-    return legs?.[0]?.status ?? 401;
+    const legs = this.legsOf(err) ?? [];
+    return (legs.find((l) => l.index === 0) ?? legs[0])?.status ?? 401;
   }
 
   /** "primary and secondary", or "primary" with one configured leg. */
@@ -838,15 +1006,16 @@ export class Quonfig {
 
   /**
    * `<errs>` from the logging contract: `primary=<host>: <error>; secondary=<host>: <error>`.
-   * Hosts only; never the SDK key or URL credentials.
+   * Hosts and `HTTP <status>` only; never the SDK key, URL credentials or an
+   * upstream response body (decision 9).
    */
   private formatErrs(err: unknown): string {
     const name = (i: number): string => (i === 0 ? "primary" : "secondary");
-    const legs = err && typeof err === "object" ? cycleLegFailures.get(err) : undefined;
+    const legs = this.legsOf(err);
     if (legs && legs.length > 0) {
       return [...legs]
         .sort((a, b) => a.index - b.index)
-        .map((l) => `${name(l.index)}=${this.transport.hostAt(l.index)}: ${describeError(l.error)}`)
+        .map((l) => `${name(l.index)}=${this.transport.hostAt(l.index)}: ${legErrorText(l)}`)
         .join("; ");
     }
     const n = Math.min(2, this.transport.legCount());
@@ -856,9 +1025,26 @@ export class Quonfig {
     return parts.join("; ");
   }
 
+  /**
+   * `<errs>` for an attempt still in flight at the deadline: the legs that
+   * failed so far, and "timed out" for every leg that had not answered.
+   */
+  private formatAttempt(failed: readonly LegFailure[]): string {
+    const n = Math.min(2, this.transport.legCount());
+    const parts: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const l = failed.find((f) => f.index === i);
+      const name = i === 0 ? "primary" : "secondary";
+      parts.push(`${name}=${this.transport.hostAt(i)}: ${l ? legErrorText(l) : "timed out"}`);
+    }
+    return parts.join("; ");
+  }
+
   /** " via secondary (version v)" for the heal line. */
   private healDetail(): string {
-    const via = this.resolvedFromIndex === 0 ? "primary" : "secondary";
+    // -1 (no HTTP leg recorded, e.g. healed by SSE, which is pinned to the
+    // primary stream) reads as primary.
+    const via = this.resolvedFromIndex > 0 ? "secondary" : "primary";
     const v = this.store.getVersion();
     return ` via ${via}${v ? ` (version ${v})` : ""}`;
   }
@@ -934,6 +1120,18 @@ export class Quonfig {
     this.initialized = true;
     this.stopInitRetry();
     this.settleReadyWaiters();
+    this.startBackgroundWorkers();
+  }
+
+  /**
+   * Start the update channel (SSE, or the poller when SSE is off) and the
+   * telemetry reporter. Once per client: at a healthy init, or at the init
+   * decision point of a degraded client (fail caught, or continue), whose heal
+   * then starts nothing new (qfg-9p4i.17, I6).
+   */
+  private startBackgroundWorkers(): void {
+    if (this.closed || this.backgroundWorkersStarted) return;
+    this.backgroundWorkersStarted = true;
 
     // Boot log: announce the chosen update mode so deployers can see the new
     // SSE-with-fallback behavior at startup. Per qfg-47c2.7 acceptance.
@@ -965,20 +1163,47 @@ export class Quonfig {
     this.initRetryNextWarnAt = Date.now() + INIT_RETRY_WARN_FIRST_MS;
     let attempt = 0;
     let lastErr: unknown = firstErr;
+    this.initRetryLastErr = firstErr;
+
+    const attemptSettled = (): void => {
+      const waiters = this.initRetryAttemptWaiters;
+      this.initRetryAttemptWaiters = [];
+      for (const w of waiters) w();
+    };
 
     const onSettled = (p: Promise<void>): void => {
       p.then(
         () => {
           if (!this.initRetryActive) return;
           this.healFromInitRetry();
+          attemptSettled();
         },
         (err) => {
           if (!this.initRetryActive || this.closed || this.initialized) return;
           lastErr = err;
+          this.initRetryLastErr = err;
           this.maybeWarnInitRetry(lastErr);
+          attemptSettled();
           schedule();
         }
       );
+    };
+
+    const runNow = (): void => {
+      this.initRetryTimer = undefined;
+      if (!this.initRetryActive || this.closed || this.initialized) return;
+      onSettled(this.fetchAndInstall());
+    };
+    // A joined init() (I5) wants an attempt now rather than after the
+    // backoff: run it at once, or right after the attempt in flight settles.
+    let kicked = false;
+    this.initRetryKick = () => {
+      if (!this.initRetryTimer) {
+        kicked = true;
+        return;
+      }
+      clearTimeout(this.initRetryTimer);
+      runNow();
     };
 
     const schedule = (): void => {
@@ -987,14 +1212,11 @@ export class Quonfig {
       // Uniform in [base/2, base], mirroring the SSE reconnect jitter.
       let wait = base / 2 + Math.random() * (base / 2);
       if (lastErr instanceof AuthRejectedError) wait = this.authProbeWaitMs();
-      this.initRetryTimer = setTimeout(
-        () => {
-          this.initRetryTimer = undefined;
-          if (!this.initRetryActive || this.closed || this.initialized) return;
-          onSettled(this.fetchAndInstall());
-        },
-        this.requestWait("init-retry", wait)
-      );
+      if (kicked) {
+        kicked = false;
+        wait = 0;
+      }
+      this.initRetryTimer = setTimeout(runNow, this.requestWait("init-retry", wait));
       const t = this.initRetryTimer as any;
       if (t && typeof t === "object" && "unref" in t) t.unref();
     };
@@ -1004,6 +1226,7 @@ export class Quonfig {
 
   private stopInitRetry(): void {
     this.initRetryActive = false;
+    this.initRetryKick = undefined;
     if (this.initRetryTimer) {
       clearTimeout(this.initRetryTimer);
       this.initRetryTimer = undefined;
@@ -1019,7 +1242,8 @@ export class Quonfig {
     // WARN, not INFO: the filter level that saw the failure must also see the
     // recovery (design section C).
     this.logger.warn(
-      `[quonfig] init recovered: config loaded after ${elapsed}${this.healDetail()}. Now serving live config.`
+      `[quonfig] init recovered: config loaded after ${elapsed}${this.healDetail()}. Now serving live config.`,
+      initEvent("recovered")
     );
     this.completeInit();
   }
@@ -1036,7 +1260,8 @@ export class Quonfig {
         : INIT_RETRY_WARN_SLOW_MS);
     const secs = Math.floor(sinceStart / 1000);
     this.logger.warn(
-      `[quonfig] still not connected to Quonfig delivery (${Math.floor(secs / 60)}m${secs % 60}s since start); serving defaults. ${this.formatErrs(err)}`
+      `[quonfig] still not connected to Quonfig delivery (${Math.floor(secs / 60)}m${secs % 60}s since start); serving defaults. ${this.formatErrs(err)}`,
+      initEvent("not_connected")
     );
   }
 
@@ -1943,6 +2168,14 @@ export class Quonfig {
     this.configInstalls++;
     this.lastSuccessfulRefreshAt = new Date();
     this.invokeOnConfigUpdate();
+    // A degraded client (caught fail, or continue) runs SSE and the poller
+    // (I6): config from either heals it, not only the init-retry loop. After
+    // this synchronous install step, so the installing leg is recorded first.
+    if (this.initFailed && !this.initialized && !this.closed) {
+      queueMicrotask(() => {
+        if (this.initFailed && !this.initialized) this.healFromInitRetry();
+      });
+    }
   }
 
   /**
@@ -2113,7 +2346,7 @@ export class Quonfig {
    * heals forward after. If every fired leg fails, rejects with the last error so
    * init applies its failure semantics; an all-304 cycle is a no-op success.
    */
-  private async fetchAndInstall(): Promise<void> {
+  private async fetchAndInstall(failedLegs?: LegFailure[]): Promise<void> {
     let installedOnce = false;
     let fired = 0;
     let failures = 0;
@@ -2136,7 +2369,14 @@ export class Quonfig {
       if (leg.error) {
         failures++;
         lastError = leg.error;
-        legFailures.push({ index: leg.sourceIndex, status: leg.status, error: leg.error });
+        const f: LegFailure = {
+          index: leg.sourceIndex,
+          status: leg.status,
+          error: leg.error,
+          hung: leg.hung === true,
+        };
+        legFailures.push(f);
+        failedLegs?.push(f);
         return;
       }
       try {
@@ -2149,7 +2389,9 @@ export class Quonfig {
         // and updateIfStalerThan — for the life of the process (qfg-4k7d).
         failures++;
         lastError = err instanceof Error ? err : new Error(String(err));
-        legFailures.push({ index: leg.sourceIndex, status: leg.status, error: lastError });
+        const f: LegFailure = { index: leg.sourceIndex, status: leg.status, error: lastError };
+        legFailures.push(f);
+        failedLegs?.push(f);
         this.logger.warn("[quonfig] failed to install config payload:", err);
       }
     };

@@ -32,14 +32,31 @@ function prefix(message: string): string {
   return `${PREFIX} ${message}`;
 }
 
+/**
+ * Drop a trailing `{ event: "quonfig.init.<name>" }` structured field: it is
+ * for structured host loggers, and console output stays the plain line.
+ */
+function consoleArgs(args: unknown[]): unknown[] {
+  const last = args[args.length - 1];
+  if (
+    last !== null &&
+    typeof last === "object" &&
+    Object.keys(last).length === 1 &&
+    typeof (last as { event?: unknown }).event === "string"
+  ) {
+    return args.slice(0, -1);
+  }
+  return args;
+}
+
 function defaultSdkLogger(): NormalizedLogger {
   return {
     // Debug is silent by default: telemetry logs every failed POST at debug
     // (P7), which must not reach stdout unless the host supplies a logger.
     debug: NOOP,
-    info: (message, ...args) => console.info(prefix(message), ...args),
-    warn: (message, ...args) => console.warn(prefix(message), ...args),
-    error: (message, ...args) => console.error(prefix(message), ...args),
+    info: (message, ...args) => console.info(prefix(message), ...consoleArgs(args)),
+    warn: (message, ...args) => console.warn(prefix(message), ...consoleArgs(args)),
+    error: (message, ...args) => console.error(prefix(message), ...consoleArgs(args)),
   };
 }
 

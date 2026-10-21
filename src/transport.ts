@@ -33,6 +33,45 @@ export interface LegResult {
    * response's ETag can't turn later polls into 304s (qfg-9dxb.9).
    */
   rollbackEtag?: () => void;
+  /**
+   * True when the leg ended on its own deadline (the per-leg hedge abort or
+   * fetch timeout) rather than on an answer or a fast error. The init path
+   * reports an attempt whose every leg hung as a timeout (qfg-9p4i.17).
+   */
+  hung?: boolean;
+}
+
+/**
+ * Strip URL userinfo (`scheme://user:pass@host` -> `scheme://host`) from text
+ * that may reach a log line or an error message (init-failure design,
+ * decision 9). Hosts stay; credentials never do.
+ */
+export function redactUrlCredentials(text: string): string {
+  return text.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s@]*@/gi, "$1");
+}
+
+/**
+ * A copy of `err` whose message (and its cause's) carries no URL userinfo.
+ * Returns `err` itself when there was nothing to redact.
+ */
+function redactError(err: Error): Error {
+  const cause = (err as { cause?: unknown }).cause;
+  const causeMsg = cause instanceof Error ? cause.message : undefined;
+  const clean = redactUrlCredentials(err.message);
+  const cleanCause = causeMsg === undefined ? undefined : redactUrlCredentials(causeMsg);
+  if (clean === err.message && cleanCause === causeMsg) return err;
+  const out = new Error(clean);
+  out.name = err.name;
+  if (cause instanceof Error) {
+    const c = new Error(cleanCause);
+    c.name = cause.name;
+    const code = (cause as { code?: unknown }).code;
+    if (code !== undefined) (c as { code?: unknown }).code = code;
+    (out as { cause?: unknown }).cause = c;
+  }
+  const code = (err as { code?: unknown }).code;
+  if (code !== undefined) (out as { code?: unknown }).code = code;
+  return out;
 }
 
 const DEFAULT_DOMAIN = "quonfig.com";
@@ -272,6 +311,11 @@ export class Transport {
   private async fetchFromUrlAt(i: number, abortMs: number): Promise<LegResult> {
     const baseUrl = this.baseUrls[i];
     let status = 0;
+    // Bound this single leg so a hung upstream (accepts the connection but
+    // never responds) aborts after abortMs instead of running forever. The
+    // signal stays active through the body read, so a slow body is bounded
+    // too. The abort surfaces as a rejected fetch, caught below.
+    const signal = AbortSignal.timeout(abortMs);
     try {
       const headers = this.getHeaders();
       // Per-leg ETag: read only this leg's slot so a 304 from the other leg can
@@ -293,11 +337,7 @@ export class Transport {
       const fetchInit: RequestInit & { cache?: string } = {
         method: "GET",
         headers,
-        // Bound this single leg so a hung upstream (accepts the connection but
-        // never responds) aborts after abortMs instead of running forever. The
-        // signal stays active through the body read, so a slow body is bounded
-        // too. The abort surfaces as a rejected fetch, caught below.
-        signal: AbortSignal.timeout(abortMs),
+        signal,
       };
       if (isDev) {
         fetchInit.cache = "no-store";
@@ -310,8 +350,13 @@ export class Transport {
       }
 
       if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        throw new Error(`Unexpected status ${response.status} from ${baseUrl}: ${body}`);
+        // The body is drained, not reported: an upstream error page can be
+        // large and can echo anything, so it never reaches a log line or an
+        // error message (init-failure design, decision 9).
+        await response.text().catch(() => "");
+        throw new Error(
+          `Unexpected status ${response.status} from ${redactUrlCredentials(baseUrl)}`
+        );
       }
 
       // Decode AND validate before touching the ETag slot: a non-envelope 200
@@ -332,7 +377,10 @@ export class Transport {
 
       return { result: { envelope, notChanged: false }, sourceIndex: i, status, rollbackEtag };
     } catch (err) {
-      return { error: err instanceof Error ? err : new Error(String(err)), sourceIndex: i, status };
+      const error = redactError(err instanceof Error ? err : new Error(String(err)));
+      const out: LegResult = { error, sourceIndex: i, status };
+      if (signal.aborted) out.hung = true;
+      return out;
     }
   }
 
@@ -350,7 +398,7 @@ export class Transport {
     try {
       return new URL(raw).host;
     } catch {
-      return raw;
+      return redactUrlCredentials(raw);
     }
   }
 
