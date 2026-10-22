@@ -54,10 +54,12 @@ function deriveDomainFromApiUrls(apiUrls?: string[]): string {
  * `quonfig-user.email` are dead code in prod.
  */
 export function loadQuonfigUserContext(apiUrls?: string[], logger?: Logger): Contexts | undefined {
-  const path = join(os.homedir(), ".quonfig", tokenFilenameForApiUrls(apiUrls));
-
+  let path: string;
   let raw: string;
   try {
+    // os.homedir() throws when HOME is unset and the uid has no passwd
+    // entry (some containers); treat that as "no dev context" (qfg-za5s).
+    path = join(os.homedir(), ".quonfig", tokenFilenameForApiUrls(apiUrls));
     raw = readFileSync(path, "utf8");
   } catch {
     return undefined;

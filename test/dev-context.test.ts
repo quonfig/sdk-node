@@ -184,6 +184,23 @@ describe("Quonfig dev-context injection", () => {
     warnSpy.mockRestore();
   });
 
+  // qfg-za5s: os.homedir() throws a SystemError when HOME is unset and the
+  // uid has no passwd entry (some containers). Treat it as "no dev context".
+  it("no-op when os.homedir() throws", async () => {
+    homedirMock = () => {
+      throw new Error("ENOENT: no such file or directory, uv_os_homedir");
+    };
+
+    const q = new Quonfig({
+      sdkKey: "test",
+      datafile: emptyEnvelope(),
+      enableQuonfigUserContext: true,
+    });
+    await q.init();
+
+    expect(readGlobalContext(q)).toEqual({});
+  });
+
   it("customer-supplied quonfig-user keys win on collision", async () => {
     writeFileSync(
       join(tmpHome, ".quonfig", "tokens.json"),
