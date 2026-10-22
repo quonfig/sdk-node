@@ -59,12 +59,13 @@ jobs:
         with:
           repository: quonfig/integration-test-data
           path: integration-test-data
-          # Bumped with the chaos harness (after_ms + strict expectation keys,
-          # qfg-goi1.10.33), so it can run ahead of test.yaml's pin. The
-          # corpus carries the hedge ordering scenarios: o01 (fast primary
-          # wins, secondary never contacted), o03 (heal forward), and o05
-          # (slow older primary loses to a fast newer secondary). (qfg-7h5d.1.14)
-          ref: v2026.10.16.2
+          # Must equal the pin in test.yaml and chaos.yaml: test.yaml runs
+          # scripts/check-itd-refs.sh, which fails when they differ
+          # (qfg-6vno.7). The corpus carries the hedge ordering scenarios:
+          # o01 (fast primary wins, secondary never contacted), o03 (heal
+          # forward), and o05 (slow older primary loses to a fast newer
+          # secondary). (qfg-7h5d.1.14)
+          ref: v2026.10.21.1
 
       - name: Checkout api-delivery
         # api-delivery is private; the default GITHUB_TOKEN cannot read it. A PAT

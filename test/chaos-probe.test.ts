@@ -8,7 +8,13 @@ import { ChaosProbe } from "../chaos/probe";
 describe("ChaosProbe.lastRefresh", () => {
   it("tracks client.lastSuccessfulRefresh() across a 304-only refresh", () => {
     let stamp: Date | undefined;
-    const client = { lastSuccessfulRefresh: () => stamp };
+    const client = {
+      lastSuccessfulRefresh: () => stamp,
+      connectionState: () => "connected" as const,
+      fallbackPollerActive: () => false,
+      supervisorCounters: () => ({ sseConnectAttempts: 0, workerRestartsLayer1: 0 }),
+      isReady: () => true,
+    };
     const probe = new ChaosProbe(client);
     expect(probe.lastRefresh).toBe(0);
 

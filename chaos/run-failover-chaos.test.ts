@@ -42,7 +42,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as yaml from "js-yaml";
 
 import { Quonfig } from "../src/quonfig";
-import type { SSEConnectionState } from "../src/types";
 import {
   isTerminal,
   loadExpectations,
@@ -123,7 +122,7 @@ class Toxiproxy {
   }
   async clearToxics(proxy: string): Promise<void> {
     const res = await fetch(`${this.base}/proxies/${proxy}/toxics`);
-    if (!res.ok) return;
+    if (!res.ok) throw new Error(`clearToxics ${proxy}: ${res.status} ${await res.text()}`);
     const list = (await res.json()) as Array<{ name: string }>;
     for (const t of list) {
       await fetch(`${this.base}/proxies/${proxy}/toxics/${t.name}`, { method: "DELETE" }).catch(
@@ -154,9 +153,8 @@ class Toxiproxy {
     if (!res.ok) throw new Error(`addToxic ${proxy}/${name}: ${res.status} ${await res.text()}`);
   }
   async removeToxic(proxy: string, name: string): Promise<void> {
-    await fetch(`${this.base}/proxies/${proxy}/toxics/${name}`, { method: "DELETE" }).catch(
-      () => {}
-    );
+    const res = await fetch(`${this.base}/proxies/${proxy}/toxics/${name}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`removeToxic ${proxy}/${name}: ${res.status} ${await res.text()}`);
   }
 }
 
@@ -168,13 +166,18 @@ class Toxiproxy {
  */
 class RigProbe {
   private client?: Quonfig;
-  sseStates: SSEConnectionState[] = [];
+  /** SDK log lines, as the client's logger received them. */
+  logs: { level: string; msg: string }[] = [];
 
   setClient(c: Quonfig): void {
     this.client = c;
   }
-  onSSEState(s: SSEConnectionState): void {
-    this.sseStates.push(s);
+  log(level: string, msg: string): void {
+    this.logs.push({ level, msg });
+  }
+  /** SDK log lines at exactly `level` that match `re` (ITD chaos README). */
+  logMatches(level: string, re: RegExp): number {
+    return this.logs.filter((l) => l.level === level && re.test(l.msg)).length;
   }
   ready(): boolean {
     return this.client?.ready() ?? false;
@@ -200,6 +203,8 @@ const RE_RESOLVED_FROM = /^client\.resolvedFrom\(\)\s*(==|!=)\s*'([^']+)'$/;
 const RE_HELD_GEN = /^client\.heldGeneration\(\)\s*(>=|<=|==|!=|<|>)\s*(-?\d+)$/;
 const RE_INSTALL_COUNT = /^client\.configInstallCount\(\)\s*(>=|<=|==|!=|<|>)\s*(-?\d+)$/;
 const RE_SSE_FAILOVER = /^client\.sseFailedOverToSecondary\(\)\s*==\s*(true|false)$/;
+const RE_SDK_LOG =
+  /^client\.sdkLog\(\s*'([^']+)'\s*,\s*\/(.+)\/([a-z]*)\s*\)\s*(>=|<=|==|!=|<|>)\s*(\d+)$/;
 
 function compareNum(op: string, a: number, b: number): boolean {
   switch (op) {
@@ -253,6 +258,14 @@ function evalLeaf(expr: string, probe: RigProbe): { ok: boolean; why: string } {
     const want = m[1] === "true";
     const got = probe.sseFailedOverToSecondary();
     return { ok: got === want, why: `sseFailedOverToSecondary=${got} want ${want}` };
+  }
+  if ((m = RE_SDK_LOG.exec(expr))) {
+    const [, level, pattern, flags, op, wantStr] = m;
+    const got = probe.logMatches(level, new RegExp(pattern, flags));
+    return {
+      ok: compareNum(op, got, Number(wantStr)),
+      why: `sdkLog(${level},/${pattern}/${flags})=${got} ${op} ${wantStr}`,
+    };
   }
   return { ok: false, why: `unrecognized expression: ${expr}` };
 }
@@ -419,11 +432,21 @@ async function reconfigureProxies(
  * Map a failover-rig inject alias to a self-restoring toxiproxy action on the
  * primary HTTP leg (or the SSE leg). Each alias carries its own duration in ms,
  * after which a timer clears the fault — so the scenarios need no `clear` event.
+ *
+ * An unknown shape throws, and a failed apply or restore lands in `errors`:
+ * either fails the scenario, since a fault that never happened would let it
+ * pass on a healthy client (qfg-6vno.2).
  */
-async function applyInject(tp: Toxiproxy, inj: RigInject): Promise<void> {
+async function applyInject(tp: Toxiproxy, inj: RigInject, errors: string[]): Promise<void> {
   const name = inj.name || "primary_fault";
   const restoreAfter = (ms: number, fn: () => Promise<void>): void => {
-    setTimeout(() => void fn().catch(() => {}), ms).unref();
+    setTimeout(
+      () =>
+        void fn().catch((err) =>
+          errors.push(`restore ${JSON.stringify(inj)} failed: ${(err as Error).message}`)
+        ),
+      ms
+    ).unref();
   };
   if (inj.primary_refused_ms !== undefined) {
     await tp.setEnabled("http", false);
@@ -438,7 +461,7 @@ async function applyInject(tp: Toxiproxy, inj: RigInject): Promise<void> {
     await tp.setEnabled("sse", false);
     restoreAfter(inj.sse_down_ms, () => tp.setEnabled("sse", true));
   } else {
-    console.log(`applyInject: unhandled inject shape ${JSON.stringify(inj)} — no-op`);
+    throw new Error(`unknown inject shape ${JSON.stringify(inj)}`);
   }
 }
 
@@ -462,7 +485,7 @@ async function runRigScenario(
   run: RigRun,
   expectations: ChaosExpectation[],
   driveRefresh: boolean
-): Promise<{ pass: number; fail: number; details: string[] }> {
+): Promise<{ pass: number; fail: number; details: string[]; chaosErrors: string[] }> {
   // Clean proxy state — no leftover toxics, all legs enabled.
   for (const p of ["http", "secondary", "sse"]) {
     await tp.clearToxics(p);
@@ -488,7 +511,12 @@ async function runRigScenario(
     onNoDefault: "ignore",
     initTimeout: RIG_INIT_TIMEOUT_MS,
     sseReadDeadlineMs: 5000,
-    onSSEConnectionStateChange: (s: SSEConnectionState) => probe.onSSEState(s),
+    logger: {
+      debug: (m: string, ...a: unknown[]) => probe.log("debug", [m, ...a].join(" ")),
+      info: (m: string, ...a: unknown[]) => probe.log("info", [m, ...a].join(" ")),
+      warn: (m: string, ...a: unknown[]) => probe.log("warn", [m, ...a].join(" ")),
+      error: (m: string, ...a: unknown[]) => probe.log("error", [m, ...a].join(" ")),
+    },
   });
   if (sseEnabled) {
     (
@@ -505,22 +533,26 @@ async function runRigScenario(
   // rest on timers. This makes the failover suite deterministic: a t=0 primary
   // fault (refused/hang/slow) is in place when the initial fetch runs, so the
   // SDK must fail it over to the secondary rather than racing a healthy primary.
+  const chaosErrors: string[] = [];
+  const fire = async (ev: RigEvent): Promise<void> => {
+    const at = ev.at_ms ?? 0;
+    try {
+      if (!ev.inject) throw new Error(`unknown chaos event ${JSON.stringify(ev)}`);
+      await applyInject(tp, ev.inject, chaosErrors);
+      console.log(`[${at}ms] inject ${JSON.stringify(ev.inject)}`);
+    } catch (err) {
+      const msg = `[${at}ms] chaos event failed: ${(err as Error).message}`;
+      console.log(msg);
+      chaosErrors.push(msg);
+    }
+  };
   const deferred: RigEvent[] = [];
   for (const ev of run.chaos ?? []) {
-    if (!ev.inject) continue;
-    if ((ev.at_ms ?? 0) <= 0) {
-      await applyInject(tp, ev.inject);
-      console.log(`[0ms] inject ${JSON.stringify(ev.inject)}`);
-    } else {
-      deferred.push(ev);
-    }
+    if ((ev.at_ms ?? 0) <= 0) await fire(ev);
+    else deferred.push(ev);
   }
   for (const ev of deferred) {
-    const at = ev.at_ms ?? 0;
-    setTimeout(() => {
-      void applyInject(tp, ev.inject!).catch(() => {});
-      console.log(`[${at}ms] inject ${JSON.stringify(ev.inject)}`);
-    }, at).unref();
+    setTimeout(() => void fire(ev), ev.at_ms ?? 0).unref();
   }
 
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -574,10 +606,11 @@ async function runRigScenario(
       );
     }
   }
+  for (const e of chaosErrors) details.push(`FAIL  chaos: ${e}`);
   details.push(
-    `summary: ${pass} passed, ${fail} failed (ready=${probe.ready()}, resolvedFrom='${probe.resolvedFrom()}', heldGeneration=${probe.heldGeneration()}, installs=${probe.configInstallCount()}, sseFailedOverToSecondary=${probe.sseFailedOverToSecondary()})`
+    `summary: ${pass} passed, ${fail} failed, ${chaosErrors.length} chaos event error(s) (ready=${probe.ready()}, resolvedFrom='${probe.resolvedFrom()}', heldGeneration=${probe.heldGeneration()}, installs=${probe.configInstallCount()}, sseFailedOverToSecondary=${probe.sseFailedOverToSecondary()})`
   );
-  return { pass, fail, details };
+  return { pass, fail, details, chaosErrors };
 }
 
 function upstreamGenerations(ups: RigUpstream[] | undefined): {
@@ -642,6 +675,7 @@ describe("failover + ordering chaos (qfg-7h5d.1.7)", { timeout: 30 * 60 * 1000 }
             const result = await runRigScenario(tp, run, expectations, false);
             for (const line of result.details) console.log(line);
             killSpawned();
+            expect(result.chaosErrors, "chaos event(s) failed or were not understood").toEqual([]);
             expect(result.fail, `${result.fail} expectation(s) failed`).toBe(0);
           });
         }
@@ -671,6 +705,7 @@ describe("failover + ordering chaos (qfg-7h5d.1.7)", { timeout: 30 * 60 * 1000 }
             const result = await runRigScenario(tp, run, expectations, true);
             for (const line of result.details) console.log(line);
             killSpawned();
+            expect(result.chaosErrors, "chaos event(s) failed or were not understood").toEqual([]);
             expect(result.fail, `${result.fail} expectation(s) failed`).toBe(0);
           });
         }

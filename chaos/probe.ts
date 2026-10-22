@@ -1,34 +1,65 @@
 /**
  * The sdk-node chaos runner's SDK probe (`run-chaos.test.ts`): the state the
  * expectation expressions in `expressions.ts` read. Kept out of the runner so
- * it is unit-tested in `test/chaos-probe.test.ts`.
+ * it is unit-tested in `test/chaos-probe.test.ts` and
+ * `test/chaos-sdk-hooks.test.ts`.
+ *
+ * Every value an expression asserts on comes from the SDK itself (qfg-6vno.2):
+ * `connectionState()`, `fallbackPollerActive()`, `lastSuccessfulRefresh()`,
+ * `isReady()` and the internal `supervisorCounters()` hook. The probe keeps no
+ * state machine of its own, so it cannot report a state the supervisor
+ * contract forbids (such as `reconnecting`). The only runner-side facts are
+ * the ones only the runner can observe: whether init() raised
+ * (`processCrashed`, `initState`), the SDK's log lines, and how many
+ * onConfigUpdate callbacks fired after the init call returned.
  */
 
-import type { SSEConnectionState } from "../src/types";
-import type { ExpressionProbe } from "./expressions";
+import type { SupervisorCounters } from "../src/sse";
+import type { ConnectionState } from "../src/types";
+import type { ExpressionProbe, MetricReading } from "./expressions";
 
 /** The slice of the Quonfig client the probe reads. */
-export interface RefreshSource {
+export interface ProbeClient {
   lastSuccessfulRefresh(): Date | undefined;
+  connectionState(): ConnectionState;
+  fallbackPollerActive(): boolean;
+  supervisorCounters(): SupervisorCounters;
+  isReady(): boolean;
 }
 
+/**
+ * Why `worker_restart_total{layer="2"}` is SKIPPED (Decision 6: unimplemented
+ * = SKIPPED with a reason): sdk-node's fallback poller is a timer chain, not a
+ * supervised worker, so the SDK has no layer-2 restart to count.
+ */
+export const LAYER2_SKIP_REASON =
+  "sdk-node counts no layer-2 restarts: the fallback poller is a timer chain, not a " +
+  "supervised worker, so the SDK has no layer-2 restart counter (Decision 6)";
+
 export class ChaosProbe implements ExpressionProbe {
-  // Same vocabulary as sdk-go's chaosProbe; values that the SDK does not yet
-  // expose stay at sentinel defaults.
-  connState: "initializing" | "connected" | "reconnecting" | "falling_back" | "disconnected" =
-    "initializing";
-  connAttempts = 0;
-  restartLayer1 = 0;
-  restartLayer2 = 0;
-  fallbackActive = false;
   processCrashed = false;
   logs: string[] = [];
+  /** Init-failure scenarios: 'pending' | 'returned' | 'raised' (README). */
+  initState: "pending" | "returned" | "raised" | "" = "";
+  /** onConfigUpdate callbacks after the init call returned or raised. */
+  readyEvents = 0;
+  /** Init-failure scenarios: the SDK's string getter with a caller default. */
+  getString?: (key: string, dflt: string) => string;
 
-  constructor(private client?: RefreshSource) {}
+  constructor(private client?: ProbeClient) {}
 
   /** Attach the client once constructed (its options close over this probe). */
-  attach(client: RefreshSource): void {
+  attach(client: ProbeClient): void {
     this.client = client;
+  }
+
+  /** client.connectionState(), verbatim. */
+  get connState(): string {
+    return this.client?.connectionState() ?? "initializing";
+  }
+
+  get fallbackActive(): boolean {
+    return this.client?.fallbackPollerActive() ?? false;
   }
 
   /**
@@ -41,57 +72,35 @@ export class ChaosProbe implements ExpressionProbe {
     return this.client?.lastSuccessfulRefresh()?.getTime() ?? 0;
   }
 
-  onSSEState(state: SSEConnectionState): void {
-    if (state === "connected") {
-      if (this.connState === "connected" || this.connState === "reconnecting") {
-        // already connected once; reconnect counts as a restart
-      }
-      this.connState = "connected";
-      this.connAttempts++;
-    } else if (state === "error" || state === "connecting") {
-      if (this.connState === "connected") {
-        // connected → error edge counts as a Layer 1 worker restart.
-        this.restartLayer1++;
-      }
-      this.connState = "reconnecting";
-    } else if (state === "disconnected") {
-      this.connState = "disconnected";
-    }
+  ready(): boolean {
+    return this.client?.isReady() ?? false;
   }
-  setFallbackActive(active: boolean): void {
-    this.fallbackActive = active;
-    if (active) {
-      this.connState = "falling_back";
-    }
-  }
+
   log(level: string, msg: string): void {
     this.logs.push(`level=${level.toLowerCase()} ${msg}`);
-    // Map "onConfigUpdate callback threw" to a Layer 1 restart so chaos
-    // scenario 10 (callback throw) sees worker_restart_total increment per
-    // panic. The supervisor-test-contract notes the increment is optional, but
-    // the chaos scenario requires it. The SDK's invokeOnConfigUpdate emits
-    // `[quonfig] onConfigUpdate callback threw:` on each catch.
-    if (/onConfigUpdate callback threw/i.test(msg)) {
-      this.restartLayer1++;
-    }
   }
+
   // known is false for a metric name the probe does not implement, so the
-  // evaluator fails the expectation instead of reading a silent 0.
-  sdkMetric(name: string, labels: Record<string, string>): { value: number; known: boolean } {
+  // evaluator fails the expectation instead of reading a silent 0. A metric the
+  // SDK does not have is SKIPPED with a reason.
+  sdkMetric(name: string, labels: Record<string, string>): MetricReading {
+    const counters = this.client?.supervisorCounters();
     if (name === "quonfig_sdk_worker_restart_total") {
-      if (labels.layer === "1") return { value: this.restartLayer1, known: true };
-      if (labels.layer === "2") return { value: this.restartLayer2, known: true };
-      return { value: this.restartLayer1 + this.restartLayer2, known: true };
+      if (labels.layer === "1") {
+        return { value: counters?.workerRestartsLayer1 ?? 0, known: true };
+      }
+      return { value: 0, known: true, skip: LAYER2_SKIP_REASON };
     }
     if (name === "quonfig_sse_connect_attempts_total") {
-      return { value: this.connAttempts, known: true };
+      return { value: counters?.sseConnectAttempts ?? 0, known: true };
     }
     return { value: 0, known: false };
   }
+
   logMatches(level: string, re: RegExp): number {
     let n = 0;
     for (const line of this.logs) {
-      if (level && !line.toLowerCase().includes(`level=${level.toLowerCase()}`)) continue;
+      if (level && !line.toLowerCase().startsWith(`level=${level.toLowerCase()} `)) continue;
       if (re.test(line)) n++;
     }
     return n;

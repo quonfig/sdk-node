@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Minor
+
+- `sseFailedOverToSecondary()` now reads the SSE stream leg the client actually holds. It returned a
+  constant `false`, so a regression that repointed the stream to a secondary host could not show up.
+  It still returns `false` in every supported configuration: SSE stays on the primary stream.
+  (qfg-6vno.2)
+
+### Tests
+
+- Chaos harness: the probe reads `connectionState()`, `fallbackPollerActive()` and a new internal,
+  test-only `supervisorCounters()` hook (SSE connect attempts and Layer 1 restarts) from the SDK
+  instead of tracking its own state, so it can no longer report the non-contract `reconnecting`.
+  `worker_restart_total{layer=2}` is SKIPPED with a reason (sdk-node has no layer-2 restart). An
+  unknown or failed inject, clear or process action now fails the scenario. Chaos and failover ITD
+  pins move to `v2026.10.21.1` (the init-failure scenario 00 and the f01/f04 `sdkLog` rows are
+  implemented), and CI fails when the three ITD pins differ. (qfg-6vno.2, qfg-6vno.7)
+
 ## 1.9.0 - 2026-10-21
 
 ### Minor

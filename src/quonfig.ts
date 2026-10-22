@@ -31,7 +31,7 @@ import { Resolver } from "./resolver";
 import { ConfigDependencyResolver } from "./rawMatch";
 import { Transport, defaultApiUrls, type LegResult, redactUrlCredentials } from "./transport";
 import { computeReason, ReasonStatic, ReasonTargetingMatch, ReasonSplit } from "./reason";
-import { SSEConnection, type EventSourceFactory } from "./sse";
+import { SSEConnection, type EventSourceFactory, type SupervisorCounters } from "./sse";
 import { mergeContexts } from "./context";
 import { normalizeLogger, type NormalizedLogger } from "./sdkLogger";
 import { parseLevel, shouldLog } from "./logger";
@@ -335,6 +335,10 @@ export class Quonfig {
   private readonly globalContext: Contexts;
   private readonly initTimeout: number;
   private readonly onInitFailure: OnInitFailure;
+  private readonly supervisorCountersValue: SupervisorCounters = {
+    sseConnectAttempts: 0,
+    workerRestartsLayer1: 0,
+  };
   /** Pending waitForReady() calls; settled by completeInit() or close(). */
   private readyWaiters: { resolve: () => void; reject: (err: Error) => void }[] = [];
   /** Wakes the init loop's sleeps when close() runs. */
@@ -2295,13 +2299,26 @@ export class Quonfig {
   }
 
   /**
-   * Whether the live SSE stream ever repointed to a non-primary leg. Always
-   * false by design — SSE is pinned to the primary stream and failover is an
-   * HTTP-only property (the chaos suite asserts this in f05). Exists so a
-   * regression that silently repoints the stream would be caught. (qfg-7h5d.1.7)
+   * Whether the SSE stream is currently derived from a non-primary leg. SSE is
+   * pinned to the primary stream and failover is an HTTP-only property (the
+   * chaos suite asserts `false` in f05), so this should stay `false`. It reads
+   * the transport's real stream leg, so a regression that repoints the stream
+   * shows up here. (qfg-7h5d.1.7; was a constant `false` until qfg-6vno.2)
    */
   sseFailedOverToSecondary(): boolean {
-    return false;
+    return this.transport.activeStreamLegIndex() > 0;
+  }
+
+  /**
+   * Internal, test-only (qfg-6vno.2): a snapshot of the supervisor counters
+   * the chaos harness reads for `quonfig_sse_connect_attempts_total` and
+   * `quonfig_sdk_worker_restart_total{layer="1"}`. NOT part of the public API;
+   * it may change or go away without a semver bump.
+   *
+   * @internal
+   */
+  supervisorCounters(): SupervisorCounters {
+    return { ...this.supervisorCountersValue };
   }
 
   /**
@@ -2314,6 +2331,9 @@ export class Quonfig {
     try {
       this.onConfigUpdate();
     } catch (err) {
+      // Inline recovery, counted as a Layer 1 restart (contract Test 5,
+      // reason callback_panic) so the chaos harness sees it (scenario 10).
+      this.supervisorCountersValue.workerRestartsLayer1++;
       this.logger.error("[quonfig] onConfigUpdate callback threw:", err);
     }
   }
@@ -2493,6 +2513,7 @@ export class Quonfig {
       eventSourceFactory: this.testEventSourceFactory,
       readDeadlineMs: this.sseReadDeadlineMs,
       waitHook: this.testWaitHook,
+      counters: this.supervisorCountersValue,
     });
     this.sseConnection.start((envelope: ConfigEnvelope) => this.handleSSEEnvelope(envelope));
   }
