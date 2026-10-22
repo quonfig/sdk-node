@@ -11,8 +11,8 @@
 
 ### Patch
 
-- Client construction no longer throws when `os.homedir()` fails (HOME unset and no passwd entry,
-  as in some containers). Dev context is skipped instead, matching sdk-go. (qfg-za5s)
+- Client construction no longer throws when `os.homedir()` fails (HOME unset and no passwd entry, as
+  in some containers). Dev context is skipped instead, matching sdk-go. (qfg-za5s)
 
 ### Tests
 
