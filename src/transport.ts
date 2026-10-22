@@ -74,6 +74,77 @@ function redactError(err: Error): Error {
   return out;
 }
 
+/**
+ * Size cap for a 200 body from `/api/v2/configs` (qfg-6vno.20.3; ITD "Rule —
+ * size caps"): 16 MiB. Over the cap the leg fails exactly like a 5xx. A
+ * constant, not an option.
+ */
+export const CONFIG_BODY_MAX_BYTES = 16_777_216;
+
+/** At most this many bytes of a non-2xx body are ever read (size-caps rule). */
+export const NON_2XX_BODY_MAX_BYTES = 1024;
+
+/** A 200 config body over {@link CONFIG_BODY_MAX_BYTES}: a failed leg. */
+export class ConfigBodyTooLargeError extends Error {
+  constructor(source: string) {
+    super(`Config body from ${source} exceeds the maximum size of ${CONFIG_BODY_MAX_BYTES} bytes`);
+    this.name = "ConfigBodyTooLargeError";
+  }
+}
+
+/**
+ * Decode a response body as JSON, failing with {@link ConfigBodyTooLargeError}
+ * once it passes {@link CONFIG_BODY_MAX_BYTES}. A `Content-Length` over the cap
+ * fails before reading; otherwise bytes are counted as they arrive and the
+ * read stops at the first chunk past the cap. A response with no body stream
+ * has nothing to cap and decodes through `json()`.
+ */
+async function readCappedJSON(response: Response, source: string): Promise<unknown> {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > CONFIG_BODY_MAX_BYTES) {
+    await response.body?.cancel().catch(() => {});
+    throw new ConfigBodyTooLargeError(source);
+  }
+  if (!response.body) return response.json();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > CONFIG_BODY_MAX_BYTES) {
+      await reader.cancel().catch(() => {});
+      throw new ConfigBodyTooLargeError(source);
+    }
+    chunks.push(value);
+  }
+  return JSON.parse(Buffer.concat(chunks, total).toString("utf8"));
+}
+
+/**
+ * Read at most `maxBytes` of a body (decoded as UTF-8) and cancel the rest, so
+ * a large error page is never pulled in full. Never throws.
+ */
+async function readBodyPrefix(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } catch {
+    /* a failed read just ends the prefix */
+  }
+  reader.cancel().catch(() => {});
+  return Buffer.concat(chunks).subarray(0, maxBytes).toString("utf8");
+}
+
 const DEFAULT_DOMAIN = "quonfig.com";
 
 /**
@@ -350,10 +421,11 @@ export class Transport {
       }
 
       if (!response.ok) {
-        // The body is drained, not reported: an upstream error page can be
-        // large and can echo anything, so it never reaches a log line or an
-        // error message (init-failure design, decision 9).
-        await response.text().catch(() => "");
+        // The body is not reported: an upstream error page can be large and
+        // can echo anything, so it never reaches a log line or an error
+        // message (init-failure design, decision 9). At most 1 KiB is read,
+        // then the rest is cancelled (size-caps rule).
+        await readBodyPrefix(response, NON_2XX_BODY_MAX_BYTES);
         throw new Error(
           `Unexpected status ${response.status} from ${redactUrlCredentials(baseUrl)}`
         );
@@ -363,7 +435,11 @@ export class Transport {
       // (a proxy/WAF answering `{}` or `{"error":...}`) is a failed leg, so
       // hedge/failover proceed, and its ETag is never stored — otherwise later
       // 304s would keep "confirming" the junk (qfg-9dxb.3 Fix B).
-      const envelope = parseConfigEnvelope(await response.json());
+      // The body is capped at 16 MiB while it is read (size-caps rule): over
+      // the cap the leg fails like a 5xx, before any ETag is stored.
+      const envelope = parseConfigEnvelope(
+        await readCappedJSON(response, redactUrlCredentials(baseUrl))
+      );
 
       const newEtag = response.headers.get("ETag");
       let rollbackEtag: (() => void) | undefined;
@@ -627,7 +703,8 @@ export class Transport {
     }
 
     if (!response.ok) {
-      const body = await response.text().catch(() => "");
+      // At most 1 KiB of the error body is read and logged (size-caps rule).
+      const body = await readBodyPrefix(response, NON_2XX_BODY_MAX_BYTES);
       this.logger.warn(`Telemetry POST failed: ${response.status} ${body}`);
     }
   }
