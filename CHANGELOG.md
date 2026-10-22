@@ -27,6 +27,11 @@
   `onSSEConnectionStateChange` is now logged at ERROR (was WARN), with the error and its stack, like
   `onConfigUpdate`; the `onConfigUpdate` line drops its duplicated `[quonfig]` prefix. Everything
   else (connection state, `lastSuccessfulRefresh()`, later envelopes) is unchanged.
+- **Size caps follow-up** (qfg-6vno.20.3). An oversized `/api/v2/configs` body now logs one WARN per
+  oversized episode per HTTP leg (redacted URL and the 16,777,216-byte cap), with repeats at DEBUG,
+  instead of a "Fallback poll error" WARN on every poll. The episode ends when an envelope installs
+  from that leg. The telemetry reporter now reads at most 1 KiB of a response body; it read the
+  whole body and then kept the first 1 KiB.
 
 ### Patch
 

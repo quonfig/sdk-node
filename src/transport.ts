@@ -659,12 +659,10 @@ export class Transport {
         body: new Uint8Array(body.buffer, body.byteOffset, body.byteLength),
         signal: controller.signal,
       });
-      const text = await response.text();
+      // At most 1 KiB of the response body is ever read (size-caps rule R5).
+      const bodySnippet = await readBodyPrefix(response, NON_2XX_BODY_MAX_BYTES);
       const retryAfter = response.headers.get("retry-after") ?? undefined;
-      const result: TelemetryHttpResult = {
-        status: response.status,
-        bodySnippet: text.slice(0, 1024),
-      };
+      const result: TelemetryHttpResult = { status: response.status, bodySnippet };
       if (retryAfter !== undefined) result.retryAfter = retryAfter;
       return result;
     } catch (err) {

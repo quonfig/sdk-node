@@ -29,7 +29,13 @@ import { ConfigStore } from "./store";
 import { Evaluator } from "./evaluator";
 import { Resolver } from "./resolver";
 import { ConfigDependencyResolver } from "./rawMatch";
-import { Transport, defaultApiUrls, type LegResult, redactUrlCredentials } from "./transport";
+import {
+  ConfigBodyTooLargeError,
+  Transport,
+  defaultApiUrls,
+  type LegResult,
+  redactUrlCredentials,
+} from "./transport";
 import { computeReason, ReasonStatic, ReasonTargetingMatch, ReasonSplit } from "./reason";
 import { SSEConnection, type EventSourceFactory, type SupervisorCounters } from "./sse";
 import { mergeContexts } from "./context";
@@ -428,6 +434,8 @@ export class Quonfig {
   private configInstalls: number = 0;
   /** baseUrls index of the last HTTP fetch that installed; -1 until the first. */
   private resolvedFromIndex: number = -1;
+  /** HTTP legs inside an oversized-body WARN episode (size-caps rule, R4). */
+  private oversizedHttpLegs = new Set<number>();
 
   // Telemetry collectors
   private evaluationSummaries: EvaluationSummaryCollector;
@@ -2402,6 +2410,21 @@ export class Quonfig {
    * heals forward after. If every fired leg fails, rejects with the last error so
    * init applies its failure semantics; an all-304 cycle is a no-op success.
    */
+  /**
+   * One WARN per oversized-body episode per HTTP leg, repeats at DEBUG
+   * (size-caps rule, R4). The episode ends when an envelope installs from
+   * that leg.
+   */
+  private logOversizedLeg(leg: LegResult): void {
+    const msg = `[quonfig] ${leg.error!.message}; the leg failed and nothing was installed`;
+    if (this.oversizedHttpLegs.has(leg.sourceIndex)) {
+      this.logger.debug(msg);
+      return;
+    }
+    this.oversizedHttpLegs.add(leg.sourceIndex);
+    this.logger.warn(msg);
+  }
+
   private async fetchAndInstall(failedLegs?: LegFailure[]): Promise<void> {
     let installedOnce = false;
     let fired = 0;
@@ -2433,6 +2456,7 @@ export class Quonfig {
         };
         legFailures.push(f);
         failedLegs?.push(f);
+        if (leg.error instanceof ConfigBodyTooLargeError) this.logOversizedLeg(leg);
         return;
       }
       try {
@@ -2468,6 +2492,8 @@ export class Quonfig {
         // the upstream holding the config; a rejected older leg never flips it.
         // markActiveLeg keeps getActiveBaseUrlIndex()/SSE consistent.
         this.resolvedFromIndex = leg.sourceIndex;
+        // An install from this leg ends its oversized-body episode.
+        this.oversizedHttpLegs.delete(leg.sourceIndex);
         // Failover observability: record which leg (primary/secondary) served
         // the config now held (qfg-41nh.18).
         this.failover.recordResolvedFrom(leg.sourceIndex);
@@ -2690,6 +2716,11 @@ export class Quonfig {
             // R2: this cycle enters auth-failed; its ERROR replaces the usual
             // "Fallback poll error" line, and the poller stops.
             this.enterAuthFailed(err);
+            return;
+          }
+          if (err instanceof ConfigBodyTooLargeError) {
+            // Already reported once per episode by logOversizedLeg.
+            this.logger.debug("Fallback poll error:", err);
             return;
           }
           this.logger.warn("Fallback poll error:", err);
