@@ -407,6 +407,54 @@ describe("Test 10 — size caps", () => {
     expect(rig.configHeaders[2]["if-none-match"]).toBe('"e1"');
   }, 20_000);
 
+  it("case 3 episode: repeated oversized polls log one WARN, repeats at DEBUG; an install ends the episode", async () => {
+    const big = paddedEnvelope(BODY_CAP + 1, 9);
+    // hit 1 small (init), hits 2-5 oversized, hit 6 small gen 6 (installs),
+    // hit 7+ oversized again (a new episode).
+    const rig = await startRig(
+      () => {},
+      (_req, res, hit) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(hit === 1 ? envelopeJSON("v1", 1) : hit === 6 ? envelopeJSON("v6", 6) : big);
+      }
+    );
+    const logs: Logged[] = [];
+    const q = new Quonfig({
+      sdkKey: "test-backend-key",
+      apiUrls: [rig.url],
+      enableSSE: false,
+      fallbackPollEnabled: true,
+      fallbackPollIntervalMs: 100,
+      collectEvaluationSummaries: false,
+      contextUploadMode: "none",
+      onNoDefault: "ignore",
+      logger: captureLogger(logs),
+    } as any);
+    clients.push(q);
+    await q.init();
+    const oversized = (level: Logged["level"]) =>
+      logs.filter((l) => l.level === level && l.line.includes(String(BODY_CAP)));
+    await waitFor(() => rig.configHits >= 5, 10_000, "4 oversized polls");
+    await sleep(50);
+    expect(oversized("warn")).toHaveLength(1);
+    expect(oversized("warn")[0].line).toContain(rig.url.replace("http://", ""));
+    expect(oversized("debug").length).toBeGreaterThanOrEqual(3);
+    await waitFor(() => rig.configHits >= 8, 10_000, "install then oversized again");
+    await sleep(50);
+    expect(q.getString(KEY)).toBe("v6");
+    expect(oversized("warn")).toHaveLength(2);
+  }, 20_000);
+
+  it("case 4 telemetry: the reporter path reads at most 1 KiB of a non-2xx body", async () => {
+    const { response, pulled } = countingResponse(2 * 1024 * 1024, 512, { status: 400 });
+    vi.stubGlobal("fetch", async () => response);
+    const t = new Transport(["http://127.0.0.1:1"], "test-key", "http://127.0.0.1:1");
+    const res = await t.sendTelemetry(Buffer.from("{}"), { timeoutMs: 5000 });
+    expect(res.status).toBe(400);
+    expect(res.bodySnippet.length).toBeLessThanOrEqual(1024);
+    expect(pulled()).toBeLessThanOrEqual(1024 + 512);
+  });
+
   it("case 4: 502 with a 2 MiB marker body -> marker in no log line or error", async () => {
     const MARKER = "SIZE-CAPS-MARKER-7f3a";
     const body = (MARKER + "z".repeat(1000)).repeat(2 * 1024);
