@@ -402,6 +402,14 @@ export class Transport {
     }
   }
 
+  /**
+   * Index of the delivery leg the SSE stream URL is derived from (0 = the
+   * primary). Ignores `__testStreamUrlOverride`, which only rewrites the URL.
+   */
+  activeStreamLegIndex(): number {
+    return this.streamUrls.indexOf(this.activeStreamUrl);
+  }
+
   /** Number of configured delivery legs. */
   legCount(): number {
     return this.baseUrls.length;

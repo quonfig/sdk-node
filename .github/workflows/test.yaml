@@ -37,6 +37,10 @@ jobs:
           # adopting new test cases. See integration-test-data/RELEASING.md.
           ref: v2026.10.21.1
 
+      - name: Check integration-test-data refs match across workflows
+        working-directory: sdk-node
+        run: scripts/check-itd-refs.sh
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node-version }}

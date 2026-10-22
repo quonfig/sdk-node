@@ -107,6 +107,29 @@ export interface SSEConnectionOptions {
    * supervisor requests (kind "sse") and returns the delay actually used.
    */
   waitHook?: (kind: string, ms: number) => number;
+  /**
+   * Internal, test-only (qfg-6vno.2): counters the supervisor bumps. Shared
+   * across SSEConnection instances by the owning client. Not public API.
+   */
+  counters?: SupervisorCounters;
+}
+
+/**
+ * Internal, test-only supervisor counters (qfg-6vno.2). The chaos harness reads
+ * them for `quonfig_sse_connect_attempts_total` and
+ * `quonfig_sdk_worker_restart_total{layer="1"}`; sdk-node exports no
+ * Prometheus metrics, so these are the SDK-side source of those values. Not
+ * part of the public API and may change without a semver bump.
+ */
+export interface SupervisorCounters {
+  /** Every SSE connect attempt (the first one and each reconnect). */
+  sseConnectAttempts: number;
+  /**
+   * Every Layer 1 restart: the SSE supervisor scheduling a new worker after an
+   * abnormal exit (error, read-deadline trip, failed connect), plus each
+   * caught onConfigUpdate throw (contract Test 5, reason callback_panic).
+   */
+  workerRestartsLayer1: number;
 }
 
 /**
@@ -240,6 +263,7 @@ export class SSEConnection {
   /** Whether the current connection has delivered its first valid frame. */
   private frameSeen = false;
   private waitHook?: (kind: string, ms: number) => number;
+  private counters?: SupervisorCounters;
 
   constructor(transport: Transport, logger?: Logger, options?: SSEConnectionOptions) {
     this.transport = transport;
@@ -248,6 +272,7 @@ export class SSEConnection {
     this.eventSourceFactory = options?.eventSourceFactory;
     this.readDeadlineMs = options?.readDeadlineMs ?? DEFAULT_SSE_READ_DEADLINE_MS;
     this.waitHook = options?.waitHook;
+    this.counters = options?.counters;
   }
 
   /**
@@ -267,6 +292,7 @@ export class SSEConnection {
   }
 
   private async connectSSE(onUpdate: (envelope: ConfigEnvelope) => void): Promise<void> {
+    if (this.counters) this.counters.sseConnectAttempts++;
     try {
       const factory = this.eventSourceFactory ?? (await this.defaultFactory());
       if (this.closed) return; // close() raced the async factory import
@@ -358,6 +384,7 @@ export class SSEConnection {
    */
   private scheduleReconnect(): void {
     if (this.closed || this.reconnectTimer !== null || this.eventSource !== null) return;
+    if (this.counters) this.counters.workerRestartsLayer1++;
 
     const delay = this.reconnectDelayMs;
     // Uniform sleep in [delay/2, delay], mirroring sdk-go's runLoop jitter.

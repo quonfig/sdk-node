@@ -18,8 +18,26 @@ export interface ExpressionProbe {
    * loudly instead of comparing against a silent 0 (mirrors sdk-go's
    * `sdkMetric(name, labels) (value, known)`).
    */
-  sdkMetric(name: string, labels: Record<string, string>): { value: number; known: boolean };
+  sdkMetric(name: string, labels: Record<string, string>): MetricReading;
   logMatches(level: string, re: RegExp): number;
+  // Init-failure vocabulary (ITD chaos README, 00-boot-both-down-then-restore).
+  /** 'pending' | 'returned' | 'raised'; '' when the test sets no on_init_failure. */
+  initState?: string;
+  /** onConfigUpdate callbacks fired after the init call returned or raised. */
+  readyEvents?: number;
+  /** The SDK's string getter with a caller default. May throw. */
+  getString?: (key: string, dflt: string) => string;
+  ready?(): boolean;
+}
+
+/**
+ * A probe's reading of an SDK metric. `skip` set means the SDK does not have
+ * the value: the leaf is SKIPPED with that reason (Decision 6), never compared.
+ */
+export interface MetricReading {
+  value: number;
+  known: boolean;
+  skip?: string;
 }
 
 /**
@@ -61,6 +79,11 @@ const RE_LAST_REFRESH =
 const RE_SDK_METRIC =
   /^client\.sdkMetric\(\s*'([^']+)'\s*(?:,\s*layer=\s*'([^']+)'\s*)?\)\s*(>=|<=|==|!=|<|>)\s*(\d+)$/;
 const RE_SERVER_METRIC = /^server_metric\(\s*'([^']+)'\s*\)\s*(>=|<=|==|!=|<|>)\s*(\d+)$/;
+const RE_INIT_STATE = /^client\.initState\(\)\s*(==|!=)\s*'([^']+)'$/;
+const RE_GET_STRING =
+  /^client\.getString\(\s*'([^']*)'\s*,\s*'([^']*)'\s*\)\s*(==|!=)\s*'([^']*)'$/;
+const RE_READY_EVENTS = /^client\.readyEventCount\(\)\s*(>=|<=|==|!=|<|>)\s*(\d+)$/;
+const RE_READY_EQ = /^client\.ready\(\)\s*==\s*(true|false)$/;
 const RE_SDK_LOG =
   /^client\.sdkLog\(\s*'([^']+)'\s*,\s*\/(.+)\/i\s*\)\s*(>=|<=|==|!=|<|>)\s*(\d+)$/;
 
@@ -135,7 +158,11 @@ function evalLeaf(expr: string, probe: ExpressionProbe): EvalResult {
   if ((m = RE_SDK_METRIC.exec(expr))) {
     const [, metric, layer, op, wantStr] = m;
     const labels: Record<string, string> = layer ? { layer } : {};
-    const { value: got, known } = probe.sdkMetric(metric, labels);
+    const { value: got, known, skip } = probe.sdkMetric(metric, labels);
+    if (skip) {
+      const reason = `${expr}: ${skip}`;
+      return { ok: true, why: `SKIPPED ${reason}`, skipped: [reason], skippedOnly: true };
+    }
     if (!known) {
       return leafResult(
         false,
@@ -155,6 +182,38 @@ function evalLeaf(expr: string, probe: ExpressionProbe): EvalResult {
     const got = probe.logMatches(level, re);
     const ok = compareNum(op, got, Number(wantStr));
     return leafResult(ok, `sdkLog(${level},/${pattern}/i)=${got} ${op} ${wantStr}`);
+  }
+  if ((m = RE_INIT_STATE.exec(expr))) {
+    const [, op, want] = m;
+    const got = probe.initState ?? "";
+    const ok = op === "==" ? got === want : got !== want;
+    return leafResult(ok, `initState='${got}' ${op} '${want}'`);
+  }
+  if ((m = RE_GET_STRING.exec(expr))) {
+    const [, key, dflt, op, want] = m;
+    if (!probe.getString) return leafResult(false, `getString: the runner did not wire it`);
+    let got: string;
+    try {
+      got = probe.getString(key, dflt);
+    } catch (err) {
+      return leafResult(false, `getString('${key}') threw: ${(err as Error).message}`);
+    }
+    const ok = op === "==" ? got === want : got !== want;
+    return leafResult(ok, `getString('${key}')='${got}' ${op} '${want}'`);
+  }
+  if ((m = RE_READY_EVENTS.exec(expr))) {
+    const [, op, wantStr] = m;
+    const got = probe.readyEvents ?? 0;
+    return leafResult(
+      compareNum(op, got, Number(wantStr)),
+      `readyEventCount=${got} ${op} ${wantStr}`
+    );
+  }
+  if ((m = RE_READY_EQ.exec(expr))) {
+    const want = m[1] === "true";
+    if (!probe.ready) return leafResult(false, `ready: the runner did not wire it`);
+    const got = probe.ready();
+    return leafResult(got === want, `ready=${got} want ${want}`);
   }
   return leafResult(false, `unrecognized expression: ${expr}`);
 }
