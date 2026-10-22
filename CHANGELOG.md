@@ -20,6 +20,11 @@
   is cancelled; the deprecated `Transport.postTelemetry()` WARN now carries at most 1 KiB of the
   error body. The caps are constants, not options.
 
+### Patch
+
+- Client construction no longer throws when `os.homedir()` fails (HOME unset and no passwd entry, as
+  in some containers). Dev context is skipped instead, matching sdk-go. (qfg-za5s)
+
 ### Tests
 
 - Chaos harness: the probe reads `connectionState()`, `fallbackPollerActive()` and a new internal,
