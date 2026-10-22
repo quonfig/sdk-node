@@ -77,7 +77,7 @@ const RE_PROC_ALIVE_EQ = /^client\.processStillAlive\(\)\s*==\s*(true|false)$/;
 const RE_LAST_REFRESH =
   /^client\.lastSuccessfulRefresh\(\)\s*(>=|>|<=|<|==)\s*\(now\(\)\s*-\s*(\d+)\)$/;
 const RE_SDK_METRIC =
-  /^client\.sdkMetric\(\s*'([^']+)'\s*(?:,\s*layer=\s*'([^']+)'\s*)?\)\s*(>=|<=|==|!=|<|>)\s*(\d+)$/;
+  /^client\.sdkMetric\(\s*'([^']+)'\s*(?:,\s*(layer|callback)=\s*'([^']+)'\s*)?\)\s*(>=|<=|==|!=|<|>)\s*(\d+)$/;
 const RE_SERVER_METRIC = /^server_metric\(\s*'([^']+)'\s*\)\s*(>=|<=|==|!=|<|>)\s*(\d+)$/;
 const RE_INIT_STATE = /^client\.initState\(\)\s*(==|!=)\s*'([^']+)'$/;
 const RE_GET_STRING =
@@ -156,8 +156,9 @@ function evalLeaf(expr: string, probe: ExpressionProbe): EvalResult {
     );
   }
   if ((m = RE_SDK_METRIC.exec(expr))) {
-    const [, metric, layer, op, wantStr] = m;
-    const labels: Record<string, string> = layer ? { layer } : {};
+    const [, metric, labelName, labelValue, op, wantStr] = m;
+    const labels: Record<string, string> = labelName ? { [labelName]: labelValue } : {};
+    const labelStr = labelName ? `${labelName}=${labelValue}` : "";
     const { value: got, known, skip } = probe.sdkMetric(metric, labels);
     if (skip) {
       const reason = `${expr}: ${skip}`;
@@ -170,7 +171,7 @@ function evalLeaf(expr: string, probe: ExpressionProbe): EvalResult {
       );
     }
     const ok = compareNum(op, got, Number(wantStr));
-    return leafResult(ok, `sdkMetric(${metric},layer=${layer ?? ""})=${got} ${op} ${wantStr}`);
+    return leafResult(ok, `sdkMetric(${metric},${labelStr})=${got} ${op} ${wantStr}`);
   }
   if ((m = RE_SERVER_METRIC.exec(expr))) {
     const skip = `${expr}: ${SERVER_METRIC_SKIP_REASON}`;

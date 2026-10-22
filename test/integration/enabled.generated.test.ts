@@ -542,6 +542,125 @@ describe("enabled", () => {
     });
   });
 
+  it("returns true for PROP_MATCHES when the regex matches part of the prop (unanchored search)", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "xaab" } });
+      expect(scope.isEnabled("feature-flag.matches")).toBe(true);
+    });
+  });
+
+  it("returns false for PROP_DOES_NOT_MATCH when the regex matches part of the prop (unanchored search)", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "xaab" } });
+      expect(scope.isEnabled("feature-flag.does-not-match")).toBe(false);
+    });
+  });
+
+  it("returns true for PROP_MATCHES with an anchored regex when the whole prop matches", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "123" } });
+      expect(scope.isEnabled("feature-flag.matches.anchored")).toBe(true);
+    });
+  });
+
+  it("returns false for PROP_MATCHES with an anchored regex when the prop is too long", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "1234" } });
+      expect(scope.isEnabled("feature-flag.matches.anchored")).toBe(false);
+    });
+  });
+
+  it("returns false for PROP_MATCHES with an anchored regex when the prop has a non-matching character", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "12a" } });
+      expect(scope.isEnabled("feature-flag.matches.anchored")).toBe(false);
+    });
+  });
+
+  it("returns false for PROP_MATCHES when the prop is not a string", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: 123 } });
+      expect(scope.isEnabled("feature-flag.matches.anchored")).toBe(false);
+    });
+  });
+
+  it("returns false for PROP_MATCHES when the prop is missing", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { key: "michael" } });
+      expect(scope.isEnabled("feature-flag.matches.anchored")).toBe(false);
+    });
+  });
+
+  it("returns true for PROP_DOES_NOT_MATCH with an anchored regex when the prop is too long", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "1234" } });
+      expect(scope.isEnabled("feature-flag.does-not-match.anchored")).toBe(true);
+    });
+  });
+
+  it("returns true for PROP_DOES_NOT_MATCH with an anchored regex when the prop has a non-matching character", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "12a" } });
+      expect(scope.isEnabled("feature-flag.does-not-match.anchored")).toBe(true);
+    });
+  });
+
+  it("returns false for PROP_DOES_NOT_MATCH with an anchored regex when the whole prop matches", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "123" } });
+      expect(scope.isEnabled("feature-flag.does-not-match.anchored")).toBe(false);
+    });
+  });
+
+  it("returns false for PROP_DOES_NOT_MATCH when the prop is not a string", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: 123 } });
+      expect(scope.isEnabled("feature-flag.does-not-match.anchored")).toBe(false);
+    });
+  });
+
+  it("returns false for PROP_DOES_NOT_MATCH when the prop is missing", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { key: "michael" } });
+      expect(scope.isEnabled("feature-flag.does-not-match.anchored")).toBe(false);
+    });
+  });
+
+  it("returns false for PROP_MATCHES when the stored regex is invalid", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "(" } });
+      expect(scope.isEnabled("feature-flag.matches.invalid-pattern")).toBe(false);
+    });
+  });
+
+  it("returns false for PROP_DOES_NOT_MATCH when the stored regex is invalid", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "abc" } });
+      expect(scope.isEnabled("feature-flag.does-not-match.invalid-pattern")).toBe(false);
+    });
+  });
+
+  it("returns true for IN_SEG when the segment's PROP_DOES_NOT_MATCH criterion holds", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "abc" } });
+      expect(scope.isEnabled("feature-flag.in-segment.does-not-match")).toBe(true);
+    });
+  });
+
+  it("returns false for IN_SEG when the segment's PROP_DOES_NOT_MATCH regex matches", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { code: "123" } });
+      expect(scope.isEnabled("feature-flag.in-segment.does-not-match")).toBe(false);
+    });
+  });
+
+  it("returns false for IN_SEG when the segment's PROP_DOES_NOT_MATCH prop is missing", async () => {
+    await withClient({}, (client) => {
+      const scope = client.withContext({ user: { key: "michael" } });
+      expect(scope.isEnabled("feature-flag.in-segment.does-not-match")).toBe(false);
+    });
+  });
+
   it("returns true for IS_PRESENT rule when the given prop is a non-empty string", async () => {
     await withClient({}, (client) => {
       const scope = client.withContext({ user: { id: "abc" } });

@@ -338,6 +338,8 @@ export class Quonfig {
   private readonly supervisorCountersValue: SupervisorCounters = {
     sseConnectAttempts: 0,
     workerRestartsLayer1: 0,
+    callbackErrorsOnConfigUpdate: 0,
+    callbackErrorsOnConnectionStateChange: 0,
   };
   /** Pending waitForReady() calls; settled by completeInit() or close(). */
   private readyWaiters: { resolve: () => void; reject: (err: Error) => void }[] = [];
@@ -2310,9 +2312,11 @@ export class Quonfig {
   }
 
   /**
-   * Internal, test-only (qfg-6vno.2): a snapshot of the supervisor counters
-   * the chaos harness reads for `quonfig_sse_connect_attempts_total` and
-   * `quonfig_sdk_worker_restart_total{layer="1"}`. NOT part of the public API;
+   * Internal, test-only (qfg-6vno.2, qfg-6vno.27): a snapshot of the
+   * supervisor counters the chaos harness reads for
+   * `quonfig_sse_connect_attempts_total`,
+   * `quonfig_sdk_worker_restart_total{layer="1"}` and
+   * `quonfig_sdk_callback_errors_total{callback}`. NOT part of the public API;
    * it may change or go away without a semver bump.
    *
    * @internal
@@ -2322,19 +2326,41 @@ export class Quonfig {
   }
 
   /**
-   * Invoke the user's onConfigUpdate callback, catching any thrown error so
-   * an exception in user code does not crash the SDK supervisor (Tier 1
-   * supervisor contract Test 5; chaos scenario 10).
+   * Invoke the user's onConfigUpdate callback, catching any thrown error (or
+   * rejected promise from an async callback) so an exception in user code does
+   * not crash the SDK supervisor (Tier 1 supervisor contract Test 5; chaos
+   * scenario 10).
    */
   private invokeOnConfigUpdate(): void {
     if (!this.onConfigUpdate) return;
+    this.invokeUserCallback("on_config_update", "onConfigUpdate", () => this.onConfigUpdate!());
+  }
+
+  /**
+   * Run one user callback invocation in isolation (contract Test 5,
+   * qfg-6vno.27). A throw or a rejected promise is caught, counted in
+   * `callback_errors_total{callback}` and logged at ERROR with the error (and
+   * so its stack). It is NOT a worker restart: no worker was restarted, so
+   * `worker_restart_total` does not move.
+   */
+  private invokeUserCallback(
+    callback: "on_config_update" | "on_connection_state_change",
+    name: string,
+    fn: () => unknown
+  ): void {
+    const onError = (err: unknown): void => {
+      if (callback === "on_config_update")
+        this.supervisorCountersValue.callbackErrorsOnConfigUpdate++;
+      else this.supervisorCountersValue.callbackErrorsOnConnectionStateChange++;
+      this.logger.error(`${name} callback threw:`, err);
+    };
     try {
-      this.onConfigUpdate();
+      const result = fn();
+      if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+        (result as PromiseLike<unknown>).then(undefined, onError);
+      }
     } catch (err) {
-      // Inline recovery, counted as a Layer 1 restart (contract Test 5,
-      // reason callback_panic) so the chaos harness sees it (scenario 10).
-      this.supervisorCountersValue.workerRestartsLayer1++;
-      this.logger.error("[quonfig] onConfigUpdate callback threw:", err);
+      onError(err);
     }
   }
 
@@ -2564,11 +2590,10 @@ export class Quonfig {
     this.lastSSEState = state;
 
     if (this.onSSEConnectionStateChange) {
-      try {
-        this.onSSEConnectionStateChange(state);
-      } catch (err) {
-        this.logger.warn("onSSEConnectionStateChange callback threw:", err);
-      }
+      const cb = this.onSSEConnectionStateChange;
+      this.invokeUserCallback("on_connection_state_change", "onSSEConnectionStateChange", () =>
+        cb(state)
+      );
     }
 
     if (!this.fallbackPollEnabled) return;

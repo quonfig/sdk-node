@@ -440,7 +440,7 @@ async function runScenario(
 
   // Read the summary before close(), which reports disconnected.
   const counters = quonfig.supervisorCounters();
-  const summaryState = `state=${probe.connState}, restartLayer1=${counters.workerRestartsLayer1}, connectAttempts=${counters.sseConnectAttempts}, fallback=${probe.fallbackActive}, lastRefreshMs=${probe.lastRefresh}`;
+  const summaryState = `state=${probe.connState}, restartLayer1=${counters.workerRestartsLayer1}, callbackErrors=${counters.callbackErrorsOnConfigUpdate}/${counters.callbackErrorsOnConnectionStateChange}, connectAttempts=${counters.sseConnectAttempts}, fallback=${probe.fallbackActive}, lastRefreshMs=${probe.lastRefresh}`;
   await quonfig.close().catch(() => {});
 
   const details: string[] = [];

@@ -12,7 +12,12 @@ describe("ChaosProbe.lastRefresh", () => {
       lastSuccessfulRefresh: () => stamp,
       connectionState: () => "connected" as const,
       fallbackPollerActive: () => false,
-      supervisorCounters: () => ({ sseConnectAttempts: 0, workerRestartsLayer1: 0 }),
+      supervisorCounters: () => ({
+        sseConnectAttempts: 0,
+        workerRestartsLayer1: 0,
+        callbackErrorsOnConfigUpdate: 0,
+        callbackErrorsOnConnectionStateChange: 0,
+      }),
       isReady: () => true,
     };
     const probe = new ChaosProbe(client);

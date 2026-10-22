@@ -59,7 +59,12 @@ describe("SSEConnection supervisor counters", () => {
 
   it("counts every connect attempt and every restart after an abnormal exit", async () => {
     vi.useFakeTimers();
-    const counters: SupervisorCounters = { sseConnectAttempts: 0, workerRestartsLayer1: 0 };
+    const counters: SupervisorCounters = {
+      sseConnectAttempts: 0,
+      workerRestartsLayer1: 0,
+      callbackErrorsOnConfigUpdate: 0,
+      callbackErrorsOnConnectionStateChange: 0,
+    };
     let es: FakeES | null = null;
     const factory = (_url: string, init: { onCommentFrame?: () => void }) => {
       es = {
@@ -79,7 +84,7 @@ describe("SSEConnection supervisor counters", () => {
     sse.start(() => {});
     await vi.advanceTimersByTimeAsync(0);
     es!.keepalive();
-    expect(counters).toEqual({ sseConnectAttempts: 1, workerRestartsLayer1: 0 });
+    expect(counters).toMatchObject({ sseConnectAttempts: 1, workerRestartsLayer1: 0 });
 
     // Abnormal exit -> supervisor restart -> second attempt.
     es!.onerror?.({ type: "error" });
@@ -95,12 +100,12 @@ describe("SSEConnection supervisor counters", () => {
 
     // close() is not an abnormal exit.
     sse.close();
-    expect(counters).toEqual({ sseConnectAttempts: 3, workerRestartsLayer1: 2 });
+    expect(counters).toMatchObject({ sseConnectAttempts: 3, workerRestartsLayer1: 2 });
   });
 });
 
 describe("Quonfig.supervisorCounters()", () => {
-  it("counts a throwing onConfigUpdate as a layer-1 restart (reason callback_panic)", () => {
+  it("counts a throwing onConfigUpdate in callback_errors, never as a worker restart (qfg-6vno.27)", () => {
     const q = new Quonfig({
       sdkKey: "k",
       apiUrls: [PRIMARY],
@@ -110,10 +115,16 @@ describe("Quonfig.supervisorCounters()", () => {
         throw new Error("boom");
       },
     });
-    expect(q.supervisorCounters()).toEqual({ sseConnectAttempts: 0, workerRestartsLayer1: 0 });
+    expect(q.supervisorCounters()).toEqual({
+      sseConnectAttempts: 0,
+      workerRestartsLayer1: 0,
+      callbackErrorsOnConfigUpdate: 0,
+      callbackErrorsOnConnectionStateChange: 0,
+    });
     (q as any).invokeOnConfigUpdate();
     (q as any).invokeOnConfigUpdate();
-    expect(q.supervisorCounters().workerRestartsLayer1).toBe(2);
+    expect(q.supervisorCounters().callbackErrorsOnConfigUpdate).toBe(2);
+    expect(q.supervisorCounters().workerRestartsLayer1).toBe(0);
   });
 });
 
@@ -122,7 +133,12 @@ function fakeClient(over: Partial<ProbeClient> = {}): ProbeClient {
     lastSuccessfulRefresh: () => undefined,
     connectionState: () => "connected",
     fallbackPollerActive: () => false,
-    supervisorCounters: () => ({ sseConnectAttempts: 0, workerRestartsLayer1: 0 }),
+    supervisorCounters: () => ({
+      sseConnectAttempts: 0,
+      workerRestartsLayer1: 0,
+      callbackErrorsOnConfigUpdate: 0,
+      callbackErrorsOnConnectionStateChange: 0,
+    }),
     isReady: () => true,
     ...over,
   };
@@ -149,7 +165,12 @@ describe("ChaosProbe reads the SDK", () => {
   });
 
   it("reads restart and attempt counters from supervisorCounters()", () => {
-    const c: SupervisorCounters = { sseConnectAttempts: 4, workerRestartsLayer1: 3 };
+    const c: SupervisorCounters = {
+      sseConnectAttempts: 4,
+      workerRestartsLayer1: 3,
+      callbackErrorsOnConfigUpdate: 2,
+      callbackErrorsOnConnectionStateChange: 1,
+    };
     const probe = new ChaosProbe(fakeClient({ supervisorCounters: () => ({ ...c }) }));
     expect(
       evaluate("client.sdkMetric('quonfig_sdk_worker_restart_total', layer='1') == 3", probe).ok
@@ -158,10 +179,38 @@ describe("ChaosProbe reads the SDK", () => {
       true
     );
     // An SSE state edge or a log line no longer moves the counter on its own.
-    probe.log("error", "[quonfig] onConfigUpdate callback threw: x");
+    probe.log("error", "onConfigUpdate callback threw: x");
     expect(
       evaluate("client.sdkMetric('quonfig_sdk_worker_restart_total', layer='1') == 3", probe).ok
     ).toBe(true);
+  });
+
+  it("reads callback_errors_total{callback} from supervisorCounters() (scenario 10 exp[0])", () => {
+    const c: SupervisorCounters = {
+      sseConnectAttempts: 1,
+      workerRestartsLayer1: 0,
+      callbackErrorsOnConfigUpdate: 2,
+      callbackErrorsOnConnectionStateChange: 1,
+    };
+    const probe = new ChaosProbe(fakeClient({ supervisorCounters: () => ({ ...c }) }));
+    expect(
+      evaluate(
+        "client.sdkMetric('quonfig_sdk_callback_errors_total', callback='on_config_update') >= 1",
+        probe
+      ).ok
+    ).toBe(true);
+    expect(
+      evaluate(
+        "client.sdkMetric('quonfig_sdk_callback_errors_total', callback='on_connection_state_change') == 1",
+        probe
+      ).ok
+    ).toBe(true);
+    // An unknown callback label is not a silent 0.
+    const r = evaluate(
+      "client.sdkMetric('quonfig_sdk_callback_errors_total', callback='typo') == 0",
+      probe
+    );
+    expect(r.ok).toBe(false);
   });
 
   it("reports layer-2 restarts SKIPPED with a reason, never a constant 0", () => {
