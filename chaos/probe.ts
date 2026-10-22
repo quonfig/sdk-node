@@ -94,6 +94,15 @@ export class ChaosProbe implements ExpressionProbe {
     if (name === "quonfig_sse_connect_attempts_total") {
       return { value: counters?.sseConnectAttempts ?? 0, known: true };
     }
+    if (name === "quonfig_sdk_callback_errors_total") {
+      if (labels.callback === "on_config_update") {
+        return { value: counters?.callbackErrorsOnConfigUpdate ?? 0, known: true };
+      }
+      if (labels.callback === "on_connection_state_change") {
+        return { value: counters?.callbackErrorsOnConnectionStateChange ?? 0, known: true };
+      }
+      return { value: 0, known: false };
+    }
     return { value: 0, known: false };
   }
 

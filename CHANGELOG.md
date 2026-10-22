@@ -19,6 +19,14 @@
   `lastSuccessfulRefresh()` does not advance). A non-2xx body is read for at most 1 KiB and the rest
   is cancelled; the deprecated `Transport.postTelemetry()` WARN now carries at most 1 KiB of the
   error body. The caps are constants, not options.
+- **Callback errors are not worker restarts** (ITD contract Test 5, qfg-6vno.27). A throw from
+  `onConfigUpdate` or `onSSEConnectionStateChange`, or a rejected promise from an async one, is
+  caught and counted in the new internal `quonfig_sdk_callback_errors_total{callback}` counter
+  (`on_config_update` / `on_connection_state_change`). It no longer counts toward
+  `worker_restart_total{layer="1"}`, which now counts only real SSE worker restarts. A throwing
+  `onSSEConnectionStateChange` is now logged at ERROR (was WARN), with the error and its stack, like
+  `onConfigUpdate`; the `onConfigUpdate` line drops its duplicated `[quonfig]` prefix. Everything
+  else (connection state, `lastSuccessfulRefresh()`, later envelopes) is unchanged.
 
 ### Tests
 
@@ -29,6 +37,9 @@
   unknown or failed inject, clear or process action now fails the scenario. Chaos and failover ITD
   pins move to `v2026.10.21.1` (the init-failure scenario 00 and the f01/f04 `sdkLog` rows are
   implemented), and CI fails when the three ITD pins differ. (qfg-6vno.2, qfg-6vno.7)
+- ITD pins move to `v2026.10.22.2` (size caps Test 10, callback-errors Test 5, chaos scenario 10
+  asserts `callback_errors_total`). The chaos probe reads `quonfig_sdk_callback_errors_total` with a
+  `callback` label. (qfg-6vno.20.3, qfg-6vno.27)
 
 ## 1.9.0 - 2026-10-21
 

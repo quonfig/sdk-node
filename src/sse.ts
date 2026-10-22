@@ -173,9 +173,10 @@ export interface SSEConnectionOptions {
 }
 
 /**
- * Internal, test-only supervisor counters (qfg-6vno.2). The chaos harness reads
- * them for `quonfig_sse_connect_attempts_total` and
- * `quonfig_sdk_worker_restart_total{layer="1"}`; sdk-node exports no
+ * Internal, test-only supervisor counters (qfg-6vno.2, qfg-6vno.27). The chaos
+ * harness reads them for `quonfig_sse_connect_attempts_total`,
+ * `quonfig_sdk_worker_restart_total{layer="1"}` and
+ * `quonfig_sdk_callback_errors_total{callback}`; sdk-node exports no
  * Prometheus metrics, so these are the SDK-side source of those values. Not
  * part of the public API and may change without a semver bump.
  */
@@ -184,10 +185,17 @@ export interface SupervisorCounters {
   sseConnectAttempts: number;
   /**
    * Every Layer 1 restart: the SSE supervisor scheduling a new worker after an
-   * abnormal exit (error, read-deadline trip, failed connect), plus each
-   * caught onConfigUpdate throw (contract Test 5, reason callback_panic).
+   * abnormal exit (error, read-deadline trip, failed connect). A user callback
+   * throw is never a restart (contract Test 5; see the callbackErrors fields).
    */
   workerRestartsLayer1: number;
+  /** `callback_errors_total{callback="on_config_update"}`: caught onConfigUpdate throws/rejections. */
+  callbackErrorsOnConfigUpdate: number;
+  /**
+   * `callback_errors_total{callback="on_connection_state_change"}`: caught
+   * onSSEConnectionStateChange throws/rejections.
+   */
+  callbackErrorsOnConnectionStateChange: number;
 }
 
 /**
