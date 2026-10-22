@@ -1,6 +1,6 @@
 import { parseConfigEnvelope } from "./envelope";
 import type { ConfigEnvelope, SSEConnectionState } from "./types";
-import type { Transport } from "./transport";
+import { redactUrlCredentials, type Transport } from "./transport";
 import { normalizeLogger, type Logger, type NormalizedLogger } from "./sdkLogger";
 
 export type { SSEConnectionState };
@@ -15,6 +15,59 @@ export const DEFAULT_SSE_READ_DEADLINE_MS = 90_000;
  */
 export const SSE_RECONNECT_INITIAL_DELAY_MS = 500;
 export const SSE_RECONNECT_MAX_DELAY_MS = 30_000;
+
+/**
+ * Size cap for one SSE event (qfg-6vno.20.3; ITD "Rule — size caps"): 4 MiB.
+ * Counted over the raw bytes of an event block (every line up to the blank
+ * line that ends it), so a `data:` line with no terminator is bounded too. An
+ * event over the cap is not a frame and its connection is a failed attempt. A
+ * constant, not an option.
+ */
+export const SSE_MAX_EVENT_BYTES = 4_194_304;
+
+/** Error the monitored stream fails with when an event exceeds {@link SSE_MAX_EVENT_BYTES}. */
+export class SSEEventTooLargeError extends Error {
+  constructor() {
+    super("SSE event exceeds the size cap");
+    this.name = "SSEEventTooLargeError";
+  }
+}
+
+/**
+ * Counts the bytes of the current SSE event block in a raw byte stream and
+ * reports when it passes {@link SSE_MAX_EVENT_BYTES}. A blank line ends the
+ * block and resets the count. Lines end in CRLF, LF or CR; both bytes are
+ * ASCII, so scanning UTF-8 bytes is safe.
+ */
+export class SSEEventSizeGuard {
+  private eventBytes = 0;
+  private atLineStart = true;
+  private pendingCR = false;
+
+  /** Feed one body chunk; returns true when the current event passed the cap. */
+  push(chunk: Uint8Array): boolean {
+    for (let i = 0; i < chunk.length; i++) {
+      const b = chunk[i];
+      if (this.pendingCR) {
+        this.pendingCR = false;
+        if (b === 0x0a) continue;
+      }
+      if (b === 0x0d || b === 0x0a) {
+        if (this.atLineStart) {
+          this.eventBytes = 0;
+        } else {
+          this.atLineStart = true;
+          this.eventBytes++;
+        }
+        if (b === 0x0d) this.pendingCR = true;
+        continue;
+      }
+      this.atLineStart = false;
+      if (++this.eventBytes > SSE_MAX_EVENT_BYTES) return true;
+    }
+    return false;
+  }
+}
 
 /** Minimal shape of the eventsource client used by SSEConnection. */
 export interface EventSourceLike {
@@ -37,7 +90,12 @@ export interface EventSourceLike {
  */
 export type EventSourceFactory = (
   url: string,
-  init: { headers: Record<string, string>; onCommentFrame?: () => void }
+  init: {
+    headers: Record<string, string>;
+    onCommentFrame?: () => void;
+    /** Called once when the stream is failed for an event over {@link SSE_MAX_EVENT_BYTES}. */
+    onOversized?: () => void;
+  }
 ) => EventSourceLike;
 
 /**
@@ -144,7 +202,8 @@ export interface SupervisorCounters {
 export function wrapFetchWithReadDeadline(
   innerFetch: typeof fetch,
   deadlineMs: number,
-  onCommentFrame?: () => void
+  onCommentFrame?: () => void,
+  onOversized?: () => void
 ): typeof fetch {
   return (async (input: any, init?: RequestInit): Promise<Response> => {
     const controller = new AbortController();
@@ -185,12 +244,16 @@ export function wrapFetchWithReadDeadline(
     // the only seam we need. It is also where keepalives are seen: the
     // library drops comment lines, so a comment-only block is detected here
     // (first-frame rule, qfg-goi1.10.40). Only a 200 event stream counts.
+    //
+    // The size cap lives here too (qfg-6vno.20.3): the guard counts the bytes
+    // of the current event and fails the stream at the cap, before the
+    // over-cap chunk reaches the parser, so eventsource never buffers more
+    // than about the cap plus one chunk for one event.
     const reader = response.body.getReader();
     const contentType = response.headers.get("content-type") ?? "";
-    const detector =
-      onCommentFrame && response.status === 200 && contentType.startsWith("text/event-stream")
-        ? new CommentFrameDetector()
-        : null;
+    const isEventStream = response.status === 200 && contentType.startsWith("text/event-stream");
+    const detector = onCommentFrame && isEventStream ? new CommentFrameDetector() : null;
+    const sizeGuard = isEventStream ? new SSEEventSizeGuard() : null;
     const monitored = new ReadableStream<Uint8Array>({
       async pull(controllerOut) {
         try {
@@ -201,6 +264,17 @@ export function wrapFetchWithReadDeadline(
             return;
           }
           resetDeadline();
+          if (sizeGuard && sizeGuard.push(value)) {
+            if (timer !== null) clearTimeout(timer);
+            try {
+              onOversized?.();
+            } catch {
+              /* never break the stream over a state callback */
+            }
+            reader.cancel().catch(() => {});
+            controllerOut.error(new SSEEventTooLargeError());
+            return;
+          }
           if (detector && detector.push(value) > 0) {
             try {
               onCommentFrame!();
@@ -262,6 +336,13 @@ export class SSEConnection {
   private closed = false;
   /** Whether the current connection has delivered its first valid frame. */
   private frameSeen = false;
+  /**
+   * Oversized gate and episode (qfg-6vno.20.3): set when a connection ended on
+   * an event over {@link SSE_MAX_EVENT_BYTES}. While set, a keepalive is not a
+   * frame (the server resends the oversized snapshot on every connect); the
+   * next envelope clears it and ends the WARN episode.
+   */
+  private oversized = false;
   private waitHook?: (kind: string, ms: number) => number;
   private counters?: SupervisorCounters;
 
@@ -307,10 +388,23 @@ export class SSEConnection {
       // attempt: onerror reports `error` and the backoff keeps growing.
       this.frameSeen = false;
       let es: EventSourceLike | null = null;
-      const onFrame = (): void => {
-        if (es !== null && es === this.eventSource) this.markFirstFrame();
+      let connOversized = false;
+      const onFrame = (envelope: boolean): void => {
+        if (es === null || es !== this.eventSource) return;
+        if (this.oversized) {
+          if (!envelope) return;
+          this.oversized = false;
+        }
+        this.markFirstFrame();
       };
-      es = factory(url, { headers, onCommentFrame: onFrame });
+      const onOversized = (): void => {
+        if (es !== null && es === this.eventSource) connOversized = true;
+      };
+      es = factory(url, {
+        headers,
+        onCommentFrame: () => onFrame(false),
+        onOversized,
+      });
       this.eventSource = es;
 
       es.onmessage = (event: any) => {
@@ -320,7 +414,7 @@ export class SSEConnection {
           // not a frame.
           const envelope: ConfigEnvelope = parseConfigEnvelope(JSON.parse(event.data));
           // The connected edge fires before the envelope is installed.
-          onFrame();
+          onFrame(true);
           onUpdate(envelope);
         } catch (err) {
           this.logger.warn("SSE message parse error:", err);
@@ -328,7 +422,15 @@ export class SSEConnection {
       };
 
       es.onerror = (err: any) => {
-        this.logger.warn("SSE error:", err);
+        if (connOversized) {
+          // One WARN per oversized episode, repeats at DEBUG (size-caps rule).
+          const msg = `SSE event from ${redactUrlCredentials(url)} exceeds the maximum size of ${SSE_MAX_EVENT_BYTES} bytes; dropping it and backing off (fallback polling takes over)`;
+          if (this.oversized) this.logger.debug(msg);
+          else this.logger.warn(msg);
+          this.oversized = true;
+        } else {
+          this.logger.warn("SSE error:", err);
+        }
         this.setState("error");
         // eventsource@4 never reconnects after a non-200 response
         // (failConnection → readyState=CLOSED → scheduleReconnect no-ops),
@@ -421,12 +523,18 @@ export class SSEConnection {
     return (url, init) => {
       const headers = init.headers;
       const onCommentFrame = init.onCommentFrame;
+      const onOversized = init.onOversized;
       const baseFetch: typeof fetch = (input, fetchInit) =>
         fetch(input, {
           ...fetchInit,
           headers: { ...(fetchInit?.headers as Record<string, string>), ...headers },
         });
-      const customFetch = wrapFetchWithReadDeadline(baseFetch, deadlineMs, onCommentFrame);
+      const customFetch = wrapFetchWithReadDeadline(
+        baseFetch,
+        deadlineMs,
+        onCommentFrame,
+        onOversized
+      );
       return new EventSource(url, { fetch: customFetch }) as EventSourceLike;
     };
   }
