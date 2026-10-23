@@ -1,26 +1,22 @@
 # Changelog
 
-## Unreleased
+## 1.10.0 - 2026-10-23
 
 ### Minor
 
-- `sseFailedOverToSecondary()` now reads the SSE stream leg the client actually holds. It returned a
-  constant `false`, so a regression that repointed the stream to a secondary host could not show up.
-  It still returns `false` in every supported configuration: SSE stays on the primary stream.
-  (qfg-6vno.2)
-- **Size caps** (ITD "Rule — size caps", qfg-6vno.20.3). One SSE event is capped at 4 MiB (4,194,304
-  bytes), counted while the stream is read, so an event with no line terminator is bounded too. Over
-  the cap the connection is a failed attempt: backoff grows, the client does not report `connected`,
-  and the fallback poller takes over; later connections that deliver only a keepalive do not report
-  `connected` until an SSE envelope installs. One WARN per oversized episode (redacted stream URL
-  and the cap in bytes), repeats at DEBUG. A 200 body from `/api/v2/configs` is capped at 16 MiB
-  (16,777,216 bytes): a `Content-Length` over the cap fails before reading, else the read stops at
-  the cap. Over the cap the leg fails like a 5xx (nothing installed, no ETag stored,
-  `lastSuccessfulRefresh()` does not advance). A non-2xx body is read for at most 1 KiB and the rest
-  is cancelled; the deprecated `Transport.postTelemetry()` WARN now carries at most 1 KiB of the
-  error body. The caps are constants, not options.
-- **Callback errors are not worker restarts** (ITD contract Test 5, qfg-6vno.27). A throw from
-  `onConfigUpdate` or `onSSEConnectionStateChange`, or a rejected promise from an async one, is
+- **UPGRADE: size caps** (ITD "Rule — size caps", qfg-6vno.20.3). One SSE event is capped at 4 MiB
+  (4,194,304 bytes), counted while the stream is read, so an event with no line terminator is
+  bounded too. Over the cap the connection is a failed attempt: backoff grows, the client does not
+  report `connected`, and the fallback poller takes over; later connections that deliver only a
+  keepalive do not report `connected` until an SSE envelope installs. One WARN per oversized episode
+  (redacted stream URL and the cap in bytes), repeats at DEBUG. A 200 body from `/api/v2/configs` is
+  capped at 16 MiB (16,777,216 bytes): a `Content-Length` over the cap fails before reading, else
+  the read stops at the cap. Over the cap the leg fails like a 5xx (nothing installed, no ETag
+  stored, `lastSuccessfulRefresh()` does not advance). A non-2xx body is read for at most 1 KiB and
+  the rest is cancelled; the deprecated `Transport.postTelemetry()` WARN now carries at most 1 KiB
+  of the error body. The caps are constants, not options.
+- **UPGRADE: callback errors are not worker restarts** (ITD contract Test 5, qfg-6vno.27). A throw
+  from `onConfigUpdate` or `onSSEConnectionStateChange`, or a rejected promise from an async one, is
   caught and counted in the new internal `quonfig_sdk_callback_errors_total{callback}` counter
   (`on_config_update` / `on_connection_state_change`). It no longer counts toward
   `worker_restart_total{layer="1"}`, which now counts only real SSE worker restarts. A throwing
@@ -32,6 +28,10 @@
   instead of a "Fallback poll error" WARN on every poll. The episode ends when an envelope installs
   from that leg. The telemetry reporter now reads at most 1 KiB of a response body; it read the
   whole body and then kept the first 1 KiB.
+- `sseFailedOverToSecondary()` now reads the SSE stream leg the client actually holds. It returned a
+  constant `false`, so a regression that repointed the stream to a secondary host could not show up.
+  It still returns `false` in every supported configuration: SSE stays on the primary stream.
+  (qfg-6vno.2)
 
 ### Patch
 
