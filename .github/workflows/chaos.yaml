@@ -70,7 +70,7 @@ jobs:
           # deliberately rev'd. Must equal the pin in test.yaml and
           # failover-chaos.yaml: test.yaml runs scripts/check-itd-refs.sh,
           # which fails when they differ (qfg-6vno.7).
-          ref: 7805088ae301eccfe1fbeaea79605aeb6cd3e21a # integration-test-data PR #19 head (qfg-zvyy.4); move to the tag cut from it before merging
+          ref: v2026.10.26
 
       - name: Checkout api-delivery
         if: env.HAS_REPO_TOKEN == 'true'

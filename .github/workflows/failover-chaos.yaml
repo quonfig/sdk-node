@@ -65,7 +65,7 @@ jobs:
           # o01 (fast primary wins, secondary never contacted), o03 (heal
           # forward), and o05 (slow older primary loses to a fast newer
           # secondary). (qfg-7h5d.1.14)
-          ref: 7805088ae301eccfe1fbeaea79605aeb6cd3e21a # integration-test-data PR #19 head (qfg-zvyy.4); move to the tag cut from it before merging
+          ref: v2026.10.26
 
       - name: Checkout api-delivery
         # api-delivery is private; the default GITHUB_TOKEN cannot read it. A PAT

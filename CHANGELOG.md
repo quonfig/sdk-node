@@ -77,9 +77,8 @@ now returns no value instead of a made-up one, so your default applies.
 
 ### Tests
 
-- The integration-test-data pins move to the typed-getter contract matrix. The node generator needs
-  integration-test-data PR #19 (`INT` reads go through `getInt`, and the malformed stored int/double
-  message), so the pin is that PR's head commit until a tag is cut from it.
+- The integration-test-data pins move to `v2026.10.26`, the typed-getter contract matrix plus the
+  node generator fix (`INT` reads go through `getInt`, and the malformed stored int/double message).
 - New `test/typed-getter-contract.test.ts` covers once-per-key logging, `isEnabled` on a flag with
   no matching rule, `BoundQuonfig` defaults, the Details error codes and the ±(2^53-1) edges.
 
