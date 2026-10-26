@@ -389,6 +389,13 @@ export class Quonfig {
   private authFailed: boolean = false;
   private authProbeTimer?: ReturnType<typeof setTimeout>;
   private lastSSEState?: SSEConnectionState;
+  /**
+   * True once the SSE stream has reported any edge past `connecting` (its
+   * first frame, an error, or a teardown). Until then connectionState()
+   * reports `initializing`, per the supervisor contract (Test 6: "after 200
+   * headers, no frame : initializing").
+   */
+  private sseEdgeSeen = false;
   private lastSuccessfulRefreshAt?: Date;
   private inFlightRefresh?: Promise<void>;
   private closed: boolean = false;
@@ -1697,7 +1704,8 @@ export class Quonfig {
   /**
    * Current aggregate connection state for this client.
    *
-   * - `initializing` — `init()` has not yet completed.
+   * - `initializing` — `init()` has not yet completed, or the SSE stream has
+   *   not yet delivered its first frame (nor failed) since init.
    * - `connected` — SSE is live, or the SDK is running from a local
    *   datadir/datafile and has loaded its envelope.
    * - `disconnected` — no channel is currently delivering updates (SSE has
@@ -1716,7 +1724,11 @@ export class Quonfig {
     // R6: auth-failed reports disconnected, never falling_back.
     if (this.authFailed) return "disconnected";
     if (this.fallbackPollerEngaged) return "falling_back";
-    if (this.sseConnection && this.lastSSEState !== "connected") return "disconnected";
+    if (this.sseConnection && this.lastSSEState !== "connected") {
+      // Before the stream's first edge (connecting, or 200 headers with no
+      // frame yet) the client is still initializing, not disconnected.
+      return this.sseEdgeSeen ? "disconnected" : "initializing";
+    }
     return "connected";
   }
 
@@ -2614,6 +2626,7 @@ export class Quonfig {
    */
   private handleSSEStateChange(state: SSEConnectionState): void {
     this.lastSSEState = state;
+    if (state !== "connecting") this.sseEdgeSeen = true;
 
     if (this.onSSEConnectionStateChange) {
       const cb = this.onSSEConnectionStateChange;
