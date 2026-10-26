@@ -20,6 +20,13 @@ now returns no value instead of a made-up one, so your default applies.
    `"error"` (the default) throws the underlying error, and `"warn"` and `"ignore"` return
    `undefined`. `BoundQuonfig` (`withContext`) takes the same default.
 
+   **On default settings a typed read with no default throws.** A client built without `onNoDefault`
+   uses `"error"`, so `getBool("k")` with no default throws `QuonfigTypeMismatchError` on a
+   wrong-type value, and the malformed-value, unset-ENV_VAR or decryption error on those failures.
+   That is the same policy node has always applied to a missing key. To get `undefined` instead (the
+   "absent" result other SDKs return), pass a default or construct the client with
+   `onNoDefault: "warn"` or `"ignore"`. `isEnabled` is the exception and never throws.
+
 3. **`get(key, contexts, default)` returns the default on a resolution error.** In 1.x an unset
    ENV_VAR or a decryption failure threw even when you passed a default. In 2.0 it returns the
    default.
@@ -41,7 +48,9 @@ now returns no value instead of a made-up one, so your default applies.
 7. **One warning per key.** A type mismatch, a malformed value, an unset ENV_VAR or a decryption
    failure logs one WARN per key per client. It names the key, never the value. `isEnabled` also
    logs once per key when it returns `false` for a missing key or no matching rule, except under
-   `onNoDefault: "ignore"`. The malformed-duration warning is now this warning.
+   `onNoDefault: "ignore"`. The malformed-duration warning is now this warning. An `isEnabled` call
+   before `init()` logs its own once-per-key warning, which does not suppress a later read-failure
+   warning for that key.
 
 8. **A wrong decryption key now degrades to your defaults** with one WARN per key, instead of
    throwing from reads that pass a default. If that must be fatal, read the secret without a default
@@ -62,6 +71,9 @@ now returns no value instead of a made-up one, so your default applies.
   1.x reported `GENERAL`. An unset ENV_VAR or a decryption failure still reports `GENERAL`.
 - A malformed stored int, double or duration that is read with no default throws
   `[quonfig] Config "<key>" has a malformed <type> value` under `onNoDefault: "error"`.
+- A bool config whose stored value is not a JSON boolean (for example the string `"false"`) is a
+  malformed bool for every read, including the untyped `get()`. 1.x returned `!!value`, so `"false"`
+  read as `true`.
 
 ### Tests
 

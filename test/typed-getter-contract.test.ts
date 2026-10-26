@@ -290,3 +290,44 @@ describe("Details getters", () => {
     expect(client.getNumberDetails("getter.contract.double").value).toBe(3.9);
   });
 });
+
+describe("warning sets do not shadow each other", () => {
+  it("an isEnabled call before init() does not hide a later read-failure warning", async () => {
+    const logger = makeLogger();
+    const client = new Quonfig({
+      sdkKey: "test-unused",
+      environment: "Production",
+      enableSSE: false,
+      enablePolling: false,
+      enableQuonfigUserContext: false,
+      collectEvaluationSummaries: false,
+      contextUploadMode: "none",
+      logger,
+      datafile: {
+        meta: { version: "test", environment: "Production" },
+        configs: [config("early", "string", { type: "string", value: "x" })],
+      },
+    });
+    clients.push(client);
+    expect(client.isEnabled("early")).toBe(false);
+    await client.init();
+    expect(client.getBool("early", undefined, false)).toBe(false);
+    const lines = warnedAbout(logger, "early");
+    expect(lines.some((l) => l.includes("has type string, expected bool"))).toBe(true);
+  });
+});
+
+describe("untyped get() never coerces a malformed stored bool", () => {
+  it("a bool config holding a non-boolean is a malformed value, not !!value", async () => {
+    const logger = makeLogger();
+    const client = await inlineClient(
+      [config("bad-bool", "bool", { type: "bool", value: "false" as unknown as boolean })],
+      { logger, onNoDefault: "ignore" }
+    );
+    expect(client.get("bad-bool")).toBeUndefined();
+    expect(client.get("bad-bool", undefined, "D")).toBe("D");
+    expect(client.getBool("bad-bool", undefined, false)).toBe(false);
+    expect(client.isEnabled("bad-bool")).toBe(false);
+    expect(warnedAbout(logger, "bad-bool")).toHaveLength(1);
+  });
+});

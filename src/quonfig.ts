@@ -427,6 +427,9 @@ export class Quonfig {
   // Config keys already warned about a missing weighted-rollout hash property (qfg-9dxb.8).
   private readonly warnedMissingHashProperty = new Set<string>();
   private readonly warnedReadFailure = new Set<string>();
+  // Separate from warnedReadFailure so an isEnabled call before init() never
+  // hides a later real read failure for the same key.
+  private readonly warnedNotInitialized = new Set<string>();
   private resolver: Resolver;
   private dependencyResolver: ConfigDependencyResolver;
   private transport: Transport;
@@ -1498,7 +1501,7 @@ export class Quonfig {
   isEnabled(key: string, contexts?: Contexts): boolean {
     try {
       if (!this.initialized && !this.initFailed) {
-        this.warnReadFailureOnce(key, "the client is not initialized; isEnabled returns false");
+        this.warnNotInitializedOnce(key);
         return false;
       }
       const result = this.resolveForRead(key, contexts);
@@ -2169,6 +2172,15 @@ export class Quonfig {
     this.warnedReadFailure.add(key);
     this.logger.warn(
       `[quonfig] read of "${key}" returned no value; the caller's default applies: ${reason}`
+    );
+  }
+
+  /** Warn once per key that isEnabled was called before init() and returned false. */
+  private warnNotInitializedOnce(key: string): void {
+    if (this.warnedNotInitialized.has(key)) return;
+    this.warnedNotInitialized.add(key);
+    this.logger.warn(
+      `[quonfig] isEnabled("${key}") called before init() completed; returning false`
     );
   }
 

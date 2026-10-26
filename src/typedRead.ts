@@ -125,7 +125,9 @@ export function convertNatural(key: string, v: Value): GetValue {
     case "string":
       return String(v.value ?? "");
     case "bool":
-      return !!v.value;
+      // Never `!!value`: a bool config carrying "false" is malformed, not true.
+      if (typeof v.value === "boolean") return v.value;
+      throw new QuonfigMalformedValueError(key, "bool");
     case "int":
       return storedInt(key, v);
     case "double":
