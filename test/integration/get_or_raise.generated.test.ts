@@ -69,7 +69,7 @@ describe("get_or_raise", () => {
 
   it("get_or_raise returns a default value instead of raising", async () => {
     await withClient({}, (client) => {
-      expect(client.get("my-missing-key", undefined, "DEFAULT")).toBe("DEFAULT");
+      expect(client.getString("my-missing-key", undefined, "DEFAULT")).toBe("DEFAULT");
     });
   });
 
@@ -132,7 +132,7 @@ describe("get_or_raise", () => {
     try {
       expect(init.error, "on_init_failure continue: init() must resolve").toBeUndefined();
       const client = init.client;
-      expect(client.get("any-key", undefined, "DEFAULT")).toBe("DEFAULT");
+      expect(client.getString("any-key", undefined, "DEFAULT")).toBe("DEFAULT");
     } finally {
       await init.close();
     }
@@ -275,7 +275,7 @@ describe("get_or_raise", () => {
     try {
       expect(init.error, "on_init_failure continue: init() must resolve").toBeUndefined();
       const client = init.client;
-      expect(client.get("any-key", undefined, "DEFAULT")).toBe("DEFAULT");
+      expect(client.getString("any-key", undefined, "DEFAULT")).toBe("DEFAULT");
     } finally {
       await init.close();
     }
@@ -370,8 +370,8 @@ describe("get_or_raise", () => {
 
   it("raises an error if an env-var-provided config cannot be coerced to configured type", async () => {
     await withClient({}, (client) => {
-      expect(() => client.getNumber("provided.not.a.number")).toThrow(
-        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+      expect(() => client.getInt("provided.not.a.number")).toThrow(
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
       );
     });
   });
@@ -379,12 +379,12 @@ describe("get_or_raise", () => {
   it("coercion error for an int env var names the variable and never its value", async () => {
     await withEnv({ QUONFIG_ITD_SECRET_ENV: "postgres://admin:hunter2@db" }, async () => {
       await withClient({}, (client) => {
-        expect(() => client.getNumber("provided.secret.not.an.int")).toThrow(
-          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+        expect(() => client.getInt("provided.secret.not.an.int")).toThrow(
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
         );
         let raised: unknown;
         try {
-          client.getNumber("provided.secret.not.an.int");
+          client.getInt("provided.secret.not.an.int");
         } catch (e) {
           raised = e;
         }
@@ -402,7 +402,7 @@ describe("get_or_raise", () => {
     await withEnv({ QUONFIG_ITD_SECRET_ENV: "postgres://admin:hunter2@db" }, async () => {
       await withClient({}, (client) => {
         expect(() => client.getNumber("provided.secret.not.a.double")).toThrow(
-          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
         );
         let raised: unknown;
         try {
@@ -432,7 +432,7 @@ describe("get_or_raise", () => {
     await withEnv({ QUONFIG_ITD_DURATION_30S: "30s" }, async () => {
       await withClient({}, (client) => {
         expect(() => client.getDuration("provided.duration.malformed.30s")).toThrow(
-          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
         );
       });
     });
@@ -442,7 +442,7 @@ describe("get_or_raise", () => {
     await withEnv({ QUONFIG_ITD_DURATION_PT0_5H: "PT0.5H" }, async () => {
       await withClient({}, (client) => {
         expect(() => client.getDuration("provided.duration.malformed.PT0.5H")).toThrow(
-          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
         );
       });
     });
@@ -452,7 +452,7 @@ describe("get_or_raise", () => {
     await withEnv({ QUONFIG_ITD_DURATION_P1DT: "P1DT" }, async () => {
       await withClient({}, (client) => {
         expect(() => client.getDuration("provided.duration.malformed.P1DT")).toThrow(
-          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
         );
       });
     });
@@ -462,7 +462,7 @@ describe("get_or_raise", () => {
     await withEnv({ QUONFIG_ITD_DURATION_GARBAGE: "garbage" }, async () => {
       await withClient({}, (client) => {
         expect(() => client.getDuration("provided.duration.malformed.garbage")).toThrow(
-          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
         );
       });
     });
@@ -471,7 +471,7 @@ describe("get_or_raise", () => {
   it("raises an error if a stored duration 30s cannot be coerced", async () => {
     await withClient({}, (client) => {
       expect(() => client.getDuration("test.duration.malformed.30s")).toThrow(
-        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
       );
     });
   });
@@ -479,7 +479,7 @@ describe("get_or_raise", () => {
   it("raises an error if a stored duration PT0.5H cannot be coerced", async () => {
     await withClient({}, (client) => {
       expect(() => client.getDuration("test.duration.malformed.PT0.5H")).toThrow(
-        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
       );
     });
   });
@@ -487,7 +487,7 @@ describe("get_or_raise", () => {
   it("raises an error if a stored duration P1DT cannot be coerced", async () => {
     await withClient({}, (client) => {
       expect(() => client.getDuration("test.duration.malformed.P1DT")).toThrow(
-        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
       );
     });
   });
@@ -495,7 +495,7 @@ describe("get_or_raise", () => {
   it("raises an error if a stored duration garbage cannot be coerced", async () => {
     await withClient({}, (client) => {
       expect(() => client.getDuration("test.duration.malformed.garbage")).toThrow(
-        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
       );
     });
   });
@@ -503,7 +503,447 @@ describe("get_or_raise", () => {
   it("raises an error if a stored duration empty cannot be coerced", async () => {
     await withClient({}, (client) => {
       expect(() => client.getDuration("test.duration.malformed.empty")).toThrow(
-        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed duration value)$/
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
+      );
+    });
+  });
+
+  it("STRING get_or_raise on stored int raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getString("getter.contract.int")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("STRING get_or_raise on stored double raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getString("getter.contract.double")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("STRING get_or_raise on stored bool raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getString("getter.contract.bool")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("STRING get_or_raise on stored string_list raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getString("getter.contract.string_list")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("STRING get_or_raise on stored json raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getString("getter.contract.json")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("STRING get_or_raise on stored duration raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getString("getter.contract.duration")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("INT get_or_raise on stored string raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getInt("getter.contract.string")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("INT get_or_raise on stored double 3.9 raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getInt("getter.contract.double")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("INT get_or_raise on stored bool raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getInt("getter.contract.bool")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("INT get_or_raise on stored string_list raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getInt("getter.contract.string_list")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("INT get_or_raise on stored json raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getInt("getter.contract.json")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("INT get_or_raise on stored duration raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getInt("getter.contract.duration")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DOUBLE get_or_raise on stored string raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getNumber("getter.contract.string")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DOUBLE get_or_raise on stored bool raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getNumber("getter.contract.bool")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DOUBLE get_or_raise on stored string_list raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getNumber("getter.contract.string_list")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DOUBLE get_or_raise on stored json raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getNumber("getter.contract.json")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DOUBLE get_or_raise on stored duration raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getNumber("getter.contract.duration")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("BOOLEAN get_or_raise on stored string raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getBool("getter.contract.string")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("BOOLEAN get_or_raise on stored int raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getBool("getter.contract.int")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("BOOLEAN get_or_raise on stored double raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getBool("getter.contract.double")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("BOOLEAN get_or_raise on stored string_list raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getBool("getter.contract.string_list")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("BOOLEAN get_or_raise on stored json raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getBool("getter.contract.json")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("BOOLEAN get_or_raise on stored duration raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getBool("getter.contract.duration")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("STRING_LIST get_or_raise on stored string raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getStringList("getter.contract.string")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("STRING_LIST get_or_raise on stored int raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getStringList("getter.contract.int")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("STRING_LIST get_or_raise on stored double raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getStringList("getter.contract.double")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("STRING_LIST get_or_raise on stored bool raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getStringList("getter.contract.bool")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("STRING_LIST get_or_raise on stored json raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getStringList("getter.contract.json")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("STRING_LIST get_or_raise on stored duration raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getStringList("getter.contract.duration")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("JSON get_or_raise on stored string raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getJSON("getter.contract.string")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("JSON get_or_raise on stored int raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getJSON("getter.contract.int")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("JSON get_or_raise on stored double raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getJSON("getter.contract.double")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("JSON get_or_raise on stored bool raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getJSON("getter.contract.bool")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("JSON get_or_raise on stored string_list raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getJSON("getter.contract.string_list")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("JSON get_or_raise on stored duration raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getJSON("getter.contract.duration")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DURATION get_or_raise on stored string raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getDuration("getter.contract.string")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DURATION get_or_raise on stored int raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getDuration("getter.contract.int")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DURATION get_or_raise on stored double raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getDuration("getter.contract.double")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DURATION get_or_raise on stored bool raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getDuration("getter.contract.bool")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DURATION get_or_raise on stored string_list raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getDuration("getter.contract.string_list")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DURATION get_or_raise on stored json raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getDuration("getter.contract.json")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it('BOOLEAN get_or_raise on stored string "false" raises type_mismatch', async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getBool("getter.contract.string.false")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it('BOOLEAN get_or_raise on stored string "true" raises type_mismatch', async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getBool("getter.contract.string.true")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it('INT get_or_raise on stored string "3" raises type_mismatch', async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getInt("getter.contract.string.number")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it('DOUBLE get_or_raise on stored string "3" raises type_mismatch', async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getNumber("getter.contract.string.number")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it('DURATION get_or_raise on stored string "PT1S" raises type_mismatch', async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getDuration("getter.contract.string.duration")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("DOUBLE get_or_raise on stored int 30 returns 30.0", async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("getter.contract.int")).toBe(30);
+    });
+  });
+
+  it("INT get_or_raise on stored whole double 3.0 returns 3", async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.double.whole")).toBe(3);
+    });
+  });
+
+  it("INT get_or_raise on stored double 1e300 raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getInt("getter.contract.double.huge")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it("INT get_or_raise on stored double 2^53 (outside the safe int range) raises type_mismatch", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getInt("getter.contract.double.unsafe")).toThrow(
+        /^Config ".*" has type .*, expected .*$/
+      );
+    });
+  });
+
+  it('INT get_or_raise on stored malformed int "twelve" raises unable_to_coerce_env_var', async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getInt("getter.contract.int.malformed")).toThrow(
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
+      );
+    });
+  });
+
+  it('DOUBLE get_or_raise on stored malformed double "abc" raises unable_to_coerce_env_var', async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getNumber("getter.contract.double.malformed")).toThrow(
+        /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
+      );
+    });
+  });
+
+  it('INT get_or_raise on env-var-provided malformed int "twelve" raises unable_to_coerce_env_var', async () => {
+    await withEnv({ QUONFIG_ITD_GETTER_INT: "twelve" }, async () => {
+      await withClient({}, (client) => {
+        expect(() => client.getInt("getter.contract.provided.int.malformed")).toThrow(
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
+        );
+      });
+    });
+  });
+
+  it('DOUBLE get_or_raise on env-var-provided malformed double "abc" raises unable_to_coerce_env_var', async () => {
+    await withEnv({ QUONFIG_ITD_GETTER_DOUBLE: "abc" }, async () => {
+      await withClient({}, (client) => {
+        expect(() => client.getNumber("getter.contract.provided.double.malformed")).toThrow(
+          /^(environment variable ".*" cannot be converted to (int|double|duration) for config ".*"|\[quonfig\] Config ".*" has a malformed (int|double|duration) value)$/
+        );
+      });
+    });
+  });
+
+  it("BOOLEAN get_or_raise on a missing bool env var raises missing_env_var", async () => {
+    await withClient({}, (client) => {
+      expect(() => client.getBool("getter.contract.provided.bool.missing")).toThrow(
+        /^Environment variable ".*" not set for config "/
       );
     });
   });

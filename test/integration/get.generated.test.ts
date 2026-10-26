@@ -21,13 +21,13 @@ describe("get", () => {
 
   it("get returns a default for a missing value if a default is given", async () => {
     await withClient({}, (client) => {
-      expect(client.get("my-missing-key", undefined, "DEFAULT")).toBe("DEFAULT");
+      expect(client.getString("my-missing-key", undefined, "DEFAULT")).toBe("DEFAULT");
     });
   });
 
   it("get ignores a provided default if the key is found", async () => {
     await withClient({}, (client) => {
-      expect(client.get("my-test-key", undefined, "DEFAULT")).toBe("my-test-value");
+      expect(client.getString("my-test-key", undefined, "DEFAULT")).toBe("my-test-value");
     });
   });
 
@@ -53,7 +53,7 @@ describe("get", () => {
 
   it("can return a value provided by an environment variable after type coercion", async () => {
     await withClient({}, (client) => {
-      expect(client.getNumber("provided.a.number")).toBe(1234);
+      expect(client.getInt("provided.a.number")).toBe(1234);
     });
   });
 
@@ -241,7 +241,7 @@ describe("get", () => {
 
   it("stored malformed duration 30s returns the default", async () => {
     await withClient({}, (client) => {
-      expect(client.get("test.duration.malformed.30s", undefined, 7000)).toBe(7000);
+      expect(client.getDuration("test.duration.malformed.30s", undefined, 7000)).toBe(7000);
     });
   });
 
@@ -253,7 +253,7 @@ describe("get", () => {
 
   it("stored malformed duration PT0.5H returns the default", async () => {
     await withClient({}, (client) => {
-      expect(client.get("test.duration.malformed.PT0.5H", undefined, 7000)).toBe(7000);
+      expect(client.getDuration("test.duration.malformed.PT0.5H", undefined, 7000)).toBe(7000);
     });
   });
 
@@ -265,7 +265,7 @@ describe("get", () => {
 
   it("stored malformed duration P1DT returns the default", async () => {
     await withClient({}, (client) => {
-      expect(client.get("test.duration.malformed.P1DT", undefined, 7000)).toBe(7000);
+      expect(client.getDuration("test.duration.malformed.P1DT", undefined, 7000)).toBe(7000);
     });
   });
 
@@ -277,7 +277,7 @@ describe("get", () => {
 
   it("stored malformed duration garbage returns the default", async () => {
     await withClient({}, (client) => {
-      expect(client.get("test.duration.malformed.garbage", undefined, 7000)).toBe(7000);
+      expect(client.getDuration("test.duration.malformed.garbage", undefined, 7000)).toBe(7000);
     });
   });
 
@@ -289,7 +289,7 @@ describe("get", () => {
 
   it("stored malformed duration empty returns the default", async () => {
     await withClient({}, (client) => {
-      expect(client.get("test.duration.malformed.empty", undefined, 7000)).toBe(7000);
+      expect(client.getDuration("test.duration.malformed.empty", undefined, 7000)).toBe(7000);
     });
   });
 
@@ -302,7 +302,7 @@ describe("get", () => {
   it("env-var-provided malformed duration 30s returns the default", async () => {
     await withEnv({ QUONFIG_ITD_DURATION_30S: "30s" }, async () => {
       await withClient({}, (client) => {
-        expect(client.get("provided.duration.malformed.30s", undefined, 7000)).toBe(7000);
+        expect(client.getDuration("provided.duration.malformed.30s", undefined, 7000)).toBe(7000);
       });
     });
   });
@@ -318,7 +318,9 @@ describe("get", () => {
   it("env-var-provided malformed duration PT0.5H returns the default", async () => {
     await withEnv({ QUONFIG_ITD_DURATION_PT0_5H: "PT0.5H" }, async () => {
       await withClient({}, (client) => {
-        expect(client.get("provided.duration.malformed.PT0.5H", undefined, 7000)).toBe(7000);
+        expect(client.getDuration("provided.duration.malformed.PT0.5H", undefined, 7000)).toBe(
+          7000
+        );
       });
     });
   });
@@ -334,7 +336,7 @@ describe("get", () => {
   it("env-var-provided malformed duration P1DT returns the default", async () => {
     await withEnv({ QUONFIG_ITD_DURATION_P1DT: "P1DT" }, async () => {
       await withClient({}, (client) => {
-        expect(client.get("provided.duration.malformed.P1DT", undefined, 7000)).toBe(7000);
+        expect(client.getDuration("provided.duration.malformed.P1DT", undefined, 7000)).toBe(7000);
       });
     });
   });
@@ -350,7 +352,9 @@ describe("get", () => {
   it("env-var-provided malformed duration garbage returns the default", async () => {
     await withEnv({ QUONFIG_ITD_DURATION_GARBAGE: "garbage" }, async () => {
       await withClient({}, (client) => {
-        expect(client.get("provided.duration.malformed.garbage", undefined, 7000)).toBe(7000);
+        expect(client.getDuration("provided.duration.malformed.garbage", undefined, 7000)).toBe(
+          7000
+        );
       });
     });
   });
@@ -359,6 +363,738 @@ describe("get", () => {
     await withEnv({ QUONFIG_ITD_DURATION_GARBAGE: "garbage" }, async () => {
       await withClient({ onNoDefault: "warn" }, (client) => {
         expect(client.getDuration("provided.duration.malformed.garbage")).toBe(undefined);
+      });
+    });
+  });
+
+  it("STRING getter on stored int returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("getter.contract.int", undefined, "DEFAULT")).toBe("DEFAULT");
+    });
+  });
+
+  it("STRING getter on stored int with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getString("getter.contract.int")).toBe(undefined);
+    });
+  });
+
+  it("STRING getter on stored double returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("getter.contract.double", undefined, "DEFAULT")).toBe("DEFAULT");
+    });
+  });
+
+  it("STRING getter on stored double with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getString("getter.contract.double")).toBe(undefined);
+    });
+  });
+
+  it("STRING getter on stored bool returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("getter.contract.bool", undefined, "DEFAULT")).toBe("DEFAULT");
+    });
+  });
+
+  it("STRING getter on stored bool with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getString("getter.contract.bool")).toBe(undefined);
+    });
+  });
+
+  it("STRING getter on stored string_list returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("getter.contract.string_list", undefined, "DEFAULT")).toBe("DEFAULT");
+    });
+  });
+
+  it("STRING getter on stored string_list with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getString("getter.contract.string_list")).toBe(undefined);
+    });
+  });
+
+  it("STRING getter on stored json returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("getter.contract.json", undefined, "DEFAULT")).toBe("DEFAULT");
+    });
+  });
+
+  it("STRING getter on stored json with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getString("getter.contract.json")).toBe(undefined);
+    });
+  });
+
+  it("STRING getter on stored duration returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("getter.contract.duration", undefined, "DEFAULT")).toBe("DEFAULT");
+    });
+  });
+
+  it("STRING getter on stored duration with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getString("getter.contract.duration")).toBe(undefined);
+    });
+  });
+
+  it("INT getter on stored string returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.string", undefined, 7)).toBe(7);
+    });
+  });
+
+  it("INT getter on stored string with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getInt("getter.contract.string")).toBe(undefined);
+    });
+  });
+
+  it("INT getter on stored double 3.9 returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.double", undefined, 7)).toBe(7);
+    });
+  });
+
+  it("INT getter on stored double 3.9 with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getInt("getter.contract.double")).toBe(undefined);
+    });
+  });
+
+  it("INT getter on stored bool returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.bool", undefined, 7)).toBe(7);
+    });
+  });
+
+  it("INT getter on stored bool with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getInt("getter.contract.bool")).toBe(undefined);
+    });
+  });
+
+  it("INT getter on stored string_list returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.string_list", undefined, 7)).toBe(7);
+    });
+  });
+
+  it("INT getter on stored string_list with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getInt("getter.contract.string_list")).toBe(undefined);
+    });
+  });
+
+  it("INT getter on stored json returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.json", undefined, 7)).toBe(7);
+    });
+  });
+
+  it("INT getter on stored json with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getInt("getter.contract.json")).toBe(undefined);
+    });
+  });
+
+  it("INT getter on stored duration returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.duration", undefined, 7)).toBe(7);
+    });
+  });
+
+  it("INT getter on stored duration with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getInt("getter.contract.duration")).toBe(undefined);
+    });
+  });
+
+  it("DOUBLE getter on stored string returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("getter.contract.string", undefined, 7.5)).toBe(7.5);
+    });
+  });
+
+  it("DOUBLE getter on stored string with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getNumber("getter.contract.string")).toBe(undefined);
+    });
+  });
+
+  it("DOUBLE getter on stored bool returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("getter.contract.bool", undefined, 7.5)).toBe(7.5);
+    });
+  });
+
+  it("DOUBLE getter on stored bool with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getNumber("getter.contract.bool")).toBe(undefined);
+    });
+  });
+
+  it("DOUBLE getter on stored string_list returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("getter.contract.string_list", undefined, 7.5)).toBe(7.5);
+    });
+  });
+
+  it("DOUBLE getter on stored string_list with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getNumber("getter.contract.string_list")).toBe(undefined);
+    });
+  });
+
+  it("DOUBLE getter on stored json returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("getter.contract.json", undefined, 7.5)).toBe(7.5);
+    });
+  });
+
+  it("DOUBLE getter on stored json with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getNumber("getter.contract.json")).toBe(undefined);
+    });
+  });
+
+  it("DOUBLE getter on stored duration returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("getter.contract.duration", undefined, 7.5)).toBe(7.5);
+    });
+  });
+
+  it("DOUBLE getter on stored duration with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getNumber("getter.contract.duration")).toBe(undefined);
+    });
+  });
+
+  it("BOOLEAN getter on stored string returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getBool("getter.contract.string", undefined, false)).toBe(false);
+    });
+  });
+
+  it("BOOLEAN getter on stored string with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getBool("getter.contract.string")).toBe(undefined);
+    });
+  });
+
+  it("BOOLEAN getter on stored int returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getBool("getter.contract.int", undefined, false)).toBe(false);
+    });
+  });
+
+  it("BOOLEAN getter on stored int with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getBool("getter.contract.int")).toBe(undefined);
+    });
+  });
+
+  it("BOOLEAN getter on stored double returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getBool("getter.contract.double", undefined, false)).toBe(false);
+    });
+  });
+
+  it("BOOLEAN getter on stored double with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getBool("getter.contract.double")).toBe(undefined);
+    });
+  });
+
+  it("BOOLEAN getter on stored string_list returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getBool("getter.contract.string_list", undefined, false)).toBe(false);
+    });
+  });
+
+  it("BOOLEAN getter on stored string_list with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getBool("getter.contract.string_list")).toBe(undefined);
+    });
+  });
+
+  it("BOOLEAN getter on stored json returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getBool("getter.contract.json", undefined, false)).toBe(false);
+    });
+  });
+
+  it("BOOLEAN getter on stored json with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getBool("getter.contract.json")).toBe(undefined);
+    });
+  });
+
+  it("BOOLEAN getter on stored duration returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getBool("getter.contract.duration", undefined, false)).toBe(false);
+    });
+  });
+
+  it("BOOLEAN getter on stored duration with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getBool("getter.contract.duration")).toBe(undefined);
+    });
+  });
+
+  it("STRING_LIST getter on stored string returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getStringList("getter.contract.string", undefined, ["DEFAULT"])).toEqual([
+        "DEFAULT",
+      ]);
+    });
+  });
+
+  it("STRING_LIST getter on stored string with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getStringList("getter.contract.string")).toBe(undefined);
+    });
+  });
+
+  it("STRING_LIST getter on stored int returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getStringList("getter.contract.int", undefined, ["DEFAULT"])).toEqual([
+        "DEFAULT",
+      ]);
+    });
+  });
+
+  it("STRING_LIST getter on stored int with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getStringList("getter.contract.int")).toBe(undefined);
+    });
+  });
+
+  it("STRING_LIST getter on stored double returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getStringList("getter.contract.double", undefined, ["DEFAULT"])).toEqual([
+        "DEFAULT",
+      ]);
+    });
+  });
+
+  it("STRING_LIST getter on stored double with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getStringList("getter.contract.double")).toBe(undefined);
+    });
+  });
+
+  it("STRING_LIST getter on stored bool returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getStringList("getter.contract.bool", undefined, ["DEFAULT"])).toEqual([
+        "DEFAULT",
+      ]);
+    });
+  });
+
+  it("STRING_LIST getter on stored bool with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getStringList("getter.contract.bool")).toBe(undefined);
+    });
+  });
+
+  it("STRING_LIST getter on stored json returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getStringList("getter.contract.json", undefined, ["DEFAULT"])).toEqual([
+        "DEFAULT",
+      ]);
+    });
+  });
+
+  it("STRING_LIST getter on stored json with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getStringList("getter.contract.json")).toBe(undefined);
+    });
+  });
+
+  it("STRING_LIST getter on stored duration returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getStringList("getter.contract.duration", undefined, ["DEFAULT"])).toEqual([
+        "DEFAULT",
+      ]);
+    });
+  });
+
+  it("STRING_LIST getter on stored duration with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getStringList("getter.contract.duration")).toBe(undefined);
+    });
+  });
+
+  it("JSON getter on stored string returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getJSON("getter.contract.string", undefined, { default: true })).toEqual({
+        default: true,
+      });
+    });
+  });
+
+  it("JSON getter on stored string with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getJSON("getter.contract.string")).toBe(undefined);
+    });
+  });
+
+  it("JSON getter on stored int returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getJSON("getter.contract.int", undefined, { default: true })).toEqual({
+        default: true,
+      });
+    });
+  });
+
+  it("JSON getter on stored int with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getJSON("getter.contract.int")).toBe(undefined);
+    });
+  });
+
+  it("JSON getter on stored double returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getJSON("getter.contract.double", undefined, { default: true })).toEqual({
+        default: true,
+      });
+    });
+  });
+
+  it("JSON getter on stored double with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getJSON("getter.contract.double")).toBe(undefined);
+    });
+  });
+
+  it("JSON getter on stored bool returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getJSON("getter.contract.bool", undefined, { default: true })).toEqual({
+        default: true,
+      });
+    });
+  });
+
+  it("JSON getter on stored bool with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getJSON("getter.contract.bool")).toBe(undefined);
+    });
+  });
+
+  it("JSON getter on stored string_list returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getJSON("getter.contract.string_list", undefined, { default: true })).toEqual({
+        default: true,
+      });
+    });
+  });
+
+  it("JSON getter on stored string_list with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getJSON("getter.contract.string_list")).toBe(undefined);
+    });
+  });
+
+  it("JSON getter on stored duration returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getJSON("getter.contract.duration", undefined, { default: true })).toEqual({
+        default: true,
+      });
+    });
+  });
+
+  it("JSON getter on stored duration with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getJSON("getter.contract.duration")).toBe(undefined);
+    });
+  });
+
+  it("DURATION getter on stored string returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("getter.contract.string", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it("DURATION getter on stored string with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("getter.contract.string")).toBe(undefined);
+    });
+  });
+
+  it("DURATION getter on stored int returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("getter.contract.int", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it("DURATION getter on stored int with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("getter.contract.int")).toBe(undefined);
+    });
+  });
+
+  it("DURATION getter on stored double returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("getter.contract.double", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it("DURATION getter on stored double with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("getter.contract.double")).toBe(undefined);
+    });
+  });
+
+  it("DURATION getter on stored bool returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("getter.contract.bool", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it("DURATION getter on stored bool with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("getter.contract.bool")).toBe(undefined);
+    });
+  });
+
+  it("DURATION getter on stored string_list returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("getter.contract.string_list", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it("DURATION getter on stored string_list with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("getter.contract.string_list")).toBe(undefined);
+    });
+  });
+
+  it("DURATION getter on stored json returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("getter.contract.json", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it("DURATION getter on stored json with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("getter.contract.json")).toBe(undefined);
+    });
+  });
+
+  it('BOOLEAN getter on stored string "false" returns the default', async () => {
+    await withClient({}, (client) => {
+      expect(client.getBool("getter.contract.string.false", undefined, false)).toBe(false);
+    });
+  });
+
+  it('BOOLEAN getter on stored string "false" with no default returns nil', async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getBool("getter.contract.string.false")).toBe(undefined);
+    });
+  });
+
+  it('BOOLEAN getter on stored string "false" returns a true default', async () => {
+    await withClient({}, (client) => {
+      expect(client.getBool("getter.contract.string.false", undefined, true)).toBe(true);
+    });
+  });
+
+  it('BOOLEAN getter on stored string "true" returns the default', async () => {
+    await withClient({}, (client) => {
+      expect(client.getBool("getter.contract.string.true", undefined, false)).toBe(false);
+    });
+  });
+
+  it('BOOLEAN getter on stored string "true" with no default returns nil', async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getBool("getter.contract.string.true")).toBe(undefined);
+    });
+  });
+
+  it('INT getter on stored string "3" returns the default', async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.string.number", undefined, 7)).toBe(7);
+    });
+  });
+
+  it('INT getter on stored string "3" with no default returns nil', async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getInt("getter.contract.string.number")).toBe(undefined);
+    });
+  });
+
+  it('DOUBLE getter on stored string "3" returns the default', async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("getter.contract.string.number", undefined, 7.5)).toBe(7.5);
+    });
+  });
+
+  it('DOUBLE getter on stored string "3" with no default returns nil', async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getNumber("getter.contract.string.number")).toBe(undefined);
+    });
+  });
+
+  it('DURATION getter on stored string "PT1S" returns the default', async () => {
+    await withClient({}, (client) => {
+      expect(client.getDuration("getter.contract.string.duration", undefined, 7000)).toBe(7000);
+    });
+  });
+
+  it('DURATION getter on stored string "PT1S" with no default returns nil', async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getDuration("getter.contract.string.duration")).toBe(undefined);
+    });
+  });
+
+  it("DOUBLE get on stored int 30 returns 30.0", async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("getter.contract.int")).toBe(30);
+    });
+  });
+
+  it("INT get on stored whole double 3.0 returns 3", async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.double.whole")).toBe(3);
+    });
+  });
+
+  it("DOUBLE getter on stored int 30 ignores the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("getter.contract.int", undefined, 7.5)).toBe(30);
+    });
+  });
+
+  it("INT getter on stored whole double 3.0 ignores the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.double.whole", undefined, 7)).toBe(3);
+    });
+  });
+
+  it("INT getter on stored double 1e300 returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.double.huge", undefined, 7)).toBe(7);
+    });
+  });
+
+  it("INT getter on stored double 1e300 with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getInt("getter.contract.double.huge")).toBe(undefined);
+    });
+  });
+
+  it("INT getter on stored double 2^53 (outside the safe int range) returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.double.unsafe", undefined, 7)).toBe(7);
+    });
+  });
+
+  it("INT getter on stored double 2^53 (outside the safe int range) with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getInt("getter.contract.double.unsafe")).toBe(undefined);
+    });
+  });
+
+  it('INT getter on stored malformed int "twelve" returns the default', async () => {
+    await withClient({}, (client) => {
+      expect(client.getInt("getter.contract.int.malformed", undefined, 7)).toBe(7);
+    });
+  });
+
+  it('INT getter on stored malformed int "twelve" with no default returns nil', async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getInt("getter.contract.int.malformed")).toBe(undefined);
+    });
+  });
+
+  it('DOUBLE getter on stored malformed double "abc" returns the default', async () => {
+    await withClient({}, (client) => {
+      expect(client.getNumber("getter.contract.double.malformed", undefined, 7.5)).toBe(7.5);
+    });
+  });
+
+  it('DOUBLE getter on stored malformed double "abc" with no default returns nil', async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getNumber("getter.contract.double.malformed")).toBe(undefined);
+    });
+  });
+
+  it('INT getter on env-var-provided malformed int "twelve" returns the default', async () => {
+    await withEnv({ QUONFIG_ITD_GETTER_INT: "twelve" }, async () => {
+      await withClient({}, (client) => {
+        expect(client.getInt("getter.contract.provided.int.malformed", undefined, 7)).toBe(7);
+      });
+    });
+  });
+
+  it('INT getter on env-var-provided malformed int "twelve" with no default returns nil', async () => {
+    await withEnv({ QUONFIG_ITD_GETTER_INT: "twelve" }, async () => {
+      await withClient({ onNoDefault: "warn" }, (client) => {
+        expect(client.getInt("getter.contract.provided.int.malformed")).toBe(undefined);
+      });
+    });
+  });
+
+  it('DOUBLE getter on env-var-provided malformed double "abc" returns the default', async () => {
+    await withEnv({ QUONFIG_ITD_GETTER_DOUBLE: "abc" }, async () => {
+      await withClient({}, (client) => {
+        expect(client.getNumber("getter.contract.provided.double.malformed", undefined, 7.5)).toBe(
+          7.5
+        );
+      });
+    });
+  });
+
+  it('DOUBLE getter on env-var-provided malformed double "abc" with no default returns nil', async () => {
+    await withEnv({ QUONFIG_ITD_GETTER_DOUBLE: "abc" }, async () => {
+      await withClient({ onNoDefault: "warn" }, (client) => {
+        expect(client.getNumber("getter.contract.provided.double.malformed")).toBe(undefined);
+      });
+    });
+  });
+
+  it("STRING getter on a missing env var returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("provided.by.missing.env.var", undefined, "DEFAULT")).toBe("DEFAULT");
+    });
+  });
+
+  it("STRING getter on a missing env var with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getString("provided.by.missing.env.var")).toBe(undefined);
+    });
+  });
+
+  it("STRING getter on a decryption failure returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getString("a.broken.secret.config", undefined, "DEFAULT")).toBe("DEFAULT");
+    });
+  });
+
+  it("STRING getter on a decryption failure with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getString("a.broken.secret.config")).toBe(undefined);
+    });
+  });
+
+  it("BOOLEAN getter on a missing bool env var returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(client.getBool("getter.contract.provided.bool.missing", undefined, true)).toBe(true);
+    });
+  });
+
+  it("BOOLEAN getter on a missing bool env var with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getBool("getter.contract.provided.bool.missing")).toBe(undefined);
+    });
+  });
+
+  it('BOOLEAN getter on env-var-provided bool "false" returns false', async () => {
+    await withEnv({ QUONFIG_ITD_GETTER_BOOL: "false" }, async () => {
+      await withClient({}, (client) => {
+        expect(client.getBool("getter.contract.provided.bool")).toBe(false);
       });
     });
   });

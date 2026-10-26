@@ -112,7 +112,14 @@ describe("malformed duration contract through the public client", () => {
   // A stored duration comes back from get() as integer ms, so an ENV_VAR one must too.
   it("env-var-provided PT1.5S -> 1500 via get (not the ISO string)", () => {
     expect(ignoring.get("provided.duration.PT1.5S")).toBe(1500);
-    expect(ignoring.getNumberDetails("provided.duration.PT1.5S").value).toBe(1500);
+  });
+
+  // Typed-getter contract (qfg-zvyy, 2.0): a duration is not a number.
+  it("getNumberDetails on a duration config reports TYPE_MISMATCH", () => {
+    const details = ignoring.getNumberDetails("provided.duration.PT1.5S");
+    expect(details.value).toBeUndefined();
+    expect(details.reason).toBe("ERROR");
+    expect(details.errorCode).toBe("TYPE_MISMATCH");
   });
 
   for (const key of [...STORED, ...PROVIDED]) {

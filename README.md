@@ -24,9 +24,9 @@ if (quonfig.isEnabled("new-dashboard")) {
   // show new dashboard
 }
 
-// Config values
-const limit = quonfig.getNumber("rate-limit");
-const regions = quonfig.getStringList("allowed-regions");
+// Config values, with the default to use when there is no value
+const limit = quonfig.getInt("rate-limit", undefined, 100);
+const regions = quonfig.getStringList("allowed-regions", undefined, ["us"]);
 
 // Context-aware evaluation
 const value = quonfig.get("homepage-hero", {
@@ -48,7 +48,49 @@ quonfig.close();
 > of `isEnabled` — both behave identically. New code should prefer `isEnabled`, which matches
 > `@quonfig/javascript` and `@quonfig/react`. `inContext` is likewise a deprecated alias for
 > `withContext` — both behave identically; `withContext` is the canonical name across all Quonfig
-> SDKs and `inContext` will be removed in 2.0.0.
+> SDKs and `inContext` will be removed in a future major release.
+
+## Typed getters
+
+| Getter                                    | Reads                                                   |
+| ----------------------------------------- | ------------------------------------------------------- |
+| `getString(key, contexts?, default?)`     | string and log_level configs                            |
+| `getBool(key, contexts?, default?)`       | bool configs                                            |
+| `getInt(key, contexts?, default?)`        | int configs, and doubles that are whole numbers         |
+| `getNumber(key, contexts?, default?)`     | int and double configs                                  |
+| `getStringList(key, contexts?, default?)` | string_list configs                                     |
+| `getDuration(key, contexts?, default?)`   | duration configs, in milliseconds                       |
+| `getJSON(key, contexts?, default?)`       | json configs (a fresh copy on every call)               |
+| `get(key, contexts?, default?)`           | any config, as its stored type                          |
+| `isEnabled(key, contexts?)`               | bool flags; `false` for anything else, and never throws |
+
+Every Quonfig SDK follows the same contract. A typed getter returns a value of its type or "no
+value". It returns no value when:
+
+- the key is missing, or no rule matches;
+- the config holds another type. There is no string coercion: a stored string `"false"` is not a
+  bool and `"3"` is not a number;
+- the value is malformed, for example an int config holding `"twelve"` or a duration config holding
+  `"30s"`;
+- the value comes from an ENV_VAR that is not set, or it cannot be decrypted.
+
+With no value, the getter returns your default if you passed one. If you did not, `onNoDefault`
+decides: `"error"` (the default) throws the underlying error (`QuonfigTypeMismatchError` for a wrong
+type), and `"warn"` and `"ignore"` return `undefined`. Every case except a missing key or no
+matching rule logs one warning per key per client. The warning names the key, never the value.
+
+Numbers convert only when the result is exact. `getNumber` reads an int as it is (`30`), and
+`getInt` reads a double only when it is a whole number within ±(2^53-1) (`3.0` becomes `3`). `3.9`,
+`1e300` and `2^53` are type mismatches for `getInt`. It never truncates.
+
+The `*Details` getters (`getBoolDetails`, `getStringDetails`, `getNumberDetails`,
+`getStringListDetails`, `getJSONDetails`) never throw. They report `reason: "ERROR"` with
+`errorCode: "TYPE_MISMATCH"` for a wrong-type or malformed value, and `errorCode: "GENERAL"` for an
+unset ENV_VAR or a decryption failure.
+
+**If a bad config must fail hard**, for example a wrong decryption key in production, read it
+without a default on a client with `onNoDefault: "error"`. The getter then throws instead of
+returning your default.
 
 ## Options
 

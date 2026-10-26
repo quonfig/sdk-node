@@ -9,25 +9,19 @@ import { withClient } from "./setup";
 describe("get_weighted_values", () => {
   it("weighted value is consistent 1", async () => {
     await withClient({}, (client) => {
-      expect(client.getNumber("feature-flag.weighted", { user: { tracking_id: "a72c15f5" } })).toBe(
-        1
-      );
+      expect(client.getInt("feature-flag.weighted", { user: { tracking_id: "a72c15f5" } })).toBe(1);
     });
   });
 
   it("weighted value is consistent 2", async () => {
     await withClient({}, (client) => {
-      expect(client.getNumber("feature-flag.weighted", { user: { tracking_id: "92a202f2" } })).toBe(
-        2
-      );
+      expect(client.getInt("feature-flag.weighted", { user: { tracking_id: "92a202f2" } })).toBe(2);
     });
   });
 
   it("weighted value is consistent 3", async () => {
     await withClient({}, (client) => {
-      expect(client.getNumber("feature-flag.weighted", { user: { tracking_id: "8f414100" } })).toBe(
-        3
-      );
+      expect(client.getInt("feature-flag.weighted", { user: { tracking_id: "8f414100" } })).toBe(3);
     });
   });
 
@@ -136,7 +130,7 @@ describe("get_weighted_values", () => {
   it("weighted value with hash property missing from context hashes empty string", async () => {
     await withClient({}, (client) => {
       expect(
-        client.getNumber("feature-flag.weighted.missing-hash", {
+        client.getInt("feature-flag.weighted.missing-hash", {
           user: { key: "no-tracking-id-user" },
         })
       ).toBe(2);
@@ -145,14 +139,14 @@ describe("get_weighted_values", () => {
 
   it("weighted value with no context hashes empty string", async () => {
     await withClient({}, (client) => {
-      expect(client.getNumber("feature-flag.weighted.missing-hash")).toBe(2);
+      expect(client.getInt("feature-flag.weighted.missing-hash")).toBe(2);
     });
   });
 
   it("weighted value with hash property empty string hashes empty string", async () => {
     await withClient({}, (client) => {
       expect(
-        client.getNumber("feature-flag.weighted.missing-hash", {
+        client.getInt("feature-flag.weighted.missing-hash", {
           user: { key: "empty-tracking-id-user", tracking_id: "" },
         })
       ).toBe(2);
@@ -162,9 +156,7 @@ describe("get_weighted_values", () => {
   it("weighted value with zero-weight first variant and hash property missing never serves zero-weight variant", async () => {
     await withClient({}, (client) => {
       expect(
-        client.getNumber("feature-flag.weighted.zero-first", {
-          user: { key: "no-tracking-id-user" },
-        })
+        client.getInt("feature-flag.weighted.zero-first", { user: { key: "no-tracking-id-user" } })
       ).toBe(2);
     });
   });
@@ -172,7 +164,7 @@ describe("get_weighted_values", () => {
   it("weighted value with no hash property is random on every evaluation", async () => {
     await withClient({}, (client) => {
       const seen = new Set<unknown>();
-      for (let i = 0; i < 200; i++) seen.add(client.getNumber("feature-flag.weighted.no-hash"));
+      for (let i = 0; i < 200; i++) seen.add(client.getInt("feature-flag.weighted.no-hash"));
       expect(seen).toEqual(new Set([1, 2]));
     });
   });
@@ -182,7 +174,7 @@ describe("get_weighted_values", () => {
       const seen = new Set<unknown>();
       for (let i = 0; i < 200; i++)
         seen.add(
-          client.getNumber("feature-flag.weighted.no-hash", {
+          client.getInt("feature-flag.weighted.no-hash", {
             user: { key: "same-user-every-time", tracking_id: "same-tracking-id" },
           })
         );

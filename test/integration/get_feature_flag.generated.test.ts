@@ -9,13 +9,13 @@ import { withClient } from "./setup";
 describe("get_feature_flag", () => {
   it("get returns the underlying value for a feature flag", async () => {
     await withClient({}, (client) => {
-      expect(client.getNumber("feature-flag.integer")).toBe(3);
+      expect(client.getInt("feature-flag.integer")).toBe(3);
     });
   });
 
   it("get returns the underlying value for a feature flag that matches the highest precedent rule", async () => {
     await withClient({}, (client) => {
-      expect(client.getNumber("feature-flag.integer", { user: { key: "michael" } })).toBe(5);
+      expect(client.getInt("feature-flag.integer", { user: { key: "michael" } })).toBe(5);
     });
   });
 });

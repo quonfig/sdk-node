@@ -4,7 +4,7 @@
 // Source: integration-test-data/generators/src/targets/node.ts
 
 import { describe, it, expect } from "vitest";
-import { withClient } from "./setup";
+import { withClient, withEnv } from "./setup";
 
 describe("enabled", () => {
   it("returns the correct value for a simple flag", async () => {
@@ -1042,6 +1042,80 @@ describe("enabled", () => {
     await withClient({}, (client) => {
       const scope = client.withContext({ user: { age: "35" } });
       expect(scope.isEnabled("feature-flag.greater-than")).toBe(false);
+    });
+  });
+
+  it("enabled on stored bool true returns true", async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("getter.contract.bool")).toBe(true);
+    });
+  });
+
+  it('enabled on env-var-provided bool "true" returns true', async () => {
+    await withEnv({ QUONFIG_ITD_GETTER_BOOL: "true" }, async () => {
+      await withClient({}, (client) => {
+        expect(client.isEnabled("getter.contract.provided.bool")).toBe(true);
+      });
+    });
+  });
+
+  it("enabled on stored string returns false", async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("getter.contract.string")).toBe(false);
+    });
+  });
+
+  it("enabled on stored int returns false", async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("getter.contract.int")).toBe(false);
+    });
+  });
+
+  it("enabled on stored double returns false", async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("getter.contract.double")).toBe(false);
+    });
+  });
+
+  it("enabled on stored string_list returns false", async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("getter.contract.string_list")).toBe(false);
+    });
+  });
+
+  it("enabled on stored json returns false", async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("getter.contract.json")).toBe(false);
+    });
+  });
+
+  it("enabled on stored duration returns false", async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("getter.contract.duration")).toBe(false);
+    });
+  });
+
+  it('enabled on stored string "true" returns false', async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("getter.contract.string.true")).toBe(false);
+    });
+  });
+
+  it('enabled on stored malformed int "twelve" returns false', async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("getter.contract.int.malformed")).toBe(false);
+    });
+  });
+
+  it("enabled on a missing bool env var returns false", async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("getter.contract.provided.bool.missing")).toBe(false);
+    });
+  });
+
+  it("enabled on a decryption failure returns false", async () => {
+    await withClient({}, (client) => {
+      expect(client.isEnabled("a.broken.secret.config")).toBe(false);
     });
   });
 });

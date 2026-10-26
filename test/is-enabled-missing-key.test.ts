@@ -42,12 +42,15 @@ describe("isEnabled on a missing flag key", () => {
     expect(client.withContext(CTX).isEnabled(MISSING)).toBe(false);
   });
 
-  it("returns false under onNoDefault 'warn' and still logs the warning", async () => {
+  it("returns false under onNoDefault 'warn' and logs the warning once per key", async () => {
     const logger = { warn: vi.fn(), error: vi.fn() };
     const client = await makeClient({ onNoDefault: "warn", logger });
     expect(client.isEnabled(MISSING)).toBe(false);
     expect(client.isEnabled(MISSING, CTX)).toBe(false);
-    expect(logger.warn).toHaveBeenCalledWith(`No value found for key "${MISSING}"`);
+    const warned = logger.warn.mock.calls.filter((c) =>
+      String(c[0]).includes(`No value found for key "${MISSING}"`)
+    );
+    expect(warned).toHaveLength(1);
   });
 
   it("returns false under onNoDefault 'ignore'", async () => {
@@ -63,12 +66,15 @@ describe("isEnabled on a missing flag key", () => {
     expect(() => client.getString(MISSING)).toThrow(`No value found for key "${MISSING}"`);
   });
 
-  it("still throws when called before init()", () => {
+  // Typed-getter contract (qfg-zvyy, 2.0): isEnabled never throws, even
+  // before init(). The typed getters still throw there (a programming error).
+  it("returns false when called before init()", () => {
     const client = new Quonfig({
       sdkKey: "test-unused",
       datadir: DATA_DIR,
       environment: ENVIRONMENT,
     });
-    expect(() => client.isEnabled(MISSING)).toThrow();
+    expect(client.isEnabled(MISSING)).toBe(false);
+    expect(() => client.getBool(MISSING)).toThrow();
   });
 });
