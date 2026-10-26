@@ -1,5 +1,87 @@
 # Changelog
 
+## 2.0.0 - Unreleased
+
+The typed-getter contract (qfg-zvyy). Every Quonfig SDK now shares it, and the integration-test-data
+matrix (`getter.contract.*`) pins it. If a typed read cannot return a value of the getter's type, it
+now returns no value instead of a made-up one, so your default applies.
+
+### UPGRADE to 2.0
+
+1. **No string coercion.** 1.x converted mismatched values with JavaScript rules. `getBool` on a
+   stored string `"false"` returned `true`, `getNumber("abc")` returned `NaN`, and `getString` on an
+   int returned its text. In 2.0 a value of another type is a type mismatch. A stored `"false"` is
+   never a bool, and `"3"` is never a number. Store values with the config type you read them with.
+
+2. **Typed getters take a default.** `getString`, `getNumber`, `getInt`, `getBool`, `getStringList`,
+   `getDuration` and `getJSON` take an optional third argument, `(key, contexts?, default?)`. They
+   return it when there is no value: a missing key, no matching rule, a wrong type, a malformed
+   value, an unset ENV_VAR or a decryption failure. Without a default, `onNoDefault` decides.
+   `"error"` (the default) throws the underlying error, and `"warn"` and `"ignore"` return
+   `undefined`. `BoundQuonfig` (`withContext`) takes the same default.
+
+   **On default settings a typed read with no default throws.** A client built without `onNoDefault`
+   uses `"error"`, so `getBool("k")` with no default throws `QuonfigTypeMismatchError` on a
+   wrong-type value, and the malformed-value, unset-ENV_VAR or decryption error on those failures.
+   That is the same policy node has always applied to a missing key. To get `undefined` instead (the
+   "absent" result other SDKs return), pass a default or construct the client with
+   `onNoDefault: "warn"` or `"ignore"`. `isEnabled` is the exception and never throws.
+
+3. **`get(key, contexts, default)` returns the default on a resolution error.** In 1.x an unset
+   ENV_VAR or a decryption failure threw even when you passed a default. In 2.0 it returns the
+   default.
+
+4. **`isEnabled` never throws.** It returns `false` for a missing key, a flag with no matching rule,
+   a non-bool value (a stored string `"true"` is not a bool), an unset ENV_VAR, a decryption
+   failure, and a call before `init()`. In 1.x a present flag with no matching rule, a resolution
+   error, or a call before `init()` threw under the default `onNoDefault: "error"`.
+
+5. **Numbers convert only when exact.** `getNumber` reads int and double configs. The new `getInt`
+   reads an int, or a double that is a whole number within ±(2^53-1) (`3.0` becomes `3`). `3.9`,
+   `1e300` and `2^53` are type mismatches for `getInt`, which never truncates. A malformed stored
+   int or double (for example `"twelve"`) is no value, where 1.x returned `NaN`.
+
+6. **Narrower getters.** `getNumber` and `getNumberDetails` no longer read duration configs (use
+   `getDuration`). `getJSON` and `getJSONDetails` no longer read string_list configs (use
+   `getStringList`).
+
+7. **One warning per key.** A type mismatch, a malformed value, an unset ENV_VAR or a decryption
+   failure logs one WARN per key per client. It names the key, never the value. `isEnabled` also
+   logs once per key when it returns `false` for a missing key or no matching rule, except under
+   `onNoDefault: "ignore"`. The malformed-duration warning is now this warning. An `isEnabled` call
+   before `init()` logs its own once-per-key warning, which does not suppress a later read-failure
+   warning for that key.
+
+8. **A wrong decryption key now degrades to your defaults** with one WARN per key, instead of
+   throwing from reads that pass a default. If that must be fatal, read the secret without a default
+   on a client with `onNoDefault: "error"` (the default). The getter then throws the decryption
+   error.
+
+### Added
+
+- `getInt(key, contexts?, default?)` on `Quonfig` and `BoundQuonfig`.
+- `QuonfigTypeMismatchError`, thrown by a typed getter on a wrong-type value under
+  `onNoDefault: "error"` with no default. Its message is
+  `Config "<key>" has type <stored>, expected <requested>`.
+
+### Changed
+
+- The `*Details` getters never coerce. A wrong-type or malformed value reports `reason: "ERROR"`
+  with `errorCode: "TYPE_MISMATCH"`. A malformed ENV_VAR value also reports `TYPE_MISMATCH`, where
+  1.x reported `GENERAL`. An unset ENV_VAR or a decryption failure still reports `GENERAL`.
+- A malformed stored int, double or duration that is read with no default throws
+  `[quonfig] Config "<key>" has a malformed <type> value` under `onNoDefault: "error"`.
+- A bool config whose stored value is not a JSON boolean (for example the string `"false"`) is a
+  malformed bool for every read, including the untyped `get()`. 1.x returned `!!value`, so `"false"`
+  read as `true`.
+
+### Tests
+
+- The integration-test-data pins move to `v2026.10.26`, the typed-getter contract matrix plus the
+  node generator fix (`INT` reads go through `getInt`, and the malformed stored int/double message).
+- New `test/typed-getter-contract.test.ts` covers once-per-key logging, `isEnabled` on a flag with
+  no matching rule, `BoundQuonfig` defaults, the Details error codes and the ±(2^53-1) edges.
+
 ## 1.10.0 - 2026-10-23
 
 ### Minor

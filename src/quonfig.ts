@@ -41,7 +41,14 @@ import { SSEConnection, type EventSourceFactory, type SupervisorCounters } from 
 import { mergeContexts } from "./context";
 import { normalizeLogger, type NormalizedLogger } from "./sdkLogger";
 import { parseLevel, shouldLog } from "./logger";
-import { InvalidDurationError, parseDurationMillis } from "./duration";
+import { InvalidDurationError } from "./duration";
+import {
+  QuonfigMalformedValueError,
+  QuonfigTypeMismatchError,
+  convertNatural,
+  convertTyped,
+  type ReadType,
+} from "./typedRead";
 import { loadEnvelopeFromDatadir } from "./datadir";
 import { DatadirWatcher } from "./datadirWatcher";
 import { QuonfigInitError, type QuonfigInitErrorReason } from "./initError";
@@ -174,7 +181,6 @@ class AuthRejectedError extends Error {
 }
 
 /** Caller-side type token used by the *Details API for type-mismatch detection. */
-type RequestedType = "bool" | "string" | "number" | "string_list" | "json";
 
 /**
  * Decide whether the requested type is compatible with the config's declared
@@ -182,7 +188,7 @@ type RequestedType = "bool" | "string" | "number" | "string_list" | "json";
  * the actual side is the server-declared `valueType`. Weighted-values configs
  * declare their underlying type in `valueType`, so the check is straightforward.
  */
-function isCompatibleValueType(requested: RequestedType, actual: ValueType): boolean {
+function isCompatibleValueType(requested: ReadType, actual: ValueType): boolean {
   switch (requested) {
     case "bool":
       return actual === "bool";
@@ -190,13 +196,28 @@ function isCompatibleValueType(requested: RequestedType, actual: ValueType): boo
       // log-level configs are commonly read as strings ("DEBUG", etc.).
       return actual === "string" || actual === "log_level";
     case "number":
-      return actual === "int" || actual === "double" || actual === "duration";
+    case "int":
+      return actual === "int" || actual === "double";
     case "string_list":
       return actual === "string_list";
     case "json":
-      // JSON-shaped reads accept JSON or string_list (callers fall back).
-      return actual === "json" || actual === "string_list";
+      return actual === "json";
+    case "duration":
+      return actual === "duration";
   }
+}
+
+/** The message a failed read logs and reports; never the value. */
+function describeReadError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** A value that is not of (or does not parse as) the requested type. */
+function isCoercionFailure(err: unknown): boolean {
+  if (err instanceof QuonfigTypeMismatchError) return true;
+  if (err instanceof QuonfigMalformedValueError) return true;
+  if (err instanceof InvalidDurationError) return true;
+  return err instanceof Error && /cannot be converted to/.test(err.message);
 }
 
 /**
@@ -216,28 +237,60 @@ export class BoundQuonfig {
     return this.client.get(key, mergeContexts(this.boundContexts, contexts), defaultValue);
   }
 
-  getString(key: string, contexts?: Contexts): string | undefined {
-    return this.client.getString(key, mergeContexts(this.boundContexts, contexts));
+  getString(key: string, contexts?: Contexts): string | undefined;
+  getString(key: string, contexts: Contexts | undefined, defaultValue: string): string;
+  getString(key: string, contexts?: Contexts, defaultValue?: string): string | undefined {
+    return defaultValue === undefined
+      ? this.client.getString(key, this.scope(contexts))
+      : this.client.getString(key, this.scope(contexts), defaultValue);
   }
 
-  getNumber(key: string, contexts?: Contexts): number | undefined {
-    return this.client.getNumber(key, mergeContexts(this.boundContexts, contexts));
+  getNumber(key: string, contexts?: Contexts): number | undefined;
+  getNumber(key: string, contexts: Contexts | undefined, defaultValue: number): number;
+  getNumber(key: string, contexts?: Contexts, defaultValue?: number): number | undefined {
+    return defaultValue === undefined
+      ? this.client.getNumber(key, this.scope(contexts))
+      : this.client.getNumber(key, this.scope(contexts), defaultValue);
   }
 
-  getBool(key: string, contexts?: Contexts): boolean | undefined {
-    return this.client.getBool(key, mergeContexts(this.boundContexts, contexts));
+  getInt(key: string, contexts?: Contexts): number | undefined;
+  getInt(key: string, contexts: Contexts | undefined, defaultValue: number): number;
+  getInt(key: string, contexts?: Contexts, defaultValue?: number): number | undefined {
+    return defaultValue === undefined
+      ? this.client.getInt(key, this.scope(contexts))
+      : this.client.getInt(key, this.scope(contexts), defaultValue);
   }
 
-  getStringList(key: string, contexts?: Contexts): string[] | undefined {
-    return this.client.getStringList(key, mergeContexts(this.boundContexts, contexts));
+  getBool(key: string, contexts?: Contexts): boolean | undefined;
+  getBool(key: string, contexts: Contexts | undefined, defaultValue: boolean): boolean;
+  getBool(key: string, contexts?: Contexts, defaultValue?: boolean): boolean | undefined {
+    return defaultValue === undefined
+      ? this.client.getBool(key, this.scope(contexts))
+      : this.client.getBool(key, this.scope(contexts), defaultValue);
   }
 
-  getDuration(key: string, contexts?: Contexts): number | undefined {
-    return this.client.getDuration(key, mergeContexts(this.boundContexts, contexts));
+  getStringList(key: string, contexts?: Contexts): string[] | undefined;
+  getStringList(key: string, contexts: Contexts | undefined, defaultValue: string[]): string[];
+  getStringList(key: string, contexts?: Contexts, defaultValue?: string[]): string[] | undefined {
+    return defaultValue === undefined
+      ? this.client.getStringList(key, this.scope(contexts))
+      : this.client.getStringList(key, this.scope(contexts), defaultValue);
   }
 
-  getJSON(key: string, contexts?: Contexts): any {
-    return this.client.getJSON(key, mergeContexts(this.boundContexts, contexts));
+  getDuration(key: string, contexts?: Contexts): number | undefined;
+  getDuration(key: string, contexts: Contexts | undefined, defaultValue: number): number;
+  getDuration(key: string, contexts?: Contexts, defaultValue?: number): number | undefined {
+    return defaultValue === undefined
+      ? this.client.getDuration(key, this.scope(contexts))
+      : this.client.getDuration(key, this.scope(contexts), defaultValue);
+  }
+
+  getJSON(key: string, contexts?: Contexts, defaultValue?: any): any {
+    return this.client.getJSON(key, this.scope(contexts), defaultValue);
+  }
+
+  private scope(contexts?: Contexts): Contexts {
+    return mergeContexts(this.boundContexts, contexts);
   }
 
   getBoolDetails(key: string, contexts?: Contexts): EvaluationDetails<boolean> {
@@ -373,7 +426,10 @@ export class Quonfig {
   private evaluator: Evaluator;
   // Config keys already warned about a missing weighted-rollout hash property (qfg-9dxb.8).
   private readonly warnedMissingHashProperty = new Set<string>();
-  private readonly warnedMalformedDuration = new Set<string>();
+  private readonly warnedReadFailure = new Set<string>();
+  // Separate from warnedReadFailure so an isEnabled call before init() never
+  // hides a later real read failure for the same key.
+  private readonly warnedNotInitialized = new Set<string>();
   private resolver: Resolver;
   private dependencyResolver: ConfigDependencyResolver;
   private transport: Transport;
@@ -1316,36 +1372,218 @@ export class Quonfig {
     }
   }
 
+  // ---- Reads ---------------------------------------------------------------
+  //
+  // The typed getters share one contract (qfg-zvyy), the same in every
+  // Quonfig SDK. Each returns a value of its type, or "no value":
+  //
+  //   - a missing key, or a flag with no matching rule;
+  //   - a value of another type (no string coercion: a stored "false" is a
+  //     string, never a bool);
+  //   - a malformed stored or ENV_VAR value;
+  //   - an unset ENV_VAR or a decryption failure.
+  //
+  // "No value" returns the caller's default when one is passed. Without one,
+  // the `onNoDefault` policy decides: "error" (the default) throws the
+  // underlying error, "warn" and "ignore" return undefined. Every case but a
+  // missing key / no match logs one WARN per key per client; it names the
+  // key, never the value.
+
   /**
-   * Get a config value by key. Evaluates rules against the provided context.
+   * Get a config value by key, as its stored type. Returns `defaultValue`
+   * when the key is missing or the value cannot be resolved (unset ENV_VAR,
+   * decryption failure, malformed value).
    */
   get(key: string, contexts?: Contexts, defaultValue?: any): any {
-    this.requireInitialized();
+    return this.read(key, contexts, defaultValue, undefined);
+  }
 
+  /** Get the value of a string (or log_level) config. */
+  getString(key: string, contexts?: Contexts): string | undefined;
+  getString(key: string, contexts: Contexts | undefined, defaultValue: string): string;
+  getString(key: string, contexts?: Contexts, defaultValue?: string): string | undefined {
+    return this.read(key, contexts, defaultValue, "string") as string | undefined;
+  }
+
+  /**
+   * Get the value of an int or double config. A string, even "3", is a type
+   * mismatch. Use {@link Quonfig.getInt} to require a whole number.
+   */
+  getNumber(key: string, contexts?: Contexts): number | undefined;
+  getNumber(key: string, contexts: Contexts | undefined, defaultValue: number): number;
+  getNumber(key: string, contexts?: Contexts, defaultValue?: number): number | undefined {
+    return this.read(key, contexts, defaultValue, "number") as number | undefined;
+  }
+
+  /**
+   * Get the value of an int config, or of a double config holding a whole
+   * number within +/-(2^53-1) (3.0 -> 3). It never truncates: 3.9 is a type
+   * mismatch.
+   */
+  getInt(key: string, contexts?: Contexts): number | undefined;
+  getInt(key: string, contexts: Contexts | undefined, defaultValue: number): number;
+  getInt(key: string, contexts?: Contexts, defaultValue?: number): number | undefined {
+    return this.read(key, contexts, defaultValue, "int") as number | undefined;
+  }
+
+  /** Get the value of a bool config. A stored string "false" is a type mismatch. */
+  getBool(key: string, contexts?: Contexts): boolean | undefined;
+  getBool(key: string, contexts: Contexts | undefined, defaultValue: boolean): boolean;
+  getBool(key: string, contexts?: Contexts, defaultValue?: boolean): boolean | undefined {
+    return this.read(key, contexts, defaultValue, "bool") as boolean | undefined;
+  }
+
+  /** Get the value of a string_list config. */
+  getStringList(key: string, contexts?: Contexts): string[] | undefined;
+  getStringList(key: string, contexts: Contexts | undefined, defaultValue: string[]): string[];
+  getStringList(key: string, contexts?: Contexts, defaultValue?: string[]): string[] | undefined {
+    return this.read(key, contexts, defaultValue, "string_list") as string[] | undefined;
+  }
+
+  /**
+   * Get the value of a duration config, in milliseconds. A malformed value,
+   * stored or ENV_VAR-provided, is "no value".
+   */
+  getDuration(key: string, contexts?: Contexts): number | undefined;
+  getDuration(key: string, contexts: Contexts | undefined, defaultValue: number): number;
+  getDuration(key: string, contexts?: Contexts, defaultValue?: number): number | undefined {
+    return this.read(key, contexts, defaultValue, "duration") as number | undefined;
+  }
+
+  /** Get the parsed value of a json config (a fresh copy on every call). */
+  getJSON(key: string, contexts?: Contexts, defaultValue?: any): any {
+    return this.read(key, contexts, defaultValue, "json");
+  }
+
+  /**
+   * Get a boolean config value with evaluation details (reason + error code).
+   *
+   * Never throws: errors are surfaced as `{ value: undefined, reason:
+   * "ERROR", errorCode: ... }`. A non-bool value is `TYPE_MISMATCH`.
+   */
+  getBoolDetails(key: string, contexts?: Contexts): EvaluationDetails<boolean> {
+    return this.evaluateDetailsTyped<boolean>(key, "bool", contexts);
+  }
+
+  /**
+   * Get a string config value with evaluation details (reason + error code).
+   * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
+   */
+  getStringDetails(key: string, contexts?: Contexts): EvaluationDetails<string> {
+    return this.evaluateDetailsTyped<string>(key, "string", contexts);
+  }
+
+  /**
+   * Get an int or double config value with evaluation details (reason +
+   * error code). Never throws — errors surface via `reason: "ERROR"` +
+   * `errorCode`.
+   */
+  getNumberDetails(key: string, contexts?: Contexts): EvaluationDetails<number> {
+    return this.evaluateDetailsTyped<number>(key, "number", contexts);
+  }
+
+  /**
+   * Get a string-list config value with evaluation details (reason + error code).
+   * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
+   */
+  getStringListDetails(key: string, contexts?: Contexts): EvaluationDetails<string[]> {
+    return this.evaluateDetailsTyped<string[]>(key, "string_list", contexts);
+  }
+
+  /**
+   * Get a JSON config value with evaluation details (reason + error code).
+   * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
+   */
+  getJSONDetails(key: string, contexts?: Contexts): EvaluationDetails<unknown> {
+    return this.evaluateDetailsTyped<unknown>(key, "json", contexts);
+  }
+
+  /**
+   * Check if a feature flag is enabled. Never throws: a missing key, a flag
+   * with no matching rule, a non-bool value (a stored string "true" is not a
+   * bool), any resolution error, or a call before `init()` returns false.
+   * Each of those logs one WARN per key per client (a missing key or no
+   * match is not logged under `onNoDefault: "ignore"`).
+   */
+  isEnabled(key: string, contexts?: Contexts): boolean {
+    try {
+      if (!this.initialized && !this.initFailed) {
+        this.warnNotInitializedOnce(key);
+        return false;
+      }
+      const result = this.resolveForRead(key, contexts);
+      if (result.kind === "absent") {
+        if (this.onNoDefault !== "ignore") {
+          this.warnReadFailureOnce(key, `No value found for key "${key}"`);
+        }
+        return false;
+      }
+      if (result.kind === "error") {
+        this.warnReadFailureOnce(key, describeReadError(result.error));
+        return false;
+      }
+      return convertTyped(key, result.value, "bool") as boolean;
+    } catch (err) {
+      this.warnReadFailureOnce(key, describeReadError(err));
+      return false;
+    }
+  }
+
+  /** @deprecated Use `isEnabled` instead. Kept for backwards compatibility with the Reforge launch SDK and earlier Quonfig releases. */
+  isFeatureEnabled(key: string, contexts?: Contexts): boolean {
+    return this.isEnabled(key, contexts);
+  }
+
+  /**
+   * One read through the contract: resolve, convert to `want` (the stored
+   * type when `want` is undefined), and map "no value" to the default or the
+   * onNoDefault policy.
+   */
+  private read(
+    key: string,
+    contexts: Contexts | undefined,
+    defaultValue: unknown,
+    want: ReadType | undefined
+  ): any {
+    this.requireInitialized();
+    const result = this.resolveForRead(key, contexts);
+    if (result.kind === "absent") return this.handleNoDefault(key, defaultValue);
+    if (result.kind === "ok") {
+      try {
+        return want === undefined
+          ? convertNatural(key, result.value)
+          : convertTyped(key, result.value, want);
+      } catch (err) {
+        return this.readFailed(key, defaultValue, err);
+      }
+    }
+    return this.readFailed(key, defaultValue, result.error);
+  }
+
+  /**
+   * Evaluate and resolve `key` (ENV_VAR, decryption). Records context and
+   * evaluation telemetry for a resolved value. Never throws for a config
+   * problem: those come back as `{ kind: "error" }`.
+   */
+  private resolveForRead(
+    key: string,
+    contexts: Contexts | undefined
+  ):
+    | { kind: "absent" }
+    | { kind: "error"; error: unknown }
+    | { kind: "ok"; value: Value; evaluation: Evaluation; hashPropertyMissing: boolean } {
     const mergedContexts = mergeContexts(this.globalContext, contexts);
     const config = this.store.get(key);
+    if (config === undefined) return { kind: "absent" };
 
-    if (config === undefined) {
-      return this.handleNoDefault(key, defaultValue);
-    }
-
-    // Record context for telemetry
     this.recordContextTelemetry(mergedContexts);
 
-    // Evaluate
     const match = this.evaluator.evaluateConfig(config, this.environmentId, mergedContexts);
     this.warnIfHashPropertyMissing(config.key, match);
+    if (!match.isMatch || match.value === undefined) return { kind: "absent" };
 
-    if (!match.isMatch || match.value === undefined) {
-      return this.handleNoDefault(key, defaultValue);
-    }
-
-    // Resolve (ENV_VAR, decryption) and unwrap to a plain value. A malformed
-    // duration (stored or ENV_VAR) is treated like an absent value: the caller's
-    // default, else the onNoDefault policy (qfg-2agi.9).
     let resolved: Value;
     let reportableValue: GetValue | undefined;
-    let unwrapped: unknown;
     try {
       ({ resolved, reportableValue } = this.resolver.resolveValue(
         match.value,
@@ -1354,18 +1592,18 @@ export class Quonfig {
         this.environmentId,
         mergedContexts
       ));
-      unwrapped = this.resolver.unwrapValue(resolved);
-    } catch (err) {
-      if (!(err instanceof InvalidDurationError)) throw err;
-      this.warnMalformedDurationOnce(key);
-      if (defaultValue !== undefined) return defaultValue;
-      if (this.onNoDefault === "error") {
-        throw new Error(`[quonfig] Config "${key}" has a malformed duration value`);
-      }
-      return undefined;
+    } catch (error) {
+      return { kind: "error", error };
     }
 
-    // Record evaluation for telemetry
+    let unwrapped: unknown;
+    try {
+      unwrapped = convertNatural(config.key, resolved);
+    } catch (error) {
+      // A malformed stored value: no evaluation to report.
+      return { kind: "error", error };
+    }
+
     const evaluation: Evaluation = {
       configId: config.id,
       configKey: config.key,
@@ -1377,147 +1615,24 @@ export class Quonfig {
       reason: computeReason(match, config),
     };
     this.evaluationSummaries.push(evaluation, summaryValueRef(match, resolved));
-
-    return unwrapped;
+    return {
+      kind: "ok",
+      value: resolved,
+      evaluation,
+      hashPropertyMissing: match.missingHashProperty !== undefined,
+    };
   }
 
   /**
-   * Get a string config value.
+   * A read that found the key but could not produce a value: log once per
+   * key, then the caller's default, else the onNoDefault policy (which
+   * rethrows the underlying error under "error").
    */
-  getString(key: string, contexts?: Contexts): string | undefined {
-    const value = this.get(key, contexts, undefined);
-    if (value === undefined) return undefined;
-    return String(value);
-  }
-
-  /**
-   * Get a boolean config value with evaluation details (reason + error code).
-   *
-   * Unlike {@link Quonfig.getBool}, this method NEVER throws — errors are
-   * surfaced as `{ value: undefined, reason: "ERROR", errorCode: ... }`.
-   */
-  getBoolDetails(key: string, contexts?: Contexts): EvaluationDetails<boolean> {
-    return this.evaluateDetailsTyped<boolean>(key, "bool", contexts, (raw) => {
-      if (typeof raw === "boolean") return raw;
-      // weighted_values can resolve to other types; coerce defensively
-      return !!raw;
-    });
-  }
-
-  /**
-   * Get a string config value with evaluation details (reason + error code).
-   * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
-   */
-  getStringDetails(key: string, contexts?: Contexts): EvaluationDetails<string> {
-    return this.evaluateDetailsTyped<string>(key, "string", contexts, (raw) => String(raw));
-  }
-
-  /**
-   * Get a numeric config value with evaluation details (reason + error code).
-   * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
-   */
-  getNumberDetails(key: string, contexts?: Contexts): EvaluationDetails<number> {
-    return this.evaluateDetailsTyped<number>(key, "number", contexts, (raw) => {
-      if (typeof raw === "number") return raw;
-      const n = Number(raw);
-      return Number.isNaN(n) ? (undefined as unknown as number) : n;
-    });
-  }
-
-  /**
-   * Get a string-list config value with evaluation details (reason + error code).
-   * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
-   */
-  getStringListDetails(key: string, contexts?: Contexts): EvaluationDetails<string[]> {
-    return this.evaluateDetailsTyped<string[]>(key, "string_list", contexts, (raw) => {
-      if (Array.isArray(raw)) return raw.map((v: any) => String(v));
-      return undefined as unknown as string[];
-    });
-  }
-
-  /**
-   * Get a JSON config value with evaluation details (reason + error code).
-   * Never throws — errors surface via `reason: "ERROR"` + `errorCode`.
-   */
-  getJSONDetails(key: string, contexts?: Contexts): EvaluationDetails<unknown> {
-    return this.evaluateDetailsTyped<unknown>(key, "json", contexts, (raw) => raw);
-  }
-
-  /**
-   * Get a number config value.
-   */
-  getNumber(key: string, contexts?: Contexts): number | undefined {
-    const value = this.get(key, contexts, undefined);
-    if (value === undefined) return undefined;
-    return typeof value === "number" ? value : Number(value);
-  }
-
-  /**
-   * Get a boolean config value.
-   */
-  getBool(key: string, contexts?: Contexts): boolean | undefined {
-    const value = this.get(key, contexts, undefined);
-    if (value === undefined) return undefined;
-    return !!value;
-  }
-
-  /**
-   * Get a string list config value.
-   */
-  getStringList(key: string, contexts?: Contexts): string[] | undefined {
-    const value = this.get(key, contexts, undefined);
-    if (value === undefined) return undefined;
-    if (Array.isArray(value)) return value.map((v: any) => String(v));
+  private readFailed(key: string, defaultValue: unknown, err: unknown): any {
+    this.warnReadFailureOnce(key, describeReadError(err));
+    if (defaultValue !== undefined) return defaultValue;
+    if (this.onNoDefault === "error") throw err;
     return undefined;
-  }
-
-  /**
-   * Get a duration config value in milliseconds.
-   */
-  getDuration(key: string, contexts?: Contexts): number | undefined {
-    const value = this.get(key, contexts, undefined);
-    if (value === undefined) return undefined;
-    // If the evaluator already unwrapped it to ms (duration type), return as-is
-    if (typeof value === "number") return value;
-    // If it's a string (ENV_VAR-provided, validated on resolve), parse it
-    if (typeof value === "string") return parseDurationMillis(value);
-    return undefined;
-  }
-
-  /**
-   * Get a JSON config value (parsed).
-   */
-  getJSON(key: string, contexts?: Contexts): any {
-    const value = this.get(key, contexts, undefined);
-    if (value === undefined) return undefined;
-    // If already parsed (from unwrap), return as-is
-    return value;
-  }
-
-  /**
-   * Check if a feature flag is enabled.
-   * Returns false if the key is not found or the value is not a boolean.
-   * A missing key returns false under every `onNoDefault` policy ("warn"
-   * still logs); `get()` and the typed getters keep the policy's behavior.
-   */
-  isEnabled(key: string, contexts?: Contexts): boolean {
-    this.requireInitialized();
-    if (this.store.get(key) === undefined) {
-      if (this.onNoDefault === "warn") {
-        this.logger.warn(`No value found for key "${key}"`);
-      }
-      return false;
-    }
-    const value = this.get(key, contexts, undefined);
-    if (typeof value === "boolean") return value;
-    if (value === "true") return true;
-    if (value === "false") return false;
-    return false;
-  }
-
-  /** @deprecated Use `isEnabled` instead. Kept for backwards compatibility with the Reforge launch SDK and earlier Quonfig releases. */
-  isFeatureEnabled(key: string, contexts?: Contexts): boolean {
-    return this.isEnabled(key, contexts);
   }
 
   /**
@@ -1838,7 +1953,7 @@ export class Quonfig {
    */
   private evaluateDetailsRaw(
     key: string,
-    requestedType: RequestedType,
+    requestedType: ReadType,
     contexts?: Contexts
   ): {
     value: GetValue | unknown;
@@ -1878,25 +1993,25 @@ export class Quonfig {
       };
     }
 
-    // Type-mismatch check against the config's declared valueType.
+    // Type-mismatch check against the config's declared valueType, before
+    // evaluating (no telemetry for a read that cannot succeed).
     if (!isCompatibleValueType(requestedType, config.valueType)) {
+      const error = new QuonfigTypeMismatchError(key, config.valueType, requestedType);
+      this.warnReadFailureOnce(key, error.message);
       return {
         value: undefined,
         reason: "ERROR",
         errorCode: "TYPE_MISMATCH",
-        errorMessage: `Config "${key}" has type ${config.valueType}, expected ${requestedType}`,
+        errorMessage: error.message,
         configId: config.id,
         configType: config.type,
       };
     }
 
+    let failure: unknown;
     try {
-      this.recordContextTelemetry(mergedContexts);
-
-      const match = this.evaluator.evaluateConfig(config, this.environmentId, mergedContexts);
-      this.warnIfHashPropertyMissing(config.key, match);
-
-      if (!match.isMatch || match.value === undefined) {
+      const result = this.resolveForRead(key, contexts);
+      if (result.kind === "absent") {
         return {
           value: undefined,
           reason: "DEFAULT",
@@ -1904,79 +2019,46 @@ export class Quonfig {
           configType: config.type,
         };
       }
-
-      const { resolved, reportableValue } = this.resolver.resolveValue(
-        match.value,
-        config.key,
-        config.valueType,
-        this.environmentId,
-        mergedContexts
-      );
-
-      const unwrapped = this.resolver.unwrapValue(resolved);
-
-      const reasonNum = computeReason(match, config);
-      const reason: EvaluationReason =
-        reasonNum === ReasonStatic
-          ? "STATIC"
-          : reasonNum === ReasonSplit
-            ? "SPLIT"
-            : reasonNum === ReasonTargetingMatch
-              ? "TARGETING_MATCH"
+      if (result.kind === "ok") {
+        const value = convertTyped(key, result.value, requestedType);
+        const reasonNum = result.evaluation.reason;
+        const reason: EvaluationReason =
+          reasonNum === ReasonStatic
+            ? "STATIC"
+            : reasonNum === ReasonSplit
+              ? "SPLIT"
               : "TARGETING_MATCH";
-
-      const evaluation: Evaluation = {
-        configId: config.id,
-        configKey: config.key,
-        configType: config.type,
-        unwrappedValue: unwrapped as GetValue,
-        reportableValue: reportableValue,
-        ruleIndex: match.ruleIndex,
-        weightedValueIndex: match.weightedValueIndex >= 0 ? match.weightedValueIndex : undefined,
-        reason: reasonNum,
-      };
-      this.evaluationSummaries.push(evaluation, summaryValueRef(match, resolved));
-
-      return {
-        value: unwrapped,
-        reason,
-        evaluation,
-        hashPropertyMissing: match.missingHashProperty !== undefined,
-      };
-    } catch (err) {
-      if (err instanceof InvalidDurationError) this.warnMalformedDurationOnce(key);
-      const message = err instanceof Error ? err.message : String(err);
-      const msg = message.toLowerCase();
-      if (msg.includes("type mismatch")) {
         return {
-          value: undefined,
-          reason: "ERROR",
-          errorCode: "TYPE_MISMATCH",
-          errorMessage: message,
-          configId: config.id,
-          configType: config.type,
+          value,
+          reason,
+          evaluation: result.evaluation,
+          hashPropertyMissing: result.hashPropertyMissing,
         };
       }
-      return {
-        value: undefined,
-        reason: "ERROR",
-        errorCode: "GENERAL",
-        errorMessage: message,
-        configId: config.id,
-        configType: config.type,
-      };
+      failure = result.error;
+    } catch (err) {
+      failure = err;
     }
+
+    // A failed read (type mismatch, malformed value, unset ENV_VAR,
+    // decryption failure): log once per key, report it, never throw.
+    const message = describeReadError(failure);
+    this.warnReadFailureOnce(key, message);
+    return {
+      value: undefined,
+      reason: "ERROR",
+      errorCode: isCoercionFailure(failure) ? "TYPE_MISMATCH" : "GENERAL",
+      errorMessage: message,
+      configId: config.id,
+      configType: config.type,
+    };
   }
 
-  /**
-   * Internal: typed wrapper around evaluateDetailsRaw — applies a value
-   * coercer and surfaces TYPE_MISMATCH if the coercer can't produce a value.
-   */
+  /** Internal: typed wrapper around evaluateDetailsRaw. */
   private evaluateDetailsTyped<T>(
     key: string,
-    requestedType: RequestedType,
-    contexts: Contexts | undefined,
-    coerce: (raw: unknown) => T | undefined
+    requestedType: ReadType,
+    contexts: Contexts | undefined
   ): EvaluationDetails<T> {
     const raw = this.evaluateDetailsRaw(key, requestedType, contexts);
     if (raw.reason !== "STATIC" && raw.reason !== "TARGETING_MATCH" && raw.reason !== "SPLIT") {
@@ -1993,23 +2075,7 @@ export class Quonfig {
       return base;
     }
 
-    const coerced = coerce(raw.value as unknown);
-    if (coerced === undefined) {
-      return {
-        value: undefined,
-        reason: "ERROR",
-        errorCode: "TYPE_MISMATCH",
-        errorMessage: `Config "${key}" value could not be coerced to ${requestedType}`,
-        variant: this.buildVariant("ERROR", undefined, undefined),
-        flagMetadata: this.buildFlagMetadata(
-          raw.evaluation?.configId,
-          raw.evaluation?.configType,
-          undefined,
-          undefined
-        ),
-      };
-    }
-
+    const coerced = raw.value as T;
     const ev = raw.evaluation;
     const flagMetadata = this.buildFlagMetadata(
       ev?.configId,
@@ -2090,7 +2156,6 @@ export class Quonfig {
     return md;
   }
 
-  /** Warn once per key about a malformed duration; never logs the raw value. */
   /**
    * Feed the context collectors. Telemetry must never throw into evaluation:
    * a value the collectors cannot handle (e.g. a BigInt context key, which
@@ -2108,11 +2173,26 @@ export class Quonfig {
     }
   }
 
-  private warnMalformedDurationOnce(key: string): void {
-    if (this.warnedMalformedDuration.has(key)) return;
-    this.warnedMalformedDuration.add(key);
+  /**
+   * Warn once per config key per client that a read returned no value (type
+   * mismatch, malformed value, unset ENV_VAR, decryption failure), so a
+   * broken config is not mistaken for "using the default". `reason` names the
+   * key and types, never the value.
+   */
+  private warnReadFailureOnce(key: string, reason: string): void {
+    if (this.warnedReadFailure.has(key)) return;
+    this.warnedReadFailure.add(key);
     this.logger.warn(
-      `[quonfig] Config "${key}" has a malformed duration value (expected an ISO 8601 duration such as PT30S); using the default`
+      `[quonfig] read of "${key}" returned no value; the caller's default applies: ${reason}`
+    );
+  }
+
+  /** Warn once per key that isEnabled was called before init() and returned false. */
+  private warnNotInitializedOnce(key: string): void {
+    if (this.warnedNotInitialized.has(key)) return;
+    this.warnedNotInitialized.add(key);
+    this.logger.warn(
+      `[quonfig] isEnabled("${key}") called before init() completed; returning false`
     );
   }
 

@@ -1,6 +1,7 @@
 // Main SDK exports
 export { Quonfig, BoundQuonfig } from "./quonfig";
 export { QuonfigInitError } from "./initError";
+export { QuonfigTypeMismatchError } from "./typedRead";
 export type { QuonfigInitErrorReason } from "./initError";
 
 // Types
