@@ -95,8 +95,11 @@ describe("Quonfig.connectionState()", () => {
     await quonfig.init();
     await vi.advanceTimersByTimeAsync(10);
 
-    // Before the first frame, SSE is connecting — connectionState reports 'disconnected'.
-    expect(quonfig.connectionState()).toBe("disconnected");
+    // Before the first frame (200 headers, no frame yet) the supervisor
+    // contract (Test 6) says 'initializing' — not 'connected', not 'disconnected'.
+    expect(quonfig.connectionState()).toBe("initializing");
+    fakeOut.value!.onopen?.({ type: "open" });
+    expect(quonfig.connectionState()).toBe("initializing");
 
     fakeOut.value!.keepalive?.();
     expect(quonfig.connectionState()).toBe("connected");
@@ -169,6 +172,35 @@ describe("Quonfig.connectionState()", () => {
 
     fakeOut.value!.onerror?.({ type: "error" });
     expect(quonfig.connectionState()).toBe("falling_back");
+
+    await quonfig.close();
+  });
+
+  it("reports 'disconnected' (not 'initializing') once the first SSE attempt errors with fallback off", async () => {
+    vi.spyOn(Transport.prototype, "fetchFromUrlAt").mockResolvedValue({
+      result: {
+        envelope: envelope("v1"),
+        notChanged: false,
+      },
+      sourceIndex: 0,
+    });
+
+    const fakeOut: { value: FakeEventSource | null } = { value: null };
+    const quonfig = new Quonfig({
+      sdkKey: "test-sdk-key",
+      enableSSE: true,
+      fallbackPollEnabled: false,
+      collectEvaluationSummaries: false,
+      contextUploadMode: "none",
+      __testEventSourceFactory: makeEventSourceFactory(fakeOut),
+    } as any);
+
+    await quonfig.init();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(quonfig.connectionState()).toBe("initializing");
+
+    fakeOut.value!.onerror?.({ type: "error" });
+    expect(quonfig.connectionState()).toBe("disconnected");
 
     await quonfig.close();
   });

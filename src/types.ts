@@ -9,7 +9,8 @@ export type SSEConnectionState = "connecting" | "connected" | "error" | "disconn
 /**
  * Aggregate connection state surfaced via {@link Quonfig.connectionState}.
  *
- * - `initializing` — `init()` has not yet completed.
+ * - `initializing` — `init()` has not yet completed, or the SSE stream has not
+ *   yet delivered its first frame (nor failed) since init.
  * - `connected` — SSE is live (or the SDK is running in datadir/datafile mode).
  * - `disconnected` — neither SSE nor the fallback poller is currently delivering
  *   updates (e.g. SSE errored but the fallback grace timer has not elapsed, or

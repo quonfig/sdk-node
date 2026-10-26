@@ -273,7 +273,7 @@ quonfig.connectionState();
 
 | State          | Meaning                                                                                                          |
 | -------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `initializing` | `init()` has not yet returned.                                                                                   |
+| `initializing` | `init()` has not yet returned, or the SSE stream has not yet delivered its first frame (or failed).              |
 | `connected`    | SSE is live, or the SDK is running from a local `datadir`/`datafile`.                                            |
 | `disconnected` | SSE has errored and the fallback grace timer has not elapsed, the SDK key was rejected, or `close()` was called. |
 | `falling_back` | The Layer 2 HTTP fallback poller is the active update channel.                                                   |
