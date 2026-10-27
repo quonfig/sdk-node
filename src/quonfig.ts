@@ -2561,6 +2561,10 @@ export class Quonfig {
         // and updateIfStalerThan — for the life of the process (qfg-4k7d).
         failures++;
         lastError = err instanceof Error ? err : new Error(String(err));
+        // The payload was not installed, so its ETag must not stay in the
+        // leg's slot either: a fixed payload for the same sha would be answered
+        // 304 until the next commit (qfg-j7ui).
+        leg.rollbackEtag?.();
         const f: LegFailure = { index: leg.sourceIndex, status: leg.status, error: lastError };
         legFailures.push(f);
         failedLegs?.push(f);
@@ -2605,13 +2609,16 @@ export class Quonfig {
         // failover observability; an equal-generation re-delivery is a silent
         // no-op (qfg-rr5b).
         this.recordSuccessfulRefresh();
-        if (this.isStrictlyOlderThanHeld(res.envelope)) {
+        const strictlyOlder = this.isStrictlyOlderThanHeld(res.envelope);
+        if (strictlyOlder) {
           this.failover.recordGuardRejected();
         }
-        // An ignored gen<=0 payload must not leave its ETag (the git sha) in
-        // the leg's slot: a repaired generation for the same sha would then be
-        // answered 304 forever. Other rejections keep their ETag (qfg-9dxb.9).
-        if ((res.envelope.meta.generation ?? 0) <= 0) {
+        // A strictly older or an ignored gen<=0 payload must not leave its ETag
+        // (the git sha) in the leg's slot: the server can repair the generation
+        // for the same sha, which would then be answered 304 until the next
+        // commit (qfg-9dxb.9, qfg-j7ui; supervisor contract Test 11). Only a
+        // same-generation re-delivery keeps its ETag: it is the held config.
+        if (strictlyOlder || (res.envelope.meta.generation ?? 0) <= 0) {
           leg.rollbackEtag?.();
         }
       }
