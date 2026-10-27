@@ -299,3 +299,110 @@ describe("install guard heals forward and seeds (o03/o04)", () => {
     }
   });
 });
+
+describe("a 200 the client does not install never pins its ETag (qfg-j7ui, supervisor Test 11)", () => {
+  // api-delivery's ETag is the git sha. A shallow-clone machine can serve sha B
+  // at a generation below the held one and later repair the generation for the
+  // SAME sha. If the refused response's ETag were kept, every later poll would
+  // 304 and the client would stay on A until the next commit.
+  type State = { sha: string; body: string };
+
+  async function startShaServer(initial: State) {
+    const ref = { state: initial };
+    const ifNoneMatch: (string | undefined)[] = [];
+    const server = http.createServer((req, res) => {
+      const inm = req.headers["if-none-match"];
+      ifNoneMatch.push(inm);
+      if (inm === ref.state.sha) {
+        res.writeHead(304, { ETag: ref.state.sha });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { ETag: ref.state.sha, "Content-Type": "application/json" });
+      res.end(ref.state.body);
+    });
+    const url = await listen(server);
+    return { url, ref, ifNoneMatch };
+  }
+
+  it("a rejected-older 200 does not leave its ETag behind to mask the same sha's repaired generation", async () => {
+    const { url, ref, ifNoneMatch } = await startShaServer({
+      sha: '"sha-A"',
+      body: flagJSON(true, 10),
+    });
+    const client = makeClient([url]);
+    try {
+      await client.init();
+      expect(client.heldGeneration()).toBe(10);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
+
+      // Shallow clone: sha B at gen 3, rejected as older. Client stays on A.
+      ref.state = { sha: '"sha-B"', body: flagJSON(false, 3) };
+      await refresh(client);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
+      expect(client.heldGeneration()).toBe(10);
+
+      // Same sha B, generation repaired to 11.
+      ref.state = { sha: '"sha-B"', body: flagJSON(false, 11) };
+      await refresh(client);
+      expect(ifNoneMatch[ifNoneMatch.length - 1]).not.toBe('"sha-B"');
+      expect(client.heldGeneration()).toBe(11);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(false);
+    } finally {
+      await client.close().catch(() => {});
+    }
+  });
+
+  it("a same-generation 200 keeps its ETag (the next poll is conditional on it)", async () => {
+    const { url, ref, ifNoneMatch } = await startShaServer({
+      sha: '"sha-A"',
+      body: flagJSON(true, 10),
+    });
+    const client = makeClient([url]);
+    try {
+      await client.init();
+      // A cold slot re-delivers the held generation under a new ETag.
+      ref.state = { sha: '"sha-A2"', body: flagJSON(true, 10) };
+      await refresh(client);
+      await refresh(client);
+      expect(ifNoneMatch[ifNoneMatch.length - 1]).toBe('"sha-A2"');
+      expect(client.heldGeneration()).toBe(10);
+    } finally {
+      await client.close().catch(() => {});
+    }
+  });
+
+  it("a 200 whose install throws does not leave its ETag behind", async () => {
+    const { url, ref, ifNoneMatch } = await startShaServer({
+      sha: '"sha-A"',
+      body: flagJSON(true, 10),
+    });
+    const client = makeClient([url]);
+    try {
+      await client.init();
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
+
+      // sha B at gen 11, but every entry fails to normalize (no `default`), so
+      // the store rejects the envelope and the install throws.
+      const broken = flagEnvelope(false, {
+        version: "gen-11-bad",
+        environment: "Production",
+        generation: 11,
+      });
+      for (const cfg of broken.configs as Record<string, unknown>[]) delete cfg.default;
+      ref.state = { sha: '"sha-B"', body: JSON.stringify(broken) };
+      await refresh(client).catch(() => {});
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(true);
+      expect(client.heldGeneration()).toBe(10);
+
+      // The server fixes sha B's payload without a new commit.
+      ref.state = { sha: '"sha-B"', body: flagJSON(false, 11) };
+      await refresh(client);
+      expect(ifNoneMatch[ifNoneMatch.length - 1]).not.toBe('"sha-B"');
+      expect(client.heldGeneration()).toBe(11);
+      expect(client.isFeatureEnabled("build.dark-mode")).toBe(false);
+    } finally {
+      await client.close().catch(() => {});
+    }
+  });
+});
