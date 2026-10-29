@@ -1,6 +1,24 @@
 # Changelog
 
-## 2.0.0 - Unreleased
+## 2.1.0 - 2026-10-29
+
+### Added
+
+- `evaluateDetails(key, contexts?)` reads a config's value in its stored form, for example a
+  duration's ISO 8601 text (`"PT90S"`) exactly as stored, where `getDuration` returns milliseconds.
+  It reads any config type, with the same `reason`, `variant`, `flagMetadata` and telemetry as the
+  `*Details` getters, and adds `valueType`, the config's stored type. It does no type check and no
+  parsing, so a malformed value is returned as stored for you to validate. It is on `Quonfig` and
+  `BoundQuonfig` and never throws. The existing getters are unchanged. It matches sdk-go's
+  `EvaluateDetails` and lets OpenFeature providers return a duration's stored text. (qfg-177f)
+
+### Fixed
+
+- A 200 from `/api/v2/configs` that is dropped as older than the installed config, or whose install
+  fails, no longer keeps its ETag. A server that repairs the same config version no longer answers
+  304 and leaves the client on old config. (qfg-j7ui)
+
+## 2.0.0 - 2026-10-26
 
 The typed-getter contract (qfg-zvyy). Every Quonfig SDK now shares it, and the integration-test-data
 matrix (`getter.contract.*`) pins it. If a typed read cannot return a value of the getter's type, it

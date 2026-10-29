@@ -36,6 +36,7 @@ export type {
   EvalMatch,
   Evaluation,
   EvaluationDetails,
+  StoredEvaluationDetails,
   EvaluationReason,
   EvaluationErrorCode,
   RawMatch,

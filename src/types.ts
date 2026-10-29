@@ -494,6 +494,16 @@ export interface EvaluationDetails<T> {
   flagMetadata?: Record<string, unknown>;
 }
 
+/**
+ * Returned by `evaluateDetails()`: the resolved value in its stored form (a
+ * duration is its ISO 8601 text exactly as stored, a json config its object,
+ * a string_list its array), plus the config's stored `valueType`. Undefined
+ * `valueType` means the key was not found or the SDK is not ready.
+ */
+export interface StoredEvaluationDetails extends EvaluationDetails<unknown> {
+  valueType?: ValueType;
+}
+
 // ---- Log Level ----
 
 export type LogLevelName = "trace" | "debug" | "info" | "warn" | "error" | "fatal";

@@ -145,6 +145,21 @@ export function convertNatural(key: string, v: Value): GetValue {
   }
 }
 
+/**
+ * A resolved value in its stored form, for `evaluateDetails()`: no type check,
+ * no parse validation. A duration stays its ISO text exactly as stored; a
+ * value `convertNatural` would reject (a malformed int, a "30s" duration) is
+ * returned as stored so the caller can validate it.
+ */
+export function storedForm(key: string, v: Value): GetValue {
+  if (v.type === "duration") return v.value;
+  try {
+    return convertNatural(key, v);
+  } catch {
+    return v.value;
+  }
+}
+
 function jsonOf(_key: string, v: Value): GetValue {
   // `valueType: "json"` must carry native JS (object/array/number/boolean/
   // null). Stringified JSON is illegal on the wire: reject loudly to match

@@ -10,6 +10,7 @@ import type {
   EvalMatch,
   Evaluation,
   EvaluationDetails,
+  StoredEvaluationDetails,
   EvaluationErrorCode,
   EvaluationReason,
   GetValue,
@@ -47,6 +48,7 @@ import {
   QuonfigTypeMismatchError,
   convertNatural,
   convertTyped,
+  storedForm,
   type ReadType,
 } from "./typedRead";
 import { loadEnvelopeFromDatadir } from "./datadir";
@@ -311,6 +313,10 @@ export class BoundQuonfig {
 
   getJSONDetails(key: string, contexts?: Contexts): EvaluationDetails<unknown> {
     return this.client.getJSONDetails(key, mergeContexts(this.boundContexts, contexts));
+  }
+
+  evaluateDetails(key: string, contexts?: Contexts): StoredEvaluationDetails {
+    return this.client.evaluateDetails(key, mergeContexts(this.boundContexts, contexts));
   }
 
   isEnabled(key: string, contexts?: Contexts): boolean {
@@ -1499,6 +1505,19 @@ export class Quonfig {
   }
 
   /**
+   * Evaluate a config of any type and return its value in its stored form,
+   * with evaluation details. There is no type check, coercion or parse
+   * validation: a duration is its ISO 8601 text exactly as stored ("PT90S"),
+   * a json config its object, a string_list its array; the caller validates.
+   * `valueType` is the config's stored value type. ENV_VAR provision and
+   * decryption still apply. Reason, variant, flagMetadata and telemetry match
+   * the typed `*Details` getters. Never throws.
+   */
+  evaluateDetails(key: string, contexts?: Contexts): StoredEvaluationDetails {
+    return this.evaluateDetailsTyped<unknown>(key, undefined, contexts);
+  }
+
+  /**
    * Check if a feature flag is enabled. Never throws: a missing key, a flag
    * with no matching rule, a non-bool value (a stored string "true" is not a
    * bool), any resolution error, or a call before `init()` returns false.
@@ -1567,7 +1586,8 @@ export class Quonfig {
    */
   private resolveForRead(
     key: string,
-    contexts: Contexts | undefined
+    contexts: Contexts | undefined,
+    storedFormRead = false
   ):
     | { kind: "absent" }
     | { kind: "error"; error: unknown }
@@ -1600,8 +1620,10 @@ export class Quonfig {
     try {
       unwrapped = convertNatural(config.key, resolved);
     } catch (error) {
-      // A malformed stored value: no evaluation to report.
-      return { kind: "error", error };
+      // A malformed stored value: no evaluation to report, except for a
+      // stored-form read (evaluateDetails), which reports the value as stored.
+      if (!storedFormRead) return { kind: "error", error };
+      unwrapped = resolved.value;
     }
 
     const evaluation: Evaluation = {
@@ -1953,10 +1975,11 @@ export class Quonfig {
    */
   private evaluateDetailsRaw(
     key: string,
-    requestedType: ReadType,
+    requestedType: ReadType | undefined,
     contexts?: Contexts
   ): {
     value: GetValue | unknown;
+    valueType?: ValueType;
     reason: EvaluationReason;
     errorCode?: EvaluationErrorCode;
     errorMessage?: string;
@@ -1995,7 +2018,7 @@ export class Quonfig {
 
     // Type-mismatch check against the config's declared valueType, before
     // evaluating (no telemetry for a read that cannot succeed).
-    if (!isCompatibleValueType(requestedType, config.valueType)) {
+    if (requestedType !== undefined && !isCompatibleValueType(requestedType, config.valueType)) {
       const error = new QuonfigTypeMismatchError(key, config.valueType, requestedType);
       this.warnReadFailureOnce(key, error.message);
       return {
@@ -2010,17 +2033,23 @@ export class Quonfig {
 
     let failure: unknown;
     try {
-      const result = this.resolveForRead(key, contexts);
+      // An untyped read (evaluateDetails) keeps the stored form: no type
+      // check, no parse validation, so a malformed value is still reported.
+      const untyped = requestedType === undefined;
+      const result = this.resolveForRead(key, contexts, untyped);
       if (result.kind === "absent") {
         return {
           value: undefined,
           reason: "DEFAULT",
           configId: config.id,
           configType: config.type,
+          valueType: untyped ? config.valueType : undefined,
         };
       }
       if (result.kind === "ok") {
-        const value = convertTyped(key, result.value, requestedType);
+        const value = untyped
+          ? storedForm(key, result.value)
+          : convertTyped(key, result.value, requestedType);
         const reasonNum = result.evaluation.reason;
         const reason: EvaluationReason =
           reasonNum === ReasonStatic
@@ -2030,6 +2059,7 @@ export class Quonfig {
               : "TARGETING_MATCH";
         return {
           value,
+          valueType: untyped ? config.valueType : undefined,
           reason,
           evaluation: result.evaluation,
           hashPropertyMissing: result.hashPropertyMissing,
@@ -2057,14 +2087,14 @@ export class Quonfig {
   /** Internal: typed wrapper around evaluateDetailsRaw. */
   private evaluateDetailsTyped<T>(
     key: string,
-    requestedType: ReadType,
+    requestedType: ReadType | undefined,
     contexts: Contexts | undefined
-  ): EvaluationDetails<T> {
+  ): EvaluationDetails<T> & { valueType?: ValueType } {
     const raw = this.evaluateDetailsRaw(key, requestedType, contexts);
     if (raw.reason !== "STATIC" && raw.reason !== "TARGETING_MATCH" && raw.reason !== "SPLIT") {
       // DEFAULT or ERROR — pass through with no value but still attach
       // variant + flagMetadata per the cross-SDK spec.
-      const base: EvaluationDetails<T> = {
+      const base: EvaluationDetails<T> & { valueType?: ValueType } = {
         value: undefined,
         reason: raw.reason,
         variant: this.buildVariant(raw.reason, undefined, undefined),
@@ -2085,12 +2115,14 @@ export class Quonfig {
       raw.reason
     );
     if (raw.hashPropertyMissing) flagMetadata.hashPropertyMissing = true;
-    return {
+    const details: EvaluationDetails<T> & { valueType?: ValueType } = {
       value: coerced,
       reason: raw.reason,
       variant: this.buildVariant(raw.reason, ev?.ruleIndex, ev?.weightedValueIndex),
       flagMetadata,
     };
+    if (raw.valueType !== undefined) details.valueType = raw.valueType;
+    return details;
   }
 
   /** Warn once per config key when a weighted rollout's hash property is missing (qfg-9dxb.8). */
