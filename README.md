@@ -88,6 +88,24 @@ The `*Details` getters (`getBoolDetails`, `getStringDetails`, `getNumberDetails`
 `errorCode: "TYPE_MISMATCH"` for a wrong-type or malformed value, and `errorCode: "GENERAL"` for an
 unset ENV_VAR or a decryption failure.
 
+### Reading a value in its stored form
+
+`evaluateDetails(key, contexts?)` returns any config's value in its stored form, with the same
+`reason`, `variant` and `flagMetadata` as the `*Details` getters. A duration comes back as its ISO
+8601 text exactly as stored, for example `"PT90S"`, where `getDuration` gives milliseconds. It is on
+`Quonfig` and `BoundQuonfig` and never throws.
+
+```typescript
+const details = quonfig.evaluateDetails("http.timeout");
+// { value: "PT90S", valueType: "duration", reason: "STATIC", variant: "static", flagMetadata: {...} }
+```
+
+There is no type check and no parsing, so validate the value yourself. A malformed value such as a
+duration stored as `"30s"` is returned as stored, with a success reason. `valueType` is the config's
+stored type (`"duration"`, `"string"`, `"json"` and so on). ENV_VAR values and decryption still
+apply. A missing key returns `value: undefined` with `reason: "ERROR"` and
+`errorCode: "FLAG_NOT_FOUND"`.
+
 **If a bad config must fail hard**, for example a wrong decryption key in production, read it
 without a default on a client with `onNoDefault: "error"`. The getter then throws instead of
 returning your default.
