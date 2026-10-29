@@ -85,8 +85,10 @@ Numbers convert only when the result is exact. `getNumber` reads an int as it is
 
 The `*Details` getters (`getBoolDetails`, `getStringDetails`, `getNumberDetails`,
 `getStringListDetails`, `getJSONDetails`) never throw. They report `reason: "ERROR"` with
-`errorCode: "TYPE_MISMATCH"` for a wrong-type or malformed value, and `errorCode: "GENERAL"` for an
-unset ENV_VAR or a decryption failure.
+`errorCode: "TYPE_MISMATCH"` for a value of another type than the one asked for,
+`errorCode: "PARSE_ERROR"` for a value that does not parse as its declared type (a malformed stored
+int, double or duration, or an ENV_VAR value that cannot be converted), and `errorCode: "GENERAL"`
+for an unset ENV_VAR or a decryption failure.
 
 ### Reading a value in its stored form
 

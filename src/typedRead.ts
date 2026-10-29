@@ -37,7 +37,7 @@ export class QuonfigTypeMismatchError extends Error {
 /**
  * A stored value that does not parse as its declared type (an int config
  * holding "twelve", a duration config holding "30s"). Same family as an
- * ENV_VAR coercion failure; reported as `TYPE_MISMATCH` by the details API.
+ * ENV_VAR coercion failure; reported as `PARSE_ERROR` by the details API.
  */
 export class QuonfigMalformedValueError extends Error {
   constructor(key: string, valueType: string) {

@@ -263,12 +263,19 @@ describe("Details getters", () => {
       client.getJSONDetails("getter.contract.string_list"),
       client.getStringListDetails("getter.contract.json"),
       client.getNumberDetails("getter.contract.duration"),
-      client.getNumberDetails("getter.contract.int.malformed"),
     ]) {
       expect(details.value).toBeUndefined();
       expect(details.reason).toBe("ERROR");
       expect(details.errorCode).toBe("TYPE_MISMATCH");
     }
+  });
+
+  it("report ERROR / PARSE_ERROR for a malformed value, with no value (qfg-wg1n)", async () => {
+    const client = await fixtureClient();
+    const details = client.getNumberDetails("getter.contract.int.malformed");
+    expect(details.value).toBeUndefined();
+    expect(details.reason).toBe("ERROR");
+    expect(details.errorCode).toBe("PARSE_ERROR");
   });
 
   it("report ERROR / GENERAL for an unset ENV_VAR or a decryption failure", async () => {
