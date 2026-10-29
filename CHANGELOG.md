@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.2.0 - 2026-10-29
+
+Malformed data now has its own error code (qfg-wg1n). Error path only: a well-formed value resolves
+exactly as before.
+
+### Changed (edge-case behaviour change, minor)
+
+- The `*Details` getters and `evaluateDetails` report a value that does not parse as its declared
+  type with the new error code `PARSE_ERROR`, where they reported `TYPE_MISMATCH` before. This
+  covers a malformed stored int, double or duration and an ENV_VAR value that cannot be converted
+  (for example `twelve` for an int config). The value is still absent and the reason is still
+  `ERROR`, so your default applies as before. Only the error code changes. Reading a config as
+  another type is still `TYPE_MISMATCH`, and an unset ENV_VAR or a decryption failure is still
+  `GENERAL`. `EvaluationErrorCode` gains `"PARSE_ERROR"`. The plain getters (`getNumber` and the
+  rest) are unchanged.
+- Upgrade note: code that compares `errorCode` with `"TYPE_MISMATCH"` to detect a malformed value
+  should compare with `"PARSE_ERROR"`. `@quonfig/openfeature-node` 3.3.0 and later pass the new code
+  straight through as OpenFeature `PARSE_ERROR`; 3.2.x and earlier report it as `GENERAL`, so
+  upgrade the provider to 3.3.0 with this release.
+
+### Fixed
+
+- Console log lines from the default logger no longer read `[quonfig] [quonfig] ...`; the prefix
+  appears once. A logger you supply sees the same messages as before. (qfg-nsqn)
+- Added a live-server regression test that `connectionState()` is `initializing` (not
+  `disconnected`) while a 200 SSE response has sent no frame yet. The behaviour itself shipped in
+  2.0.0 (qfg-j600). (qfg-rzgo)
+
 ## 2.1.0 - 2026-10-29
 
 ### Added

@@ -206,6 +206,20 @@ describe("Test 9 — first-frame rule against a local server", () => {
     expect(o.everConnectedAt).toBeNull();
   }, 15_000);
 
+  it("frameless 200 held open: connectionState() is 'initializing', not 'disconnected' (qfg-rzgo)", async () => {
+    // 200 + headers, then nothing: no frame, no close. Per the supervisor
+    // contract (Test 6) the client keeps its prior state, 'initializing'.
+    const rig = await startRig(() => {});
+    const o = await startClient(rig, 5000); // grace 10s: the poller stays off
+    await waitFor(() => rig.sseAttempts >= 1, 3000, "SSE request reached the server");
+    await sleep(300);
+    o.stopSampler();
+
+    expect(rig.sseAttempts).toBe(1);
+    expect(o.connectedEdges()).toBe(0);
+    expect(o.q.connectionState()).toBe("initializing");
+  }, 15_000);
+
   it("9b headers early, frame late: exactly one connected edge, at the keepalive", async () => {
     let sendAt = 0;
     const rig = await startRig((res) => {

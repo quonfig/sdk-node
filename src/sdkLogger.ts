@@ -28,8 +28,13 @@ const NOOP = (): void => {};
 
 const PREFIX = "[quonfig]";
 
+// Most SDK messages already start with the prefix (they are written for a
+// host logger, which adds none); add it only when it is missing so console
+// lines never read "[quonfig] [quonfig] ..." (qfg-nsqn).
 function prefix(message: string): string {
-  return `${PREFIX} ${message}`;
+  return typeof message === "string" && message.startsWith(PREFIX)
+    ? message
+    : `${PREFIX} ${message}`;
 }
 
 /**

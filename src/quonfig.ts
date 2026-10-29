@@ -214,12 +214,18 @@ function describeReadError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** A value that is not of (or does not parse as) the requested type. */
-function isCoercionFailure(err: unknown): boolean {
-  if (err instanceof QuonfigTypeMismatchError) return true;
-  if (err instanceof QuonfigMalformedValueError) return true;
-  if (err instanceof InvalidDurationError) return true;
-  return err instanceof Error && /cannot be converted to/.test(err.message);
+/**
+ * The details error code for a failed read: a value that does not parse as
+ * its declared type (a malformed stored int/double/duration, an ENV_VAR value
+ * that cannot be converted) is PARSE_ERROR; a value of another type than the
+ * one asked for is TYPE_MISMATCH; anything else is GENERAL.
+ */
+function readErrorCode(err: unknown): EvaluationErrorCode {
+  if (err instanceof QuonfigTypeMismatchError) return "TYPE_MISMATCH";
+  if (err instanceof QuonfigMalformedValueError) return "PARSE_ERROR";
+  if (err instanceof InvalidDurationError) return "PARSE_ERROR";
+  if (err instanceof Error && /cannot be converted to/.test(err.message)) return "PARSE_ERROR";
+  return "GENERAL";
 }
 
 /**
@@ -1465,7 +1471,9 @@ export class Quonfig {
    * Get a boolean config value with evaluation details (reason + error code).
    *
    * Never throws: errors are surfaced as `{ value: undefined, reason:
-   * "ERROR", errorCode: ... }`. A non-bool value is `TYPE_MISMATCH`.
+   * "ERROR", errorCode: ... }`. A non-bool value is `TYPE_MISMATCH`; a
+   * value that does not parse as its declared type (a malformed stored or
+   * ENV_VAR value) is `PARSE_ERROR`.
    */
   getBoolDetails(key: string, contexts?: Contexts): EvaluationDetails<boolean> {
     return this.evaluateDetailsTyped<boolean>(key, "bool", contexts);
@@ -2077,7 +2085,7 @@ export class Quonfig {
     return {
       value: undefined,
       reason: "ERROR",
-      errorCode: isCoercionFailure(failure) ? "TYPE_MISMATCH" : "GENERAL",
+      errorCode: readErrorCode(failure),
       errorMessage: message,
       configId: config.id,
       configType: config.type,

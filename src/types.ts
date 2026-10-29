@@ -472,6 +472,11 @@ export type EvaluationReason = "STATIC" | "TARGETING_MATCH" | "SPLIT" | "DEFAULT
 export type EvaluationErrorCode =
   | "FLAG_NOT_FOUND"
   | "TYPE_MISMATCH"
+  /**
+   * The value does not parse as its declared type: a malformed stored
+   * int/double/duration, or an ENV_VAR value that cannot be converted.
+   */
+  | "PARSE_ERROR"
   | "GENERAL"
   /** The client has no config yet (init not complete, or failed and still retrying). */
   | "PROVIDER_NOT_READY";
