@@ -1,0 +1,22 @@
+# Code scanning (SOC 2 evidence): full Semgrep scan of main, uploaded to the
+# Security tab. REPORT-ONLY: runs after merge, never on a PR, and is not a
+# required check, so findings on main never block other work. Public repos
+# only (the job skips itself on private repos). Copy to
+# .github/workflows/code-scanning.yml; all logic lives in quonfig/ci.
+name: code-scanning
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  code-scanning:
+    uses: quonfig/ci/.github/workflows/code-scanning.yml@main
