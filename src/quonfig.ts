@@ -393,6 +393,9 @@ export class BoundQuonfig {
  * const value = quonfig.get("my-config");
  * ```
  */
+/** Outcome text for the never-throwing `*Details` reads. */
+const DETAILS_ERROR_OUTCOME = 'returning reason "ERROR" with no value';
+
 export class Quonfig {
   private readonly sdkKey: string;
   private readonly apiUrls: string[];
@@ -1541,17 +1544,17 @@ export class Quonfig {
       const result = this.resolveForRead(key, contexts);
       if (result.kind === "absent") {
         if (this.onNoDefault !== "ignore") {
-          this.warnReadFailureOnce(key, `No value found for key "${key}"`);
+          this.warnReadFailureOnce(key, `No value found for key "${key}"`, "returning false");
         }
         return false;
       }
       if (result.kind === "error") {
-        this.warnReadFailureOnce(key, describeReadError(result.error));
+        this.warnReadFailureOnce(key, describeReadError(result.error), "returning false");
         return false;
       }
       return convertTyped(key, result.value, "bool") as boolean;
     } catch (err) {
-      this.warnReadFailureOnce(key, describeReadError(err));
+      this.warnReadFailureOnce(key, describeReadError(err), "returning false");
       return false;
     }
   }
@@ -1659,7 +1662,13 @@ export class Quonfig {
    * rethrows the underlying error under "error").
    */
   private readFailed(key: string, defaultValue: unknown, err: unknown): any {
-    this.warnReadFailureOnce(key, describeReadError(err));
+    const outcome =
+      defaultValue !== undefined
+        ? "returning the caller's default"
+        : this.onNoDefault === "error"
+          ? 'no default was passed, so the read throws (onNoDefault: "error")'
+          : "no default was passed, returning undefined";
+    this.warnReadFailureOnce(key, describeReadError(err), outcome);
     if (defaultValue !== undefined) return defaultValue;
     if (this.onNoDefault === "error") throw err;
     return undefined;
@@ -2028,7 +2037,7 @@ export class Quonfig {
     // evaluating (no telemetry for a read that cannot succeed).
     if (requestedType !== undefined && !isCompatibleValueType(requestedType, config.valueType)) {
       const error = new QuonfigTypeMismatchError(key, config.valueType, requestedType);
-      this.warnReadFailureOnce(key, error.message);
+      this.warnReadFailureOnce(key, error.message, DETAILS_ERROR_OUTCOME);
       return {
         value: undefined,
         reason: "ERROR",
@@ -2081,7 +2090,7 @@ export class Quonfig {
     // A failed read (type mismatch, malformed value, unset ENV_VAR,
     // decryption failure): log once per key, report it, never throw.
     const message = describeReadError(failure);
-    this.warnReadFailureOnce(key, message);
+    this.warnReadFailureOnce(key, message, DETAILS_ERROR_OUTCOME);
     return {
       value: undefined,
       reason: "ERROR",
@@ -2217,14 +2226,14 @@ export class Quonfig {
    * Warn once per config key per client that a read returned no value (type
    * mismatch, malformed value, unset ENV_VAR, decryption failure), so a
    * broken config is not mistaken for "using the default". `reason` names the
-   * key and types, never the value.
+   * key and types, never the value; `outcome` says what the read then did
+   * (returned the default, returned undefined/false, or threw), so the line
+   * never claims a default applied when the read actually threw.
    */
-  private warnReadFailureOnce(key: string, reason: string): void {
+  private warnReadFailureOnce(key: string, reason: string, outcome: string): void {
     if (this.warnedReadFailure.has(key)) return;
     this.warnedReadFailure.add(key);
-    this.logger.warn(
-      `[quonfig] read of "${key}" returned no value; the caller's default applies: ${reason}`
-    );
+    this.logger.warn(`[quonfig] read of "${key}" failed (${reason}); ${outcome}`);
   }
 
   /** Warn once per key that isEnabled was called before init() and returned false. */
