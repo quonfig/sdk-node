@@ -211,6 +211,41 @@ describe("once-per-key logging", () => {
     expect(lines).toHaveLength(1);
   });
 
+  // The WARN must say what the read actually did: a read with no default
+  // under onNoDefault "error" throws, so "the caller's default applies"
+  // would be false.
+  it("says the read throws when there is no default under onNoDefault: 'error'", async () => {
+    const logger = makeLogger();
+    const client = await fixtureClient({ logger });
+    expect(() => client.getString("a.broken.secret.config")).toThrow();
+    const [line] = warnedAbout(logger, "a.broken.secret.config");
+    expect(line).toContain("no default was passed, so the read throws");
+    expect(line).not.toContain("default applies");
+  });
+
+  it("says the caller's default is returned when one was passed", async () => {
+    const logger = makeLogger();
+    const client = await fixtureClient({ logger });
+    expect(client.getString("a.broken.secret.config", undefined, "D")).toBe("D");
+    expect(warnedAbout(logger, "a.broken.secret.config")[0]).toContain(
+      "returning the caller's default"
+    );
+  });
+
+  it("says undefined is returned when there is no default under onNoDefault: 'ignore'", async () => {
+    const logger = makeLogger();
+    const client = await fixtureClient({ logger, onNoDefault: "ignore" });
+    expect(client.getString("a.broken.secret.config")).toBeUndefined();
+    expect(warnedAbout(logger, "a.broken.secret.config")[0]).toContain("returning undefined");
+  });
+
+  it("says isEnabled returns false", async () => {
+    const logger = makeLogger();
+    const client = await fixtureClient({ logger });
+    expect(client.isEnabled("a.broken.secret.config")).toBe(false);
+    expect(warnedAbout(logger, "a.broken.secret.config")[0]).toContain("returning false");
+  });
+
   it("does not log a missing key read with a default", async () => {
     const logger = makeLogger();
     const client = await fixtureClient({ logger });
