@@ -89,7 +89,7 @@
     "pino": "10.4.0",
     "prettier": "^3.0.0",
     "tsup": "^9.0.0",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "vitest": "^5.0.5",
     "winston": "3.19.0"
   }
