@@ -38,7 +38,7 @@ export class Evaluator {
    * evaluateConfig plus segPath: the keys of the configs currently being
    * evaluated above this one through IN_SEG / NOT_IN_SEG. A segment reference
    * back onto the path is a cycle and is treated as a missing segment instead
-   * of recursing until a RangeError (qfg-9dxb.7, matches sdk-go qfg-9dxb.4).
+   * of recursing until a RangeError, matching sdk-go.
    * It is a path, not a global visited set, so diamonds still resolve.
    */
   private evaluateConfigOnPath(

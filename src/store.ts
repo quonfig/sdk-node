@@ -48,7 +48,7 @@ export class ConfigStore {
    *
    * An entry that fails to normalize (for example a config with no `default`)
    * is skipped with a WARN naming its key, and the rest installs; the skipped
-   * key reads as not found (qfg-goi1.10.1, sdk-go 2f6b98b). If every entry
+   * key reads as not found. If every entry
    * fails, the envelope is rejected and the previous configs stay, so an
    * undecodable payload can never install as an empty workspace.
    */

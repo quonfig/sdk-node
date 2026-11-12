@@ -152,7 +152,7 @@ function initEvent(name: string): { event: string } {
 
 /**
  * The installed value an evaluation's eval-summary counter identity can be
- * cached on (qfg-23uf), or undefined when the resolved value is not the stored
+ * cached on, or undefined when the resolved value is not the stored
  * one: an ENV_VAR or decrypted value is resolved per read and can change while
  * the stored descriptor stays the same, so it must not hit a cached key.
  */
@@ -374,9 +374,9 @@ export class BoundQuonfig {
     return fn ? fn(bound) : bound;
   }
 
-  /** @deprecated Use {@link BoundQuonfig.withContext} instead. Kept through 1.0.0 for backwards compatibility with the Prefab-fork lineage; removed in 2.0.0. */
+  /** @deprecated Use {@link BoundQuonfig.withContext} instead. A deprecated alias kept for backwards compatibility with the Prefab-fork lineage; it behaves exactly like `withContext`. */
   inContext(contexts: Contexts): BoundQuonfig;
-  /** @deprecated Use {@link BoundQuonfig.withContext} instead. Kept through 1.0.0 for backwards compatibility with the Prefab-fork lineage; removed in 2.0.0. */
+  /** @deprecated Use {@link BoundQuonfig.withContext} instead. A deprecated alias kept for backwards compatibility with the Prefab-fork lineage; it behaves exactly like `withContext`. */
   inContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
   inContext<T>(contexts: Contexts, fn?: (rf: BoundQuonfig) => T): BoundQuonfig | T {
     return fn ? this.withContext(contexts, fn) : this.withContext(contexts);
@@ -431,7 +431,7 @@ export class Quonfig {
   private readonly logger: NormalizedLogger;
   private readonly testEventSourceFactory?: EventSourceFactory;
   /**
-   * Private test seam (qfg-goi1.10.24): sees every background wait the client
+   * Private test seam: sees every background wait the client
    * requests ("sse", "engage", "poll", "probe") and returns the delay actually
    * used. NOT part of the public API.
    */
@@ -485,14 +485,14 @@ export class Quonfig {
   private environmentId: string = "";
   private initialized: boolean = false;
   /**
-   * True once an init() call has rejected (qfg-9p4i.2). The client is kept
+   * True once an init() call has rejected. The client is kept
    * alive: getters serve the caller default / `onNoDefault` instead of throwing
    * "Not initialized", and a background retry loop runs until config loads.
    */
   private initFailed: boolean = false;
   /** When the first init() started (ms epoch), for the heal / retry log lines. */
   private initStartedAt?: number;
-  /** True while the background init-retry loop owns retrying (qfg-9p4i.2). */
+  /** True while the background init-retry loop owns retrying. */
   private initRetryActive: boolean = false;
   private initRetryTimer?: ReturnType<typeof setTimeout>;
   private initRetryNextWarnAt?: number;
@@ -523,7 +523,7 @@ export class Quonfig {
    * Failover-behavior counters (hedge-fired / guard-rejected / resolved-from).
    * Instantiated in the constructor so it exists before the initial fetch, and
    * gated on the same telemetry opt-out as the reporter — the reporter drains it
-   * into the periodic flush only when telemetry is enabled. (qfg-41nh.18)
+   * into the periodic flush only when telemetry is enabled.
    */
   private failover: FailoverCollector;
   /** Set once a collector push has thrown, so the debug line is logged once. */
@@ -643,9 +643,9 @@ export class Quonfig {
       options.domain,
       options.logger
     );
-    // Per-URL config-fetch deadline (qfg-7h5d.1.7). Set once, before any fetch
-    // runs, so it bounds the initial fetch and every fallback-poll fetch
-    // uniformly (both route through transport.fetchConfigs).
+    // Per-URL deadline for the sequential transport.fetchConfigs path
+    // (qfg-7h5d.1.7). The client's own init and fallback-poll fetches use the
+    // hedged path (configFetchHedgeDelayMs / configFetchHedgeAbortMs).
     if (options.configFetchTimeoutMs !== undefined) {
       if (options.configFetchTimeoutMs <= 0) {
         throw new Error("[quonfig] configFetchTimeoutMs must be a positive number of milliseconds");
@@ -714,7 +714,7 @@ export class Quonfig {
    * attribute to) AND at least one collector is enabled. Mirrors sdk-go's
    * Options.TelemetryEnabled(); the single source of truth for both the failover
    * collector's enabled state and whether {@link startTelemetry} starts the
-   * reporter. (qfg-41nh.18)
+   * reporter.
    */
   private isTelemetryEnabled(): boolean {
     if (!this.sdkKey) return false;
@@ -955,7 +955,7 @@ export class Quonfig {
 
   /**
    * init() called again after a caught failure, while the background retry
-   * loop runs (qfg-9p4i.17, I5). Joins that loop instead of starting a second
+   * loop runs (I5). Joins that loop instead of starting a second
    * one: resolves when it heals, otherwise applies `onInitFailure` once at
    * `initTimeout` (or after the loop's next attempt when initTimeout <= 0).
    */
@@ -1229,7 +1229,7 @@ export class Quonfig {
    * Start the update channel (SSE, or the poller when SSE is off) and the
    * telemetry reporter. Once per client: at a healthy init, or at the init
    * decision point of a degraded client (fail caught, or continue), whose heal
-   * then starts nothing new (qfg-9p4i.17, I6).
+   * then starts nothing new (I6).
    */
   private startBackgroundWorkers(): void {
     if (this.closed || this.backgroundWorkersStarted) return;
@@ -1252,7 +1252,7 @@ export class Quonfig {
   }
 
   /**
-   * Background retry after a rejected init() (qfg-9p4i.2). First lets the
+   * Background retry after a rejected init(). First lets the
    * attempt init() gave up on settle (its late install heals at once), then
    * retries with jittered backoff 0.5s, 1s, 2s, ... capped at 30s (design B.3).
    * An auth-class rejection (401/403 from the primary) waits the auth-probe
@@ -1787,7 +1787,7 @@ export class Quonfig {
   /**
    * Wall-clock time of the most recent successful refresh — the last moment the
    * SDK confirmed its config source was reachable and its held config current.
-   * This is a LIVENESS signal, not an install counter (qfg-41nh.11):
+   * This is a LIVENESS signal, not an install counter:
    *
    * - any envelope install (initial fetch, SSE push, fallback poll, datadir
    *   load/reload) advances it, and
@@ -1818,7 +1818,7 @@ export class Quonfig {
    * successful-but-NOT-installed sites: a 304, a 200 dropped by the
    * reject-older guard, or a guard-no-op'd SSE message. Transport errors never
    * call it. Callers on the fetch/SSE paths must stamp ONLY for the
-   * not-installed outcomes so an install never double-stamps. (qfg-41nh.11)
+   * not-installed outcomes so an install never double-stamps.
    */
   private recordSuccessfulRefresh(): void {
     this.lastSuccessfulRefreshAt = new Date();
@@ -1900,9 +1900,9 @@ export class Quonfig {
     return fn ? fn(bound) : bound;
   }
 
-  /** @deprecated Use {@link Quonfig.withContext} instead. Kept through 1.0.0 for backwards compatibility with the Prefab-fork lineage; removed in 2.0.0. */
+  /** @deprecated Use {@link Quonfig.withContext} instead. A deprecated alias kept for backwards compatibility with the Prefab-fork lineage; it behaves exactly like `withContext`. */
   inContext(contexts: Contexts): BoundQuonfig;
-  /** @deprecated Use {@link Quonfig.withContext} instead. Kept through 1.0.0 for backwards compatibility with the Prefab-fork lineage; removed in 2.0.0. */
+  /** @deprecated Use {@link Quonfig.withContext} instead. A deprecated alias kept for backwards compatibility with the Prefab-fork lineage; it behaves exactly like `withContext`. */
   inContext<T>(contexts: Contexts, fn: (rf: BoundQuonfig) => T): T;
   inContext<T>(contexts: Contexts, fn?: (rf: BoundQuonfig) => T): BoundQuonfig | T {
     return fn ? this.withContext(contexts, fn) : this.withContext(contexts);
@@ -2142,7 +2142,7 @@ export class Quonfig {
     return details;
   }
 
-  /** Warn once per config key when a weighted rollout's hash property is missing (qfg-9dxb.8). */
+  /** Warn once per config key when a weighted rollout's hash property is missing. */
   private warnIfHashPropertyMissing(configKey: string, match: EvalMatch): void {
     if (match.missingHashProperty === undefined || this.warnedMissingHashProperty.has(configKey)) {
       return;
@@ -2315,7 +2315,7 @@ export class Quonfig {
    * Every install stamps `lastSuccessfulRefreshAt` here — callers on the
    * fetch/SSE paths must therefore only stamp separately for
    * successful-but-NOT-installed outcomes (a 304, or a guard-rejected payload),
-   * never both (qfg-41nh.11).
+   * never both.
    */
   private installEnvelope(envelope: ConfigEnvelope): void {
     this.store.update(envelope);
@@ -2347,7 +2347,7 @@ export class Quonfig {
    * Canonical reject-older rule for an incoming snapshot on a network install
    * path (initial fetch, failover/refresh fetch, SSE initial snapshot, SSE
    * update, fallback poll). Reject-older is the whole rule — there is no source
-   * ranking (qfg-7h5d.1.7):
+   * ranking:
    *
    *   - A fresh client (nothing installed yet) always accepts the first
    *     snapshot, even an unversioned one. A stale secondary payload can
@@ -2360,13 +2360,13 @@ export class Quonfig {
    *     an equal second leg can't re-install or flap.
    *   - An unversioned snapshot (generation absent or <= 0) installs ONLY while
    *     the client has never held a real generation (held == 0), e.g. against
-   *     `qfg serve`. Once a positive generation is held it is a silent no-op
-   *     (qfg-9dxb.9). The pre-watermark servers that sent gen 0 on every
+   *     `qfg serve`. Once a positive generation is held it is a silent no-op.
+   *     The pre-watermark servers that sent gen 0 on every
    *     payload are long gone; gen 0 now only comes from an api-delivery
    *     machine whose git object store is damaged (rev-count failed) — the
    *     least trustworthy source — so it must not override a held real
    *     generation and move the client back to older content. Such an install
-   *     never lowers the held generation (qfg-9dxb.3).
+   *     never lowers the held generation.
    *
    * Node is single-threaded, so this synchronous check plus the installEnvelope
    * that follows it run as one atomic step with respect to every other install
@@ -2386,7 +2386,7 @@ export class Quonfig {
   /**
    * Whether a guard-rejected envelope was STRICTLY older than the held
    * generation — i.e. an upstream actually tried to move this client backwards.
-   * That is the only outcome `guardRejected` counts (qfg-rr5b).
+   * That is the only outcome `guardRejected` counts.
    *
    * An EQUAL-generation re-delivery is deliberately not counted: api-delivery's
    * SSE `sendInitialConfig` re-sends the current envelope on every connect, and
@@ -2396,11 +2396,11 @@ export class Quonfig {
    * so counting it polluted the `sdk_failover` signal, where `guardRejected` is
    * supposed to mean "a leg tried to move us backwards". It stays a silent
    * no-op: not installed, and liveness still advances at the call sites exactly
-   * as it did before (qfg-41nh.11).
+   * as it did before.
    *
    * A gen<=0 snapshot rejected by {@link Quonfig.shouldInstall} (held > 0) is
    * not provably older — it carries no ordering information — so it is a
-   * silent no-op too and never counted (qfg-9dxb.9).
+   * silent no-op too and never counted.
    */
   private isStrictlyOlderThanHeld(envelope: ConfigEnvelope): boolean {
     const incoming = envelope.meta.generation ?? 0;
@@ -2412,10 +2412,10 @@ export class Quonfig {
    * Highest positive Meta.generation the client has installed (0 until a
    * versioned snapshot installs, e.g. when the server predates the watermark).
    * A higher generation is strictly newer; the canonical-ordering guard
-   * compares against it on every install path. (qfg-7h5d.1.7)
+   * compares against it on every install path.
    *
    * An unversioned install (generation absent or 0) still installs but does
-   * not lower this value — before qfg-9dxb.3 it reset it to 0.
+   * not lower this value.
    */
   heldGeneration(): number {
     return this.heldGenerationValue;
@@ -2424,7 +2424,7 @@ export class Quonfig {
   /**
    * Number of times an envelope has been installed over the client's lifetime
    * (every install path). The reject-older guard keeps this from advancing on a
-   * same-or-older payload. (qfg-7h5d.1.7)
+   * same-or-older payload.
    */
   configInstallCount(): number {
     return this.configInstalls;
@@ -2442,8 +2442,8 @@ export class Quonfig {
   }
 
   /**
-   * Whether `init()` has completed and the client is serving config.
-   * (qfg-7h5d.1.7 — used by the failover/ordering chaos suite.)
+   * Whether `init()` has completed and the client is serving config. Used by the
+   * failover/ordering chaos suite.
    */
   ready(): boolean {
     return this.initialized;
@@ -2454,14 +2454,14 @@ export class Quonfig {
    * pinned to the primary stream and failover is an HTTP-only property (the
    * chaos suite asserts `false` in f05), so this should stay `false`. It reads
    * the transport's real stream leg, so a regression that repoints the stream
-   * shows up here. (qfg-7h5d.1.7; was a constant `false` until qfg-6vno.2)
+   * shows up here.
    */
   sseFailedOverToSecondary(): boolean {
     return this.transport.activeStreamLegIndex() > 0;
   }
 
   /**
-   * Internal, test-only (qfg-6vno.2, qfg-6vno.27): a snapshot of the
+   * Internal, test-only: a snapshot of the
    * supervisor counters the chaos harness reads for
    * `quonfig_sse_connect_attempts_total`,
    * `quonfig_sdk_worker_restart_total{layer="1"}` and
@@ -2486,8 +2486,8 @@ export class Quonfig {
   }
 
   /**
-   * Run one user callback invocation in isolation (contract Test 5,
-   * qfg-6vno.27). A throw or a rejected promise is caught, counted in
+   * Run one user callback invocation in isolation (contract Test 5).
+   * A throw or a rejected promise is caught, counted in
    * `callback_errors_total{callback}` and logged at ERROR with the error (and
    * so its stack). It is NOT a worker restart: no worker was restarted, so
    * `worker_restart_total` does not move.
@@ -2532,7 +2532,7 @@ export class Quonfig {
 
   /**
    * Drive one parallel-failover hedge cycle and install whatever arrives through
-   * the reject-older guard (qfg-7h5d.1.14). The transport fires the primary leg
+   * the reject-older guard. The transport fires the primary leg
    * first and, only if it is slow or errors, the secondary in parallel; each leg
    * is delivered here as it settles and installed if it advances the held
    * generation, so watermark-max falls out — higher generation wins, a late older
@@ -2723,7 +2723,7 @@ export class Quonfig {
    * update). Either it advances the held generation and installs, or the
    * reject-older guard drops it as equal-or-older — but either way the message
    * was received and processed, so the stream proved live and the held config
-   * current: it counts as a successful refresh (qfg-41nh.11). Connection-level
+   * current: it counts as a successful refresh. Connection-level
    * SSE failures never reach here — they flow through onConnectionStateChange
    * and do not stamp.
    */
@@ -2831,7 +2831,7 @@ export class Quonfig {
    * `immediateFirstPoll` fires a fetch right away instead of waiting a full
    * poll interval. The grace-elapsed engage passes `true` — by then the store
    * is already ≥120s stale, and waiting another 60s would put first data at
-   * ~180s after SSE loss vs ~120s in sdk-go/java/net (qfg-41nh.9). The
+   * ~180s after SSE loss vs ~120s in sdk-go/java/net. The
    * boot-time engages (sse-disabled, initial-sse-failure) pass `false`
    * because init() fetched moments earlier.
    */
@@ -2999,8 +2999,7 @@ export class Quonfig {
   /**
    * Internal accessor for the chaos harness and test suite — `true` when the
    * Layer 2 HTTP fallback poller is currently scheduled. NOT part of the
-   * public API; the documented `connectionState()` accessor lands in
-   * qfg-47c2.14.
+   * public API; use `connectionState()` instead.
    */
   fallbackPollerActive(): boolean {
     return this.fallbackPollerEngaged;

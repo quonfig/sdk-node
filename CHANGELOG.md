@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.2.1 - 2026-11-12
+
+Documentation-only patch (qfg-csepk). No runtime change.
+
+- `inContext` JSDoc no longer says it is "removed in 2.0.0". It is a deprecated alias for
+  `withContext`, kept in 2.x.
+- `configFetchTimeoutMs` JSDoc now says what it bounds: the sequential fetch path only. The initial
+  fetch and fallback polls use the hedged path, bounded by `configFetchHedgeDelayMs` and
+  `configFetchHedgeAbortMs`.
+- The `namespace` option is marked `@deprecated`. The SDK never read it, so setting it has no
+  effect.
+- Removed internal tracker IDs and old-version history from the JSDoc in the published types.
+
 ## 2.2.0 - 2026-10-29
 
 Malformed data now has its own error code (qfg-wg1n). Error path only: a well-formed value resolves

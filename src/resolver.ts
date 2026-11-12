@@ -57,7 +57,7 @@ export class Resolver {
    * resolveValue plus keyPath: the config keys already being resolved above
    * this one through decryptWith. A decryptWith pointing back onto the path is
    * a cycle and fails like any other decryption error instead of recursing
-   * until a RangeError (qfg-9dxb.7, matches sdk-go qfg-9dxb.4).
+   * until a RangeError, matching sdk-go.
    */
   private resolveValueOnPath(
     val: Value,

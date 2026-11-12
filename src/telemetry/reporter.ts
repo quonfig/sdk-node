@@ -30,7 +30,7 @@ function positiveOr(value: number | undefined, fallback: number): number {
  * TelemetryReporter drains the collectors once per tick and hands the
  * serialized window to a {@link TelemetryTransportQueue}, which retains failed
  * batches byte-for-byte and resends them under the transport policy
- * (qfg-mol-9u0: 60s ticks, one POST in flight, 30s floor after a failure,
+ * (60s ticks, one POST in flight, 30s floor after a failure,
  * Retry-After, 5 batches / 2MB / 5 min retention, disable on 401/403/404).
  */
 export class TelemetryReporter {
