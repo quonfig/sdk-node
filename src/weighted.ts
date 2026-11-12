@@ -15,7 +15,7 @@ export class WeightedValueResolver {
    * the selection is deterministic via Murmur3 hash. If hashByPropertyName is
    * set but the value is missing (undefined/null), configKey + "" is hashed,
    * the same as a present empty string, and `missingHashProperty` names the
-   * property (qfg-9dxb.8). If hashByPropertyName is not set, it falls back
+   * property. If hashByPropertyName is not set, it falls back
    * to Math.random().
    *
    * Returns the selected value and its index, or [undefined, -1] if no values.

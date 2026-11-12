@@ -52,7 +52,7 @@ export class EvaluationSummaryCollector {
    * evaluation resolved to. Stored values are replaced, never mutated, on each
    * install, so the counter identity is computed once per installed value and
    * a repeat read in the same window is a counter increment instead of a
-   * serialization of the selected value (qfg-23uf). A value resolved fresh on
+   * serialization of the selected value. A value resolved fresh on
    * each read (ENV_VAR, decryption) is a different object every time and
    * simply never hits the cache.
    */

@@ -99,7 +99,7 @@ export type EventSourceFactory = (
 ) => EventSourceLike;
 
 /**
- * Detects complete comment-only SSE blocks in a raw byte stream (qfg-goi1.10.40).
+ * Detects complete comment-only SSE blocks in a raw byte stream.
  *
  * A block is the run of lines up to a blank line. It is a comment frame when it
  * holds at least one comment line (`:` first) and no other field. `: keepalive\n\n`
@@ -161,19 +161,19 @@ export interface SSEConnectionOptions {
   /** Read deadline in ms. Defaults to {@link DEFAULT_SSE_READ_DEADLINE_MS}. */
   readDeadlineMs?: number;
   /**
-   * Private test seam (qfg-goi1.10.24): sees every reconnect sleep the
+   * Private test seam: sees every reconnect sleep the
    * supervisor requests (kind "sse") and returns the delay actually used.
    */
   waitHook?: (kind: string, ms: number) => number;
   /**
-   * Internal, test-only (qfg-6vno.2): counters the supervisor bumps. Shared
+   * Internal, test-only: counters the supervisor bumps. Shared
    * across SSEConnection instances by the owning client. Not public API.
    */
   counters?: SupervisorCounters;
 }
 
 /**
- * Internal, test-only supervisor counters (qfg-6vno.2, qfg-6vno.27). The chaos
+ * Internal, test-only supervisor counters. The chaos
  * harness reads them for `quonfig_sse_connect_attempts_total`,
  * `quonfig_sdk_worker_restart_total{layer="1"}` and
  * `quonfig_sdk_callback_errors_total{callback}`; sdk-node exports no
@@ -318,7 +318,7 @@ export function wrapFetchWithReadDeadline(
  * SSE connection for receiving real-time config updates.
  *
  * Uses the `eventsource` npm package for Server-Sent Events, but owns
- * reconnection entirely (qfg-41nh.9): eventsource@4 treats ANY non-200
+ * reconnection entirely: eventsource@4 treats ANY non-200
  * response as terminal (`failConnection` sets readyState=CLOSED and
  * `scheduleReconnect` early-returns on CLOSED), so a single 502 from the Fly
  * edge during a deploy would otherwise kill SSE for the process lifetime. On
@@ -345,7 +345,7 @@ export class SSEConnection {
   /** Whether the current connection has delivered its first valid frame. */
   private frameSeen = false;
   /**
-   * Oversized gate and episode (qfg-6vno.20.3): set when a connection ended on
+   * Oversized gate and episode: set when a connection ended on
    * an event over {@link SSE_MAX_EVENT_BYTES}. While set, a keepalive is not a
    * frame (the server resends the oversized snapshot on every connect); the
    * next envelope clears it and ends the WARN episode.

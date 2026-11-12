@@ -127,7 +127,7 @@ export interface Meta {
    * --count HEAD` alongside the unordered SHA in `version`). A higher
    * generation is strictly newer, so the canonical-ordering install guard can
    * compare two snapshots and keep an established client from regressing to an
-   * older payload (qfg-7h5d.1.7). Optional: servers that predate the watermark
+   * older payload. Optional: servers that predate the watermark
    * omit it, in which case it reads as `undefined` and is treated as 0.
    */
   generation?: number;
@@ -258,15 +258,12 @@ export interface QuonfigOptions {
    */
   pollInterval?: number;
   /**
-   * Per-URL deadline (ms) for a single config-fetch attempt. Applies uniformly
-   * to the initial fetch and to every fallback-poll fetch: each base URL in the
-   * failover list gets its own timeout, so when one leg hangs (accepts the
-   * connection but never responds) the attempt aborts after this window and the
-   * next leg (e.g. the secondary) is reached inside the overall `initTimeout`
-   * instead of being starved until it. Default 3000ms. Additive and
-   * backward-compatible — the default already makes a hung upstream fail over,
-   * so existing callers need not set it. Bounds the HTTP config path only; it
-   * does not touch the long-lived SSE stream. (qfg-7h5d.1.7)
+   * Per-URL deadline (ms) for a single attempt on the sequential config-fetch
+   * path. Default 3000ms. The client's initial fetch and every fallback-poll
+   * fetch use the hedged path instead, so they are bounded by
+   * `configFetchHedgeDelayMs` (default 2000ms) and `configFetchHedgeAbortMs`
+   * (default 6000ms per leg), not by this option. Must be positive if set.
+   * Does not touch the long-lived SSE stream.
    */
   configFetchTimeoutMs?: number;
   /**
@@ -276,7 +273,6 @@ export interface QuonfigOptions {
    * this window, so the secondary is never contacted (cold standby, zero extra
    * load). Default 2000ms. Additive and backward-compatible. Bounds the HTTP
    * config path only; it does not touch the long-lived SSE stream.
-   * (qfg-7h5d.1.14)
    */
   configFetchHedgeDelayMs?: number;
   /**
@@ -286,9 +282,13 @@ export interface QuonfigOptions {
    * aborted), and should be less than `initTimeout` so the init-path heal leg is
    * not clipped — the SDK logs a one-time warning at construction if
    * `initTimeout <= configFetchHedgeAbortMs`. Default 6000ms. Additive and
-   * backward-compatible. (qfg-7h5d.1.14)
+   * backward-compatible.
    */
   configFetchHedgeAbortMs?: number;
+  /**
+   * @deprecated Has no effect. The option is accepted for backwards
+   * compatibility but the SDK never reads it.
+   */
   namespace?: string;
   globalContext?: Contexts;
   onNoDefault?: OnNoDefault;
@@ -296,46 +296,46 @@ export interface QuonfigOptions {
   contextUploadMode?: ContextUploadMode;
   /**
    * How often (ms) the SDK sends collected telemetry. One POST per interval,
-   * at most one in flight. Default 60000 (was a hardcoded 8000 before 1.3.0).
-   * Invalid values (non-finite or <= 0) fall back to the default. (qfg-mol-9u0)
+   * at most one in flight. Default 60000.
+   * Invalid values (non-finite or <= 0) fall back to the default.
    */
   telemetryFlushIntervalMs?: number;
   /**
    * Overall deadline (ms) for one telemetry POST, request start to response
    * end, connect and TLS included. A timed-out batch is kept and resent
-   * unchanged later. Default 15000 (was 3000 before 1.3.0). (qfg-mol-9u0)
+   * unchanged later. Default 15000.
    */
   telemetryTimeoutMs?: number;
   /**
    * Maximum number of failed telemetry batches kept for resend. When full, the
-   * oldest batch is dropped. Default 5. (qfg-mol-9u0)
+   * oldest batch is dropped. Default 5.
    */
   telemetryMaxRetainedBatches?: number;
   /**
    * Maximum total bytes of failed telemetry batches kept for resend (oldest
    * dropped first). A single batch larger than this is sent once and dropped
-   * if that send fails, never retained. Default 2097152 (2MB). (qfg-mol-9u0)
+   * if that send fails, never retained. Default 2097152 (2MB).
    */
   telemetryMaxRetainedBytes?: number;
   /**
    * A retained telemetry batch older than this (ms) is discarded instead of
-   * resent. Default 300000 (5 min). (qfg-mol-9u0)
+   * resent. Default 300000 (5 min).
    */
   telemetryMaxRetainedAgeMs?: number;
   /**
    * Maximum distinct (config key, config type) evaluation summaries per
    * telemetry window. New keys beyond the cap are not recorded; existing keys
-   * keep counting. Default 10000. (qfg-mol-9u0)
+   * keep counting. Default 10000.
    */
   telemetryMaxEvaluationSummaries?: number;
   /**
    * Maximum distinct (context name, field name) pairs in the context-shape
-   * report per telemetry window. Default 10000. (qfg-mol-9u0)
+   * report per telemetry window. Default 10000.
    */
   telemetryMaxContextShapeFields?: number;
   /**
    * Maximum example contexts per telemetry window (`contextUploadMode:
-   * "periodic_example"`). Default 10000. (qfg-mol-9u0)
+   * "periodic_example"`). Default 10000.
    */
   telemetryMaxExampleContexts?: number;
   /**
@@ -451,14 +451,14 @@ export interface EvalMatch {
   weightedValueIndex: number;
   /**
    * Set to the weighted rollout's hashByPropertyName when that property was
-   * missing from the context and configKey + "" was hashed (qfg-9dxb.8).
+   * missing from the context and configKey + "" was hashed.
    */
   missingHashProperty?: string;
   /**
    * @internal The installed Value object `value` was copied from. Configs are
    * replaced, never mutated, on install, so its identity is stable for as long
    * as the config is installed; eval-summary telemetry caches per-value counter
-   * keys on it (qfg-23uf).
+   * keys on it.
    */
   storedValue?: Value;
 }
@@ -548,7 +548,7 @@ export interface ExampleContextEntry {
 }
 
 /**
- * Per-flush-window failover counters (qfg-41nh.18). Additive on the wire — an
+ * Per-flush-window failover counters. Additive on the wire — an
  * older api-telemetry strips the unknown `failover` field — and only sent when
  * at least one counter is non-zero, so a healthy client emits nothing. The
  * camelCase keys are the exact shape api-telemetry's Zod schema + the ClickHouse
@@ -556,8 +556,8 @@ export interface ExampleContextEntry {
  * matching the eval-summary window convention.
  *
  * `guardRejected` counts only STRICTLY older payloads dropped by the
- * reject-older guard — an equal-generation re-delivery is a silent no-op
- * (qfg-rr5b). The wire shape itself is unchanged.
+ * reject-older guard — an equal-generation re-delivery is a silent no-op.
+ * The wire shape itself is unchanged.
  */
 export interface FailoverEvent {
   start: number;

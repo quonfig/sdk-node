@@ -23,20 +23,20 @@ export interface LegResult {
    * HTTP status the leg got (200, 304, 401, 503, ...), or 0 when it got no
    * response (network error, timeout/abort). A 200 whose body is not a valid
    * envelope carries 200 AND `error`. The client reads the primary leg's
-   * status for the auth-failure rule (qfg-goi1.10.24).
+   * status for the auth-failure rule.
    */
   status?: number;
   /**
    * Set on a 200 that stored a new ETag in this leg's slot. Undoes that store
    * (restores the previous ETag) if the slot still holds it. The caller uses it
    * when the payload is ignored as unversioned (gen<=0) so the ignored
-   * response's ETag can't turn later polls into 304s (qfg-9dxb.9).
+   * response's ETag can't turn later polls into 304s.
    */
   rollbackEtag?: () => void;
   /**
    * True when the leg ended on its own deadline (the per-leg hedge abort or
    * fetch timeout) rather than on an answer or a fast error. The init path
-   * reports an attempt whose every leg hung as a timeout (qfg-9p4i.17).
+   * reports an attempt whose every leg hung as a timeout.
    */
   hung?: boolean;
 }
@@ -148,7 +148,7 @@ async function readBodyPrefix(response: Response, maxBytes: number): Promise<str
 const DEFAULT_DOMAIN = "quonfig.com";
 
 /**
- * Timeout of the deprecated {@link Transport.postTelemetry} only (qfg-i2ar).
+ * Timeout of the deprecated {@link Transport.postTelemetry} only.
  * The reporter's POST uses `telemetryTimeoutMs` (default 15s) via
  * {@link Transport.sendTelemetry}.
  */
@@ -193,7 +193,7 @@ function errorCode(err: unknown): string | undefined {
 }
 
 /**
- * Default per-URL config-fetch deadline (qfg-7h5d.1.7). ~3s is short enough that
+ * Default per-URL config-fetch deadline. ~3s is short enough that
  * a hung primary fails over to the secondary well inside a default 10s
  * `initTimeout`, yet long enough to tolerate a slow-but-healthy upstream. This
  * is a per-attempt deadline on the HTTP config path only — it does NOT touch the
@@ -202,7 +202,7 @@ function errorCode(err: unknown): string | undefined {
 export const DEFAULT_CONFIG_FETCH_TIMEOUT_MS = 3000;
 
 /**
- * Default hedge delay (qfg-7h5d.1.14). How long the hedged config-fetch waits
+ * Default hedge delay. How long the hedged config-fetch waits
  * for the primary leg before ALSO firing the secondary in parallel (it does not
  * cancel the primary). ~2s is below a realistic slow-but-alive primary's worst
  * case yet far enough below the per-leg abort that a healthy sub-second primary
@@ -212,7 +212,7 @@ export const DEFAULT_CONFIG_FETCH_TIMEOUT_MS = 3000;
 export const DEFAULT_CONFIG_FETCH_HEDGE_DELAY_MS = 2000;
 
 /**
- * Default per-leg hard-abort deadline on the hedged path (qfg-7h5d.1.14). MUST
+ * Default per-leg hard-abort deadline on the hedged path. MUST
  * exceed the longest healable primary latency so a late-but-newer primary heals
  * forward (rather than aborting), and SHOULD be < `initTimeout` so the init-path
  * heal leg is not clipped (the client logs a warning at construction otherwise).
@@ -289,7 +289,7 @@ export class Transport {
    * The hedge runs both legs concurrently, so a single shared ETag would let a
    * 304 from one leg mask the other (and even on a single-threaded event loop two
    * overlapping refresh promises could interleave a stale `If-None-Match`). Each
-   * leg reads/writes only its own slot. (qfg-7h5d.1.14)
+   * leg reads/writes only its own slot.
    */
   private etags: string[];
   /**
@@ -305,20 +305,20 @@ export class Transport {
    * leaves budget to reach the next leg inside the caller's overall deadline
    * (e.g. `initTimeout`). Defaults to DEFAULT_CONFIG_FETCH_TIMEOUT_MS; the client
    * overwrites it from `configFetchTimeoutMs` at construction. The hedged path
-   * uses `hedgeAbortMs` instead. (qfg-7h5d.1.7)
+   * uses `hedgeAbortMs` instead.
    */
   fetchTimeoutMs: number = DEFAULT_CONFIG_FETCH_TIMEOUT_MS;
   /**
    * How long the hedge waits for the primary leg before ALSO firing the
    * secondary in parallel (it does not cancel the primary). Defaults to
    * DEFAULT_CONFIG_FETCH_HEDGE_DELAY_MS; the client overwrites it from
-   * `configFetchHedgeDelayMs`. (qfg-7h5d.1.14)
+   * `configFetchHedgeDelayMs`.
    */
   hedgeDelayMs: number = DEFAULT_CONFIG_FETCH_HEDGE_DELAY_MS;
   /**
    * Per-leg hard-abort deadline on the hedged path. Defaults to
    * DEFAULT_CONFIG_FETCH_HEDGE_ABORT_MS; the client overwrites it from
-   * `configFetchHedgeAbortMs`. (qfg-7h5d.1.14)
+   * `configFetchHedgeAbortMs`.
    */
   hedgeAbortMs: number = DEFAULT_CONFIG_FETCH_HEDGE_ABORT_MS;
   /**
@@ -377,7 +377,6 @@ export class Transport {
    * `LegResult` carrying `sourceIndex=i`. The shared `activeBaseUrl*` fields are
    * NOT mutated here: the hedge fires two legs and the caller (client) decides
    * which one installs, then snapshots its `sourceIndex` for `resolvedFrom()`.
-   * (qfg-7h5d.1.14)
    */
   private async fetchFromUrlAt(i: number, abortMs: number): Promise<LegResult> {
     const baseUrl = this.baseUrls[i];
@@ -501,7 +500,7 @@ export class Transport {
    *   - The HEDGED install path passes `false` — SSE is pinned to the PRIMARY
    *     stream and never fails over (the chaos suite asserts this in f05), so a
    *     hedged secondary install advances the base-url index (for `resolvedFrom`)
-   *     but leaves the active stream on the primary. (qfg-7h5d.1.14)
+   *     but leaves the active stream on the primary.
    */
   markActiveLeg(i: number, trackStream: boolean): void {
     if (i < 0 || i >= this.baseUrls.length) return;
@@ -536,7 +535,7 @@ export class Transport {
   }
 
   /**
-   * Parallel-failover hedge (qfg-7h5d.1.14). Fires the PRIMARY leg (index 0)
+   * Parallel-failover hedge. Fires the PRIMARY leg (index 0)
    * first and, only if it has not settled within `hedgeDelayMs` OR errors fast,
    * ALSO fires the SECONDARY leg (index 1) in parallel — without cancelling the
    * primary. A fast healthy primary means the secondary is NEVER contacted (cold
@@ -626,7 +625,7 @@ export class Transport {
    * that did land). Resolves with the HTTP status, the `Retry-After` header
    * and the first 1024 characters of the response body; rejects with a
    * {@link TelemetryRequestError} on timeout, network error or abort. Never
-   * logs: the telemetry queue owns the logging policy. (qfg-mol-9u0)
+   * logs: the telemetry queue owns the logging policy.
    *
    * `timeoutMs` bounds the whole request, response body included. It is an
    * AbortController fired by `opts.clock` (default: the wall clock), not
