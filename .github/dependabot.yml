@@ -46,3 +46,8 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "winston"
         update-types: ["version-update:semver-major"]
+      # TypeScript 7.0 has no compiler API, so tsup/rollup-plugin-dts and
+      # typescript-eslint can't run on it. Revisit at TS 7.1 stable; move
+      # TypeScript majors deliberately, not via Dependabot.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
