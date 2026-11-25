@@ -619,7 +619,13 @@ export interface RawEvaluationMetadata {
   valueType: ValueType;
 }
 
-export type RawDependencyType = "decryptWith" | "providedBy";
+/**
+ * `"decryptWith"` is deprecated: it names the old secrets format, which the SDK
+ * no longer reads. `getRawMatch` still reports it for values not yet migrated.
+ */
+export type RawDependencyType =
+  /** @deprecated The old secrets format. */
+  "decryptWith" | "providedBy";
 
 export interface RawDependency {
   dependencyType: RawDependencyType;

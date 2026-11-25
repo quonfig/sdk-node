@@ -134,8 +134,9 @@ QUONFIG_KEYSET_PROD="qf1-priv-...,qf1-priv-..." # during a rotation: old and new
 - Entries are separated by commas. Spaces, tabs, CR and LF around an entry are ignored; any other
   character makes the whole keyset invalid. Order does not matter: the SDK finds the key by its
   fingerprint and never tries keys one by one.
-- The SDK reads and parses each keyset variable when a secret first needs it, then caches the parsed
-  keys for the process.
+- The SDK reads the keyset variable on every secret read. It parses a value once and re-parses it
+  only when the variable's value changes; a decrypted value is reused until its stored ciphertext or
+  the variable's value changes.
 
 **When a value cannot be decrypted** (the keyset variable is not set, it holds no key with the
 value's fingerprint, it is malformed, or the value is corrupt), only that read fails. Startup does
@@ -155,8 +156,16 @@ error that mentions `decryptWith`. Move such values to `secrets/` with the CLI. 
 document in `secrets/` replaces a document with the same key in `configs/`, so a workspace can carry
 both copies while it migrates.
 
-**Minimum version.** Earlier releases of this SDK do not decrypt `qf1` secrets: they return the
-encrypted string as the value. Upgrade every backend that reads a secret before you create it.
+**Detecting the error.** Every secret read failure has `err.name === "QuonfigDecryptionError"` and
+an `err.code`: the qf1 class (`keyset_missing`, `key_not_held`, ...) or
+`"decrypt_with_not_supported"` for a `decryptWith` value. A qf1 failure also carries `keyset`,
+`fingerprint`, `held` (fingerprints) or `entry` (a 1-based position) when they apply. Compare `name`
+and `code`, not the message text.
+
+**Minimum version.** Releases of this SDK before this one do not read `qf1` secrets. Over the wire
+(`sdkKey`) they return the encrypted string as the value, with no error. In datadir mode they never
+open `secrets/`: a secret-only key is missing, and a key that still has an old copy in `configs/` is
+served from that copy. Upgrade every backend that reads a secret before you create it.
 
 The old-format helpers `encrypt`, `decrypt`, `generateNewHexKey` and the `encryption` namespace are
 still exported and still work, but they are deprecated: they handle only the old format.
