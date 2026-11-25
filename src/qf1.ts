@@ -60,38 +60,63 @@ export interface Qf1ErrorFields {
   entry?: number;
 }
 
+/** The `name` of every secret read failure (qf1 and the refused old format). */
+export const DECRYPTION_ERROR_NAME = "QuonfigDecryptionError";
+
 /**
- * A qf1 reader failure. This is sdk-node's unable-to-decrypt error for
- * secrets: the message is `qf1 <code>: <detail>`.
+ * sdk-node's unable-to-decrypt error. Detect it with
+ * `err.name === "QuonfigDecryptionError"` and branch on `err.code`: a qf1
+ * class (spec 9.1) or `"decrypt_with_not_supported"` for a value in the old
+ * format. Own enumerable fields are `code` plus whichever of `keyset`,
+ * `fingerprint`, `held`, `entry` apply; none is ever `undefined`.
  */
-export class Qf1Error extends Error {
-  readonly code: Qf1ErrorCode;
-  readonly keyset?: string;
-  readonly fingerprint?: string;
-  readonly held?: string[];
-  readonly entry?: number;
-  /** The message after `qf1 <code>: `, kept so a cached failure can be rethrown with a config key. */
-  readonly detail: string;
+export class QuonfigDecryptionError extends Error {
+  declare readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    Object.defineProperty(this, "name", {
+      value: DECRYPTION_ERROR_NAME,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+    (this as { code: string }).code = code;
+  }
+}
+
+/** A qf1 reader failure: `qf1 <code>: <detail>`. */
+export class Qf1Error extends QuonfigDecryptionError {
+  declare readonly code: Qf1ErrorCode;
+  declare readonly keyset?: string;
+  declare readonly fingerprint?: string;
+  declare readonly held?: string[];
+  declare readonly entry?: number;
+  /** The message after `qf1 <code>: ` (non-enumerable), so a failure can be rethrown with a config key. */
+  declare readonly detail: string;
 
   constructor(code: Qf1ErrorCode, detail: string, fields: Qf1ErrorFields = {}) {
-    super(`qf1 ${code}: ${detail}`);
-    this.name = "Qf1Error";
-    this.code = code;
-    this.detail = detail;
-    if (fields.keyset !== undefined) this.keyset = fields.keyset;
-    if (fields.fingerprint !== undefined) this.fingerprint = fields.fingerprint;
-    if (fields.held !== undefined) this.held = fields.held;
-    if (fields.entry !== undefined) this.entry = fields.entry;
+    super(code, `qf1 ${code}: ${detail}`);
+    Object.defineProperty(this, "detail", { value: detail, enumerable: false });
+    const self = this as Qf1ErrorFields;
+    if (fields.keyset !== undefined) self.keyset = fields.keyset;
+    if (fields.fingerprint !== undefined) self.fingerprint = fields.fingerprint;
+    if (fields.held !== undefined) self.held = fields.held;
+    if (fields.entry !== undefined) self.entry = fields.entry;
   }
 
-  /** The same failure with ` (config "<key>")` appended. */
-  forConfig(configKey: string): Qf1Error {
-    return new Qf1Error(this.code, `${this.detail} (config "${configKey}")`, {
+  fields(): Qf1ErrorFields {
+    return {
       keyset: this.keyset,
       fingerprint: this.fingerprint,
       held: this.held,
       entry: this.entry,
-    });
+    };
+  }
+
+  /** The same failure with ` (config "<key>")` appended. */
+  forConfig(configKey: string): Qf1Error {
+    return new Qf1Error(this.code, `${this.detail} (config "${configKey}")`, this.fields());
   }
 }
 
@@ -100,10 +125,10 @@ function fail(code: Qf1ErrorCode, detail: string, fields?: Qf1ErrorFields): neve
 }
 
 /**
- * Quote a writer-controlled name for an error (spec 9.2): at most 64
+ * Quote a short writer-controlled token for an error (spec 9.2): at most 64
  * characters, anything outside printable ASCII escaped.
  */
-function quoteName(name: string): string {
+export function quoteName(name: string): string {
   const cut = name.length > 64 ? name.slice(0, 64) : name;
   let out = "";
   for (const ch of cut) {
@@ -113,6 +138,30 @@ function quoteName(name: string): string {
     else out += `\\u{${c.toString(16)}}`;
   }
   return `"${out}"${name.length > 64 ? "..." : ""}`;
+}
+
+/**
+ * A VALID keyset name as echoed in errors and error fields: at most 64
+ * characters. (A valid name is plain ASCII, so nothing needs escaping. An
+ * invalid name is never echoed: it may be a pasted key or plaintext.)
+ */
+function shown(keyset: string): string {
+  return keyset.length > 64 ? `${keyset.slice(0, 64)}...` : keyset;
+}
+
+const KEYSET_NAME_PATTERN_TEXT = "^QUONFIG_KEYSET(_[A-Z0-9]+)*$";
+
+/** A library failure we did not expect: named by its code or class only, never its text. */
+function unexpected(err: unknown): Qf1Error {
+  const code = (err as { code?: unknown })?.code;
+  const name = (err as { name?: unknown })?.name;
+  const tag =
+    typeof code === "string" && /^[A-Z0-9_]{1,64}$/.test(code)
+      ? code
+      : typeof name === "string" && /^[A-Za-z]{1,64}$/.test(name)
+        ? name
+        : "unknown";
+  return new Qf1Error("decrypt_failed", `unexpected error from the crypto library (${tag})`);
 }
 
 // ---- base64url (spec 3.4) ----------------------------------------------------
@@ -250,15 +299,16 @@ const ENV_STRIP_RE = /^[ \t\r\n]+|[ \t\r\n]+$/g;
  * one fingerprint make the whole keyset invalid.
  */
 export function parseKeysetEnv(keyset: string, raw: string | undefined): Map<string, HeldKey> {
+  const ks = shown(keyset);
   if (raw === undefined) {
-    return fail("keyset_missing", `this runtime has no ${keyset}`, { keyset });
+    return fail("keyset_missing", `this runtime has no ${ks}`, { keyset });
   }
   const entries = raw
     .split(",")
     .map((piece) => piece.replace(ENV_STRIP_RE, ""))
     .filter((piece) => piece.length > 0);
   if (entries.length === 0) {
-    return fail("keyset_missing", `${keyset} is set but holds no keys`, { keyset });
+    return fail("keyset_missing", `${ks} is set but holds no keys`, { keyset });
   }
 
   const held = new Map<string, HeldKey>();
@@ -268,8 +318,8 @@ export function parseKeysetEnv(keyset: string, raw: string | undefined): Map<str
       privateKey = parsePrivateKeyEntry(entry);
     } catch (err) {
       if (!(err instanceof Qf1Error)) throw err;
-      return fail("keyset_invalid", `${keyset} entry ${index + 1} is not a qf1 private key`, {
-        keyset,
+      return fail("keyset_invalid", `${ks} entry ${index + 1} is not a qf1 private key`, {
+        keyset: ks,
         entry: index + 1,
       });
     }
@@ -278,8 +328,8 @@ export function parseKeysetEnv(keyset: string, raw: string | undefined): Map<str
     const existing = held.get(fp);
     if (existing !== undefined) {
       if (existing.publicKey.equals(publicKey)) return; // one key, written twice or clamp-equivalent
-      return fail("keyset_invalid", `${keyset} holds two different keys with fingerprint ${fp}`, {
-        keyset,
+      return fail("keyset_invalid", `${ks} holds two different keys with fingerprint ${fp}`, {
+        keyset: ks,
         fingerprint: fp,
       });
     }
@@ -288,19 +338,36 @@ export function parseKeysetEnv(keyset: string, raw: string | undefined): Map<str
   return held;
 }
 
+/** At most this many keysets are kept; the oldest goes first. */
+const KEYSET_CACHE_LIMIT = 64;
+
 /**
  * Process-wide cache of parsed keysets (spec 6.2, decision 33), keyed by the
  * env var's name and current value: a keyset is parsed (one X25519 per key)
  * once per distinct value, and a changed value is re-parsed. A failure is
- * cached the same way and rethrown fresh.
+ * cached the same way and rethrown fresh. A name whose env var is unset is
+ * never cached, and at most KEYSET_CACHE_LIMIT names are kept (keyset names
+ * are writer-controlled, so the cache must not grow with them).
  */
 export class KeysetCache {
   private entries = new Map<
     string,
-    { raw: string | undefined; held?: Map<string, HeldKey>; error?: Qf1Error }
+    { raw: string; held?: Map<string, HeldKey>; error?: Qf1Error }
   >();
 
+  get size(): number {
+    return this.entries.size;
+  }
+
+  has(keyset: string): boolean {
+    return this.entries.has(keyset);
+  }
+
   get(keyset: string, raw: string | undefined): Map<string, HeldKey> {
+    if (raw === undefined) {
+      this.entries.delete(keyset);
+      return parseKeysetEnv(keyset, raw); // throws keyset_missing
+    }
     let entry = this.entries.get(keyset);
     if (entry === undefined || entry.raw !== raw) {
       try {
@@ -309,16 +376,14 @@ export class KeysetCache {
         if (!(err instanceof Qf1Error)) throw err;
         entry = { raw, error: err };
       }
+      this.entries.delete(keyset);
       this.entries.set(keyset, entry);
+      while (this.entries.size > KEYSET_CACHE_LIMIT) {
+        this.entries.delete(this.entries.keys().next().value!);
+      }
     }
     if (entry.error !== undefined) {
-      const e = entry.error;
-      throw new Qf1Error(e.code, e.detail, {
-        keyset: e.keyset,
-        fingerprint: e.fingerprint,
-        held: e.held,
-        entry: e.entry,
-      });
+      throw new Qf1Error(entry.error.code, entry.error.detail, entry.error.fields());
     }
     return entry.held!;
   }
@@ -367,33 +432,34 @@ export function parseQf1(value: unknown): Qf1Parsed {
   if (!KEYSET_NAME_RE.test(keyset)) {
     return fail(
       "invalid_keyset_name",
-      `keyset name ${quoteName(keyset)} does not match ${KEYSET_NAME_RE.source}`
+      // Never echo it: an invalid field may be a pasted key or plaintext.
+      `the keyset name (${keyset.length} characters) does not match ${KEYSET_NAME_PATTERN_TEXT}`
     );
   }
   if (!FINGERPRINT_RE.test(fp)) {
     return fail(
       "malformed",
-      `the fingerprint field is not 8 lowercase hex characters (keyset ${keyset})`
+      `the fingerprint field is not 8 lowercase hex characters (keyset ${shown(keyset)})`
     );
   }
   const payload = decodeBase64Url(payloadText);
   if (payload === undefined) {
     return fail(
       "malformed",
-      `the payload is not canonical unpadded base64url (keyset ${keyset} fingerprint ${fp})`
+      `the payload is not canonical unpadded base64url (keyset ${shown(keyset)} fingerprint ${fp})`
     );
   }
   if (payload.length < MIN_PAYLOAD) {
     return fail(
       "malformed",
-      `the payload is ${payload.length} bytes, below the ${MIN_PAYLOAD}-byte minimum (keyset ${keyset} fingerprint ${fp})`
+      `the payload is ${payload.length} bytes, below the ${MIN_PAYLOAD}-byte minimum (keyset ${shown(keyset)} fingerprint ${fp})`
     );
   }
   const ephemeralPublicKey = payload.subarray(0, 32);
   if ((ephemeralPublicKey[31]! & 0x80) !== 0) {
     return fail(
       "malformed",
-      `the ephemeral key has its top bit set (keyset ${keyset} fingerprint ${fp})`
+      `the ephemeral key has its top bit set (keyset ${shown(keyset)} fingerprint ${fp})`
     );
   }
   return {
@@ -407,6 +473,7 @@ export function parseQf1(value: unknown): Qf1Parsed {
 
 // ---- Decrypt (spec 8) ---------------------------------------------------------
 
+const GCM_AUTH_FAILED = "Unsupported state or unable to authenticate data";
 const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 export interface DecryptOptions {
@@ -427,11 +494,11 @@ export function decryptQf1(
 ): string {
   try {
     return decryptInner(value, lookupEnv, options.cache);
-  } catch (err) {
-    if (err instanceof Qf1Error && options.configKey !== undefined) {
-      throw err.forConfig(options.configKey);
-    }
-    throw err;
+  } catch (caught) {
+    // Anything that is not one of our classified failures still fails the
+    // read as a qf1 error, named by its code or class only (never its text).
+    const err = caught instanceof Qf1Error ? caught : unexpected(caught);
+    throw options.configKey !== undefined ? err.forConfig(options.configKey) : err;
   }
 }
 
@@ -442,6 +509,7 @@ function decryptInner(
 ): string {
   const parsed = parseQf1(value);
   const { keyset, fingerprint: fp } = parsed;
+  const ks = shown(keyset);
 
   const raw = lookupEnv(keyset);
   let held: Map<string, HeldKey>;
@@ -451,8 +519,8 @@ function decryptInner(
     if (err instanceof Qf1Error && err.code === "keyset_missing") {
       throw new Qf1Error(
         "keyset_missing",
-        `value is encrypted to ${keyset} fingerprint ${fp}; ${err.detail}`,
-        { keyset, fingerprint: fp }
+        `value is encrypted to ${ks} fingerprint ${fp}; ${err.detail}`,
+        { keyset: ks, fingerprint: fp }
       );
     }
     throw err;
@@ -463,8 +531,8 @@ function decryptInner(
     const heldFps = [...held.keys()].sort();
     return fail(
       "key_not_held",
-      `value is encrypted to ${keyset} fingerprint ${fp}; this runtime holds ${keyset} fingerprints [${heldFps.join(", ")}]`,
-      { keyset, fingerprint: fp, held: heldFps }
+      `value is encrypted to ${ks} fingerprint ${fp}; this runtime holds ${ks} fingerprints [${heldFps.join(", ")}]`,
+      { keyset: ks, fingerprint: fp, held: heldFps }
     );
   }
 
@@ -472,8 +540,8 @@ function decryptInner(
   if (isAllZero(shared)) {
     return fail(
       "invalid_ephemeral_key",
-      `the value's ephemeral key gives an all-zero shared secret (${keyset} fingerprint ${fp})`,
-      { keyset, fingerprint: fp }
+      `the value's ephemeral key gives an all-zero shared secret (${ks} fingerprint ${fp})`,
+      { keyset: ks, fingerprint: fp }
     );
   }
 
@@ -493,21 +561,24 @@ function decryptInner(
       decipher.update(body.subarray(0, body.length - TAG_LENGTH)),
       decipher.final(),
     ]);
-  } catch {
+  } catch (err) {
+    // OpenSSL's GCM tag mismatch; any other failure is unexpected().
+    if ((err as Error)?.message !== GCM_AUTH_FAILED) throw err;
     return fail(
       "decrypt_failed",
-      `authentication failed for a value encrypted to ${keyset} fingerprint ${fp}`,
-      { keyset, fingerprint: fp }
+      `authentication failed for a value encrypted to ${ks} fingerprint ${fp}`,
+      { keyset: ks, fingerprint: fp }
     );
   }
 
   try {
     return STRICT_UTF8.decode(plaintext);
-  } catch {
+  } catch (err) {
+    if ((err as { code?: unknown })?.code !== "ERR_ENCODING_INVALID_ENCODED_DATA") throw err;
     return fail(
       "decrypt_failed",
-      `the decrypted value is not valid UTF-8 (${keyset} fingerprint ${fp})`,
-      { keyset, fingerprint: fp }
+      `the decrypted value is not valid UTF-8 (${ks} fingerprint ${fp})`,
+      { keyset: ks, fingerprint: fp }
     );
   } finally {
     plaintext.fill(0);
