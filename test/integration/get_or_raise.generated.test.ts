@@ -4,6 +4,7 @@
 // Source: integration-test-data/generators/src/targets/node.ts
 
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
 import { withClient, withEnv } from "./setup";
 
 async function initFailureClient(
@@ -58,6 +59,18 @@ async function initFailureClient(
     for (const s of servers) await new Promise<void>((r) => s.close(() => r()));
   };
   return { client, error, elapsedMs, close };
+}
+
+function qf1TestKeyset(...labels: string[]): string {
+  return labels
+    .map(
+      (label) =>
+        "qf1-priv-" +
+        createHash("sha256")
+          .update("qf1 test vector private key: " + label, "utf8")
+          .digest("base64url")
+    )
+    .join(",");
 }
 
 describe("get_or_raise", () => {
@@ -368,6 +381,22 @@ describe("get_or_raise", () => {
     });
   });
 
+  it("raises an error if a weighted variant is provided by a missing environment variable", async () => {
+    await withClient({}, (client) => {
+      expect(() =>
+        client.getString("weighted.variant.provided.missing", { user: { tracking_id: "92a202f2" } })
+      ).toThrow(/^Environment variable ".*" not set for config "/);
+    });
+  });
+
+  it("get_or_raise on a weighted ENV_VAR variant returns the env var coerced to int", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getInt("weighted.variant.provided.int", { user: { tracking_id: "92a202f2" } })
+      ).toBe(1234);
+    });
+  });
+
   it("raises an error if an env-var-provided config cannot be coerced to configured type", async () => {
     await withClient({}, (client) => {
       expect(() => client.getInt("provided.not.a.number")).toThrow(
@@ -420,10 +449,232 @@ describe("get_or_raise", () => {
     });
   });
 
-  it("raises an error for decryption failure", async () => {
+  it("get_or_raise decrypts a qf1 secret", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.short")).toBe("hello");
+        });
+      }
+    );
+  });
+
+  it("raises unable_to_decrypt for a qf1 secret on a keyset the environment does not hold", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(() => client.getString("qf1.secret.keyset.missing")).toThrow(
+            /\bqf1 (malformed|unsupported_version|invalid_keyset_name|keyset_missing|keyset_invalid|key_not_held|invalid_ephemeral_key|decrypt_failed)\b|\bdecryptWith\b/
+          );
+          let raised: unknown;
+          try {
+            client.getString("qf1.secret.keyset.missing");
+          } catch (e) {
+            raised = e;
+          }
+          const raisedMessage = String((raised as Error | undefined)?.message);
+          expect(raisedMessage).not.toContain("qf1-priv-");
+        });
+      }
+    );
+  });
+
+  it("raises unable_to_decrypt for a qf1 secret whose fingerprint is not held", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(() => client.getString("qf1.secret.key.not.held")).toThrow(
+            /\bqf1 (malformed|unsupported_version|invalid_keyset_name|keyset_missing|keyset_invalid|key_not_held|invalid_ephemeral_key|decrypt_failed)\b|\bdecryptWith\b/
+          );
+          let raised: unknown;
+          try {
+            client.getString("qf1.secret.key.not.held");
+          } catch (e) {
+            raised = e;
+          }
+          const raisedMessage = String((raised as Error | undefined)?.message);
+          expect(raisedMessage).not.toContain("qf1-priv-");
+        });
+      }
+    );
+  });
+
+  it("raises unable_to_decrypt for a qf1 secret held only under another keyset", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(() => client.getString("qf1.secret.cross.keyset")).toThrow(
+            /\bqf1 (malformed|unsupported_version|invalid_keyset_name|keyset_missing|keyset_invalid|key_not_held|invalid_ephemeral_key|decrypt_failed)\b|\bdecryptWith\b/
+          );
+          let raised: unknown;
+          try {
+            client.getString("qf1.secret.cross.keyset");
+          } catch (e) {
+            raised = e;
+          }
+          const raisedMessage = String((raised as Error | undefined)?.message);
+          expect(raisedMessage).not.toContain("qf1-priv-");
+        });
+      }
+    );
+  });
+
+  it("raises unable_to_decrypt for a qf1 secret with a tampered header", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(() => client.getString("qf1.secret.tampered.header")).toThrow(
+            /\bqf1 (malformed|unsupported_version|invalid_keyset_name|keyset_missing|keyset_invalid|key_not_held|invalid_ephemeral_key|decrypt_failed)\b|\bdecryptWith\b/
+          );
+          let raised: unknown;
+          try {
+            client.getString("qf1.secret.tampered.header");
+          } catch (e) {
+            raised = e;
+          }
+          const raisedMessage = String((raised as Error | undefined)?.message);
+          expect(raisedMessage).not.toContain("qf1-priv-");
+        });
+      }
+    );
+  });
+
+  it("raises unable_to_decrypt for a qf1 secret whose keyset name is invalid even when that env var holds its key", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(() => client.getString("qf1.secret.keyset.name.invalid")).toThrow(
+            /\bqf1 (malformed|unsupported_version|invalid_keyset_name|keyset_missing|keyset_invalid|key_not_held|invalid_ephemeral_key|decrypt_failed)\b|\bdecryptWith\b/
+          );
+          let raised: unknown;
+          try {
+            client.getString("qf1.secret.keyset.name.invalid");
+          } catch (e) {
+            raised = e;
+          }
+          const raisedMessage = String((raised as Error | undefined)?.message);
+          expect(raisedMessage).not.toContain("qf1-priv-");
+        });
+      }
+    );
+  });
+
+  it("raises unable_to_decrypt for a qf1 secret with a trailing colon", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(() => client.getString("qf1.secret.trailing.colon")).toThrow(
+            /\bqf1 (malformed|unsupported_version|invalid_keyset_name|keyset_missing|keyset_invalid|key_not_held|invalid_ephemeral_key|decrypt_failed)\b|\bdecryptWith\b/
+          );
+          let raised: unknown;
+          try {
+            client.getString("qf1.secret.trailing.colon");
+          } catch (e) {
+            raised = e;
+          }
+          const raisedMessage = String((raised as Error | undefined)?.message);
+          expect(raisedMessage).not.toContain("qf1-priv-");
+        });
+      }
+    );
+  });
+
+  it("raises unable_to_decrypt for a qf1 secret whose shared secret is all zero", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(() => client.getString("qf1.secret.low.order.ephemeral")).toThrow(
+            /\bqf1 (malformed|unsupported_version|invalid_keyset_name|keyset_missing|keyset_invalid|key_not_held|invalid_ephemeral_key|decrypt_failed)\b|\bdecryptWith\b/
+          );
+          let raised: unknown;
+          try {
+            client.getString("qf1.secret.low.order.ephemeral");
+          } catch (e) {
+            raised = e;
+          }
+          const raisedMessage = String((raised as Error | undefined)?.message);
+          expect(raisedMessage).not.toContain("qf1-priv-");
+        });
+      }
+    );
+  });
+
+  it("raises unable_to_decrypt for a value that still carries decryptWith", async () => {
     await withClient({}, (client) => {
-      expect(() => client.getString("a.broken.secret.config")).toThrow(
-        /^(Invalid key length|Invalid encrypted string|Unsupported state or unable to authenticate data)/
+      expect(() => client.getString("qf1.legacy.decrypt.with")).toThrow(
+        /\bqf1 (malformed|unsupported_version|invalid_keyset_name|keyset_missing|keyset_invalid|key_not_held|invalid_ephemeral_key|decrypt_failed)\b|\bdecryptWith\b/
       );
     });
   });

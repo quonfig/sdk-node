@@ -181,4 +181,48 @@ describe("get_weighted_values", () => {
       expect(seen).toEqual(new Set([1, 2]));
     });
   });
+
+  it("weighted json variant returns the json object", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getJSON("weighted.variant.json", { user: { tracking_id: "92a202f2" } })
+      ).toEqual({ variant: "json", n: 1 });
+    });
+  });
+
+  it("weighted duration variant returns the duration", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getDuration("weighted.variant.duration", { user: { tracking_id: "92a202f2" } })
+      ).toBe(90000);
+    });
+  });
+
+  it("weighted ENV_VAR variant reads the env var coerced to int", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getInt("weighted.variant.provided.int", { user: { tracking_id: "92a202f2" } })
+      ).toBe(1234);
+    });
+  });
+
+  it("weighted ENV_VAR variant with a missing env var returns the default", async () => {
+    await withClient({}, (client) => {
+      expect(
+        client.getString(
+          "weighted.variant.provided.missing",
+          { user: { tracking_id: "92a202f2" } },
+          "DEFAULT"
+        )
+      ).toBe("DEFAULT");
+    });
+  });
+
+  it("weighted ENV_VAR variant with a missing env var and no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(
+        client.getString("weighted.variant.provided.missing", { user: { tracking_id: "92a202f2" } })
+      ).toBe(undefined);
+    });
+  });
 });

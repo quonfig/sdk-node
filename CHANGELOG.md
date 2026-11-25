@@ -1,5 +1,52 @@
 # Changelog
 
+## Unreleased
+
+Secrets in the `qf1` format (qfg-8seuf.8). Version number not decided yet.
+
+### Added
+
+- Secrets: documents in the workspace's `secrets/` directory (type `secret`) are decrypted on read
+  with X25519, HKDF-SHA256 and AES-256-GCM. Private keys come from the environment variable named by
+  each value's keyset (`QUONFIG_KEYSET`, `QUONFIG_KEYSET_<NAME>`); the key is found by its
+  fingerprint. Parsed keysets and decrypted values are cached, and re-derived when the keyset
+  variable's value or the stored ciphertext changes. See the README "Secrets" section.
+- Datadir mode loads `secrets/` after `configs/`, `feature-flags/`, `segments/` and `log-levels/`,
+  so a secret replaces a same-key document in `configs/`. A file in `secrets/` that is not a secret
+  document is skipped with one warning naming its path (startup does not fail, since earlier
+  releases never opened `secrets/`); `configs/` and the other directories are unchanged. Over the
+  wire, `type: "secret"` entries behave like configs for every getter.
+- A value that cannot be decrypted fails only that read (your default, else `onNoDefault`), never
+  startup. Its error message starts with `qf1 <class>:` and names keysets and fingerprints, never
+  key material, the payload or the plaintext. The encrypted string is never returned as the value.
+- Telemetry reports secret evaluations with type `secret` and redacts the value over the stored
+  encrypted string, as for any confidential value.
+- Every secret read failure has `err.name === "QuonfigDecryptionError"` and an `err.code` (the qf1
+  class, or `"decrypt_with_not_supported"`).
+- `ConfigTypeString` gains `"secret"` and `ConfigType` gains `Secret`. `Resolver.resolveValue` takes
+  two optional trailing arguments: the config type and the stored value object (the cache key for
+  decrypted secrets).
+
+### Changed (behaviour change)
+
+- Values that carry `decryptWith` (the old secrets format) are no longer decrypted. Such a read now
+  fails with an error that mentions `decryptWith`, like any unresolvable value. Move those values to
+  `secrets/` with the `qfg` CLI before upgrading. `getRawMatch` is unchanged: it never decrypted and
+  still reports `decryptWith` dependencies.
+
+### Minimum version for secrets
+
+- This is the first release that reads secrets. Earlier releases return the encrypted string as the
+  value over the wire, and in datadir mode never open `secrets/` (a secret-only key is missing; a
+  key with an old `configs/` copy is served from that copy). Upgrade every backend that reads a
+  secret before you create it.
+
+### Deprecated
+
+- `encrypt`, `decrypt`, `generateNewHexKey`, the `encryption` namespace, the `Value.decryptWith` and
+  `ConfigValue.decryptWith` fields and the `"decryptWith"` member of `RawDependencyType`. They
+  handle only the old format and still work; they may be removed in a future major.
+
 ## 2.2.1 - 2026-11-12
 
 Documentation-only patch (qfg-csepk). No runtime change.

@@ -58,11 +58,16 @@ export { ConfigType, ProvidedSource, QUONFIG_SDK_LOGGING_CONTEXT_NAME } from "./
 // Context utilities
 export { contextLookup, mergeContexts, getContextValue } from "./context";
 
-// Encryption utilities
+// Old-format encryption utilities (deprecated: see src/encryption.ts). Kept
+// exported so removing them stays a major-version decision.
 export { encrypt, decrypt, generateNewHexKey } from "./encryption";
 
 // Encryption namespace (for CLI compatibility: `import { encryption } from '@quonfig/node'`)
 import { encrypt as _encrypt, generateNewHexKey as _generateNewHexKey } from "./encryption";
+/**
+ * @deprecated The old secrets format (`decryptWith`), which this SDK no longer
+ * reads. Secrets are qf1 values in `secrets/`, written with the `qfg` CLI.
+ */
 export const encryption = {
   encrypt: _encrypt,
   generateNewHexKey: _generateNewHexKey,

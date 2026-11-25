@@ -9,8 +9,8 @@ import type { ConfigResponse, Value } from "../src/types";
 // qfg-9dxb.7: a malformed workspace (segment that references itself, or a
 // decryptWith chain that loops) must not recurse until a RangeError escapes
 // get(). Semantics match sdk-go (qfg-9dxb.4): a segment cycle is treated as a
-// missing segment (IN_SEG false, NOT_IN_SEG true); a decryptWith cycle is an
-// ordinary decryption failure.
+// missing segment (IN_SEG false, NOT_IN_SEG true); a decryptWith value is an
+// ordinary failure (no decryptWith is read since qfg-8seuf.8).
 
 // A segment whose only matching rule is <operator> <ref>, falling through to false.
 function segRef(key: string, ref: string, operator = "IN_SEG"): ConfigResponse {
@@ -142,7 +142,10 @@ describe("segment cycle guard (qfg-9dxb.7)", () => {
   });
 });
 
-describe("decryptWith cycle guard (qfg-9dxb.7)", () => {
+// The decryptWith cycle guard went away with the decryptWith read path
+// (qfg-8seuf.8, qf1 spec 13.3 R1): a value carrying decryptWith now fails
+// before any key config is looked up, so a cycle cannot recurse at all.
+describe("decryptWith cycles fail without recursing (qfg-9dxb.7, qfg-8seuf.8)", () => {
   const cases: Record<string, ConfigResponse[]> = {
     "key decrypts with itself": [confidential("secret", "k"), confidential("k", "k")],
     "key cycle A->B->A": [
@@ -154,7 +157,7 @@ describe("decryptWith cycle guard (qfg-9dxb.7)", () => {
   };
 
   for (const [name, configs] of Object.entries(cases)) {
-    it(`${name}: throws a decryption Error, not RangeError`, () => {
+    it(`${name}: throws the decryptWith Error, not RangeError`, () => {
       const { resolver, store } = setup(configs);
       const cfg = store.get("secret")!;
       const val: Value = cfg.default.rules[0]!.value;
@@ -166,7 +169,7 @@ describe("decryptWith cycle guard (qfg-9dxb.7)", () => {
       }
       expect(err).toBeInstanceOf(Error);
       expect(err).not.toBeInstanceOf(RangeError);
-      expect((err as Error).message).toMatch(/decryptWith cycle/);
+      expect((err as Error).message).toMatch(/carries decryptWith/);
     });
   }
 
@@ -180,7 +183,7 @@ describe("decryptWith cycle guard (qfg-9dxb.7)", () => {
       },
     });
     await q.init();
-    expect(() => q.get("secret")).toThrow(/decryptWith cycle/);
+    expect(() => q.get("secret")).toThrow(/carries decryptWith/);
     const details = q.getStringDetails("secret");
     expect(details.reason).toBe("ERROR");
   });

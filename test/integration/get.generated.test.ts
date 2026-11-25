@@ -4,7 +4,20 @@
 // Source: integration-test-data/generators/src/targets/node.ts
 
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
 import { withClient, withEnv } from "./setup";
+
+function qf1TestKeyset(...labels: string[]): string {
+  return labels
+    .map(
+      (label) =>
+        "qf1-priv-" +
+        createHash("sha256")
+          .update("qf1 test vector private key: " + label, "utf8")
+          .digest("base64url")
+    )
+    .join(",");
+}
 
 describe("get", () => {
   it("get returns a found value for key", async () => {
@@ -44,10 +57,10 @@ describe("get", () => {
   });
 
   it("can return a value provided by an environment variable", async () => {
-    await withClient({}, (client) => {
-      expect(client.getString("prefab.secrets.encryption.key")).toBe(
-        "c87ba22d8662282abe8a0e4651327b579cb64a454ab0f4c170b45b15f049a221"
-      );
+    await withEnv({ GREETING: "hello from the environment" }, async () => {
+      await withClient({}, (client) => {
+        expect(client.getString("greeting.from.env")).toBe("hello from the environment");
+      });
     });
   });
 
@@ -57,15 +70,352 @@ describe("get", () => {
     });
   });
 
-  it("can decrypt and return a secret value (with decryption key in in env var)", async () => {
+  it("decrypts a qf1 secret", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.short")).toBe("hello");
+        });
+      }
+    );
+  });
+
+  it("decrypts a qf1 secret whose value is the empty string", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.empty")).toBe("");
+        });
+      }
+    );
+  });
+
+  it("decrypts a qf1 secret with multi-byte UTF-8", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.multibyte")).toBe("pässwörd 日本語 🔑");
+        });
+      }
+    );
+  });
+
+  it("decrypts a qf1 secret and keeps its leading U+FEFF", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.leading.bom")).toBe("\ufeffbom stays");
+        });
+      }
+    );
+  });
+
+  it("decrypts a qf1 secret with quotes, backslash, newline, tab and colons", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.json.special")).toBe('a"b\\c\nd\te:f,g qf1:x');
+        });
+      }
+    );
+  });
+
+  it("decrypts a qf1 secret on the bare QUONFIG_KEYSET keyset", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.default.keyset")).toBe(
+            "sk_test_default_keyset_value"
+          );
+        });
+      }
+    );
+  });
+
+  it("decrypts a qf1 secret encrypted to the second key of a two-key keyset", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.older.key")).toBe("written before rotation");
+        });
+      }
+    );
+  });
+
+  it("decrypts the environment-scoped value of a qf1 secret on a second keyset", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.env.scoped")).toBe(
+            "written with the first public key"
+          );
+        });
+      }
+    );
+  });
+
+  it("a qf1 secret shadows a document with the same key in configs", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.shadowed")).toBe("hello");
+        });
+      }
+    );
+  });
+
+  it("qf1 secret on a keyset the environment does not hold returns the default", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.keyset.missing", undefined, "DEFAULT")).toBe(
+            "DEFAULT"
+          );
+        });
+      }
+    );
+  });
+
+  it("qf1 secret on a keyset the environment does not hold with no default returns nil", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({ onNoDefault: "warn" }, (client) => {
+          expect(client.getString("qf1.secret.keyset.missing")).toBe(undefined);
+        });
+      }
+    );
+  });
+
+  it("qf1 secret whose fingerprint is not held returns the default", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.key.not.held", undefined, "DEFAULT")).toBe("DEFAULT");
+        });
+      }
+    );
+  });
+
+  it("qf1 secret is looked up by keyset and fingerprint, never in another keyset", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.cross.keyset", undefined, "DEFAULT")).toBe("DEFAULT");
+        });
+      }
+    );
+  });
+
+  it("qf1 secret with a tampered header returns the default", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.tampered.header", undefined, "DEFAULT")).toBe(
+            "DEFAULT"
+          );
+        });
+      }
+    );
+  });
+
+  it("qf1 secret whose keyset name is invalid is refused even when that env var holds its key", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.keyset.name.invalid", undefined, "DEFAULT")).toBe(
+            "DEFAULT"
+          );
+        });
+      }
+    );
+  });
+
+  it("qf1 secret with a trailing colon is refused", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.trailing.colon", undefined, "DEFAULT")).toBe(
+            "DEFAULT"
+          );
+        });
+      }
+    );
+  });
+
+  it("qf1 secret whose ephemeral key gives an all-zero shared secret is refused", async () => {
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.low.order.ephemeral", undefined, "DEFAULT")).toBe(
+            "DEFAULT"
+          );
+        });
+      }
+    );
+  });
+
+  it("a value that still carries decryptWith returns the default", async () => {
     await withClient({}, (client) => {
-      expect(client.getString("a.secret.config")).toBe("hello.world");
+      expect(client.getString("qf1.legacy.decrypt.with", undefined, "DEFAULT")).toBe("DEFAULT");
     });
   });
 
-  it("decrypts a secret whose key config has an environment rule", async () => {
-    await withClient({}, (client) => {
-      expect(client.getString("env.scoped.secret")).toBe("hello.world");
+  it("a value that still carries decryptWith with no default returns nil", async () => {
+    await withClient({ onNoDefault: "warn" }, (client) => {
+      expect(client.getString("qf1.legacy.decrypt.with")).toBe(undefined);
     });
   });
 
@@ -1068,15 +1418,41 @@ describe("get", () => {
   });
 
   it("STRING getter on a decryption failure returns the default", async () => {
-    await withClient({}, (client) => {
-      expect(client.getString("a.broken.secret.config", undefined, "DEFAULT")).toBe("DEFAULT");
-    });
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.getString("qf1.secret.key.not.held", undefined, "DEFAULT")).toBe("DEFAULT");
+        });
+      }
+    );
   });
 
   it("STRING getter on a decryption failure with no default returns nil", async () => {
-    await withClient({ onNoDefault: "warn" }, (client) => {
-      expect(client.getString("a.broken.secret.config")).toBe(undefined);
-    });
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({ onNoDefault: "warn" }, (client) => {
+          expect(client.getString("qf1.secret.key.not.held")).toBe(undefined);
+        });
+      }
+    );
   });
 
   it("BOOLEAN getter on a missing bool env var returns the default", async () => {

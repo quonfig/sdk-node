@@ -10,9 +10,20 @@ import type {
 
 // `schemas/` is intentionally excluded — it holds raw JSON Schema documents
 // (no key/type/valueType), not Quonfig configs. See qfg-uzsl / qfg-2inx.
-const CONFIG_SUBDIRS = ["configs", "feature-flags", "segments", "log-levels"] as const;
+//
+// `secrets/` MUST stay last (qf1 spec 13.7): the store is a map by key and
+// the last write wins, so a secret shadows a same-key document in `configs/`.
+const CONFIG_SUBDIRS = ["configs", "feature-flags", "segments", "log-levels", "secrets"] as const;
 
-export function loadEnvelopeFromDatadir(datadir: string, environment: string): ConfigEnvelope {
+/**
+ * `warn` receives one line per file in `secrets/` that is skipped (it names the
+ * path, never the content); defaults to console.warn.
+ */
+export function loadEnvelopeFromDatadir(
+  datadir: string,
+  environment: string,
+  warn: (message: string) => void = (message) => console.warn(message)
+): ConfigEnvelope {
   const environmentId = resolveEnvironment(join(datadir, "quonfig.json"), environment);
   const configs: ConfigResponse[] = [];
 
@@ -27,7 +38,22 @@ export function loadEnvelopeFromDatadir(datadir: string, environment: string): C
       .sort((a, b) => a.localeCompare(b));
 
     for (const filename of filenames) {
-      const raw = JSON.parse(readFileSync(join(dir, filename), "utf-8")) as WorkspaceConfigDocument;
+      const path = join(subdir, filename);
+      let raw: WorkspaceConfigDocument;
+      if (subdir === "secrets") {
+        // Old SDKs never open secrets/, so junk there must not start failing
+        // startup now: skip it with one line naming the path, never the
+        // content (a JSON parse error would quote it). The other directories
+        // keep their existing behaviour.
+        const doc = readSecretDocument(join(dir, filename));
+        if (typeof doc === "string") {
+          warn(`[quonfig] skipping ${path}: ${doc}`);
+          continue;
+        }
+        raw = doc;
+      } else {
+        raw = JSON.parse(readFileSync(join(dir, filename), "utf-8")) as WorkspaceConfigDocument;
+      }
       // Config files store int/double values as JSON strings on disk
       // (`{"type":"int","value":"123"}`). Coerce them to real numbers at load
       // time so the loaded envelope matches what api-delivery/sdk-go emit over
@@ -37,9 +63,12 @@ export function loadEnvelopeFromDatadir(datadir: string, environment: string): C
       // misplaced JSON Schema). Reject rather than emit an empty-key stub —
       // matches api-delivery loader.go (qfg-uzsl).
       if (!raw.key) {
-        throw new Error(
-          `[quonfig] ${join(subdir, filename)} has empty key — file is not a Quonfig Config`
-        );
+        throw new Error(`[quonfig] ${path} has empty key — file is not a Quonfig Config`);
+      }
+      // The directory, not the document, makes a secret (qf1 spec 10.2, 13.7).
+      if (subdir === "secrets") {
+        raw.type = "secret";
+        raw.sendToClientSdk = false;
       }
       configs.push(toConfigResponse(raw, environmentId));
     }
@@ -77,6 +106,30 @@ function resolveEnvironment(quonfigPath: string, environment: string): string {
   }
 
   return environment;
+}
+
+/** A document from `secrets/`, or why it is skipped (no content in the reason). */
+function readSecretDocument(file: string): WorkspaceConfigDocument | string {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf-8");
+  } catch {
+    return "not a readable file";
+  }
+  let doc: unknown;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    return "not valid JSON";
+  }
+  if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
+    return "not a JSON object";
+  }
+  const key = (doc as { key?: unknown }).key;
+  if (typeof key !== "string" || key === "") {
+    return "has no key, so it is not a Quonfig secret";
+  }
+  return doc as WorkspaceConfigDocument;
 }
 
 function toConfigResponse(raw: WorkspaceConfigDocument, environmentId: string): ConfigResponse {

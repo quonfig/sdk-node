@@ -11,8 +11,6 @@ import type { QuonfigOptions } from "../../src/types";
 import { startTelemetryStub } from "../helpers/telemetryStub";
 
 // Environment variables the integration-test fixtures reference.
-process.env.PREFAB_INTEGRATION_TEST_ENCRYPTION_KEY =
-  "c87ba22d8662282abe8a0e4651327b579cb64a454ab0f4c170b45b15f049a221";
 process.env.IS_A_NUMBER = "1234";
 process.env.NOT_A_NUMBER = "not_a_number";
 delete process.env.MISSING_ENV_VAR;

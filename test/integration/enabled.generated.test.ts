@@ -4,7 +4,20 @@
 // Source: integration-test-data/generators/src/targets/node.ts
 
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
 import { withClient, withEnv } from "./setup";
+
+function qf1TestKeyset(...labels: string[]): string {
+  return labels
+    .map(
+      (label) =>
+        "qf1-priv-" +
+        createHash("sha256")
+          .update("qf1 test vector private key: " + label, "utf8")
+          .digest("base64url")
+    )
+    .join(",");
+}
 
 describe("enabled", () => {
   it("returns the correct value for a simple flag", async () => {
@@ -1114,8 +1127,21 @@ describe("enabled", () => {
   });
 
   it("enabled on a decryption failure returns false", async () => {
-    await withClient({}, (client) => {
-      expect(client.isEnabled("a.broken.secret.config")).toBe(false);
-    });
+    await withEnv(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      async () => {
+        await withClient({}, (client) => {
+          expect(client.isEnabled("qf1.secret.key.not.held")).toBe(false);
+        });
+      }
+    );
   });
 });

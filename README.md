@@ -112,6 +112,67 @@ apply. A missing key returns `value: undefined` with `reason: "ERROR"` and
 without a default on a client with `onNoDefault: "error"`. The getter then throws instead of
 returning your default.
 
+## Secrets
+
+A secret is a document in your workspace's `secrets/` directory. It is a string config whose stored
+values are encrypted in the `qf1` format (`qf1:<KEYSET>:<fingerprint>:<payload>`). The SDK decrypts
+a value when you read it, so `getString("stripe.webhook.secret")` returns the plaintext. Create and
+change secrets with the `qfg` CLI; the SDK only reads them.
+
+**Keysets.** Each value names the keyset it is encrypted to, for example `QUONFIG_KEYSET_PROD`. The
+keyset name is also the name of the environment variable that holds that keyset's private keys in
+your runtime:
+
+```bash
+QUONFIG_KEYSET_PROD="qf1-priv-..."              # one key
+QUONFIG_KEYSET_PROD="qf1-priv-...,qf1-priv-..." # during a rotation: old and new key
+```
+
+- Names match `QUONFIG_KEYSET` or `QUONFIG_KEYSET_<NAME>`, where `<NAME>` is `A-Z`, `0-9` and `_`
+  separated parts (`QUONFIG_KEYSET_PROD`, `QUONFIG_KEYSET_CI_2`). The SDK reads only the variable
+  that a value names, and never reads a variable whose name does not match.
+- Entries are separated by commas. Spaces, tabs, CR and LF around an entry are ignored; any other
+  character makes the whole keyset invalid. Order does not matter: the SDK finds the key by its
+  fingerprint and never tries keys one by one.
+- The SDK reads the keyset variable on every secret read. It parses a value once and re-parses it
+  only when the variable's value changes; a decrypted value is reused until its stored ciphertext or
+  the variable's value changes.
+
+**When a value cannot be decrypted** (the keyset variable is not set, it holds no key with the
+value's fingerprint, it is malformed, the value is corrupt, or the runtime's crypto library refuses
+X25519, as a FIPS-restricted OpenSSL does), only that read fails. Startup does not fail, and other
+configs and secrets on other keysets still work. The read behaves like any other unresolvable value:
+your default is returned, else `onNoDefault` applies, and the `*Details` getters report
+`reason: "ERROR"` with `errorCode: "GENERAL"`. The encrypted string is never returned as the value.
+The error message starts with `qf1 <class>:` (`keyset_missing`, `key_not_held`, `keyset_invalid`,
+`malformed`, `decrypt_failed`, ...) and names the keyset and the fingerprints needed and held. It
+never contains a key, the encrypted payload or the plaintext.
+
+**Telemetry** reports a secret evaluation with type `secret` and a redacted value (`*****` plus a
+short hash of the stored encrypted string), never the plaintext.
+
+**The old format is no longer read.** A value that carries `decryptWith` (the earlier secrets
+format, a `configs/` value decrypted with a key held in another config) now fails to resolve with an
+error that mentions `decryptWith`. Move such values to `secrets/` with the CLI. In datadir mode a
+document in `secrets/` replaces a document with the same key in `configs/`, so a workspace can carry
+both copies while it migrates. A file in `secrets/` that is not a secret document (invalid JSON, no
+`key`, a directory named `*.json`) is skipped with one warning that names its path; other files and
+subdirectories are ignored.
+
+**Detecting the error.** Every secret read failure has `err.name === "QuonfigDecryptionError"` and
+an `err.code`: the qf1 class (`keyset_missing`, `key_not_held`, ...) or
+`"decrypt_with_not_supported"` for a `decryptWith` value. A qf1 failure also carries `keyset`,
+`fingerprint`, `held` (fingerprints) or `entry` (a 1-based position) when they apply. Compare `name`
+and `code`, not the message text.
+
+**Minimum version.** Releases of this SDK before this one do not read `qf1` secrets. Over the wire
+(`sdkKey`) they return the encrypted string as the value, with no error. In datadir mode they never
+open `secrets/`: a secret-only key is missing, and a key that still has an old copy in `configs/` is
+served from that copy. Upgrade every backend that reads a secret before you create it.
+
+The old-format helpers `encrypt`, `decrypt`, `generateNewHexKey` and the `encryption` namespace are
+still exported and still work, but they are deprecated: they handle only the old format.
+
 ## Options
 
 ```typescript
@@ -207,6 +268,7 @@ config loads.
 | `QUONFIG_DOMAIN`          | Domain used to derive default `apiUrls` and `telemetryUrl`. Defaults to `quonfig.com`. Set to `quonfig-staging.com` to point everything at staging. |
 | `QUONFIG_ENVIRONMENT`     | Environment name to use in datadir mode (overridden by the `environment` option).                                                                   |
 | `QUONFIG_DEV_CONTEXT`     | Set to `false` to stop injecting `quonfig-user.email` from `~/.quonfig/tokens.json` (on by default; see below).                                     |
+| `QUONFIG_KEYSET*`         | Private keys for decrypting secrets, one variable per keyset (`QUONFIG_KEYSET`, `QUONFIG_KEYSET_PROD`, ...). See [Secrets](#secrets).               |
 
 Resolution order for URLs (highest wins):
 

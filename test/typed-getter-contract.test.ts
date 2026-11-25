@@ -168,8 +168,8 @@ describe("resolution errors with a default", () => {
   it("get(k, ctx, default) returns the default on a missing ENV_VAR or decryption failure", async () => {
     const client = await fixtureClient(); // onNoDefault: "error"
     expect(client.get("provided.by.missing.env.var", undefined, "D")).toBe("D");
-    expect(client.get("a.broken.secret.config", undefined, "D")).toBe("D");
-    expect(client.getString("a.broken.secret.config", undefined, "D")).toBe("D");
+    expect(client.get("qf1.secret.key.not.held", undefined, "D")).toBe("D");
+    expect(client.getString("qf1.secret.key.not.held", undefined, "D")).toBe("D");
   });
 
   it("without a default, onNoDefault: 'error' rethrows the underlying error", async () => {
@@ -202,12 +202,12 @@ describe("once-per-key logging", () => {
   it("logs a decryption failure once and never logs the secret", async () => {
     const logger = makeLogger();
     const client = await fixtureClient({ logger });
-    client.getString("a.broken.secret.config", undefined, "D");
-    client.getString("a.broken.secret.config", undefined, "D");
-    client.isEnabled("a.broken.secret.config");
+    client.getString("qf1.secret.key.not.held", undefined, "D");
+    client.getString("qf1.secret.key.not.held", undefined, "D");
+    client.isEnabled("qf1.secret.key.not.held");
     const lines = logger.warn.mock.calls
       .map((c) => String(c[0]))
-      .filter((l) => l.includes("a.broken.secret.config"));
+      .filter((l) => l.includes("qf1.secret.key.not.held"));
     expect(lines).toHaveLength(1);
   });
 
@@ -217,8 +217,8 @@ describe("once-per-key logging", () => {
   it("says the read throws when there is no default under onNoDefault: 'error'", async () => {
     const logger = makeLogger();
     const client = await fixtureClient({ logger });
-    expect(() => client.getString("a.broken.secret.config")).toThrow();
-    const [line] = warnedAbout(logger, "a.broken.secret.config");
+    expect(() => client.getString("qf1.secret.key.not.held")).toThrow();
+    const [line] = warnedAbout(logger, "qf1.secret.key.not.held");
     expect(line).toContain("no default was passed, so the read throws");
     expect(line).not.toContain("default applies");
   });
@@ -226,8 +226,8 @@ describe("once-per-key logging", () => {
   it("says the caller's default is returned when one was passed", async () => {
     const logger = makeLogger();
     const client = await fixtureClient({ logger });
-    expect(client.getString("a.broken.secret.config", undefined, "D")).toBe("D");
-    expect(warnedAbout(logger, "a.broken.secret.config")[0]).toContain(
+    expect(client.getString("qf1.secret.key.not.held", undefined, "D")).toBe("D");
+    expect(warnedAbout(logger, "qf1.secret.key.not.held")[0]).toContain(
       "returning the caller's default"
     );
   });
@@ -235,15 +235,15 @@ describe("once-per-key logging", () => {
   it("says undefined is returned when there is no default under onNoDefault: 'ignore'", async () => {
     const logger = makeLogger();
     const client = await fixtureClient({ logger, onNoDefault: "ignore" });
-    expect(client.getString("a.broken.secret.config")).toBeUndefined();
-    expect(warnedAbout(logger, "a.broken.secret.config")[0]).toContain("returning undefined");
+    expect(client.getString("qf1.secret.key.not.held")).toBeUndefined();
+    expect(warnedAbout(logger, "qf1.secret.key.not.held")[0]).toContain("returning undefined");
   });
 
   it("says isEnabled returns false", async () => {
     const logger = makeLogger();
     const client = await fixtureClient({ logger });
-    expect(client.isEnabled("a.broken.secret.config")).toBe(false);
-    expect(warnedAbout(logger, "a.broken.secret.config")[0]).toContain("returning false");
+    expect(client.isEnabled("qf1.secret.key.not.held")).toBe(false);
+    expect(warnedAbout(logger, "qf1.secret.key.not.held")[0]).toContain("returning false");
   });
 
   it("does not log a missing key read with a default", async () => {
@@ -267,7 +267,7 @@ describe("isEnabled never throws", () => {
   it("returns false for an unset ENV_VAR, a decryption failure and a non-bool value", async () => {
     const client = await fixtureClient();
     expect(client.isEnabled("getter.contract.provided.bool.missing")).toBe(false);
-    expect(client.isEnabled("a.broken.secret.config")).toBe(false);
+    expect(client.isEnabled("qf1.secret.key.not.held")).toBe(false);
     expect(client.isEnabled("getter.contract.string.true")).toBe(false);
     expect(client.isEnabled("getter.contract.int")).toBe(false);
   });
@@ -317,7 +317,7 @@ describe("Details getters", () => {
     const client = await fixtureClient();
     for (const details of [
       client.getStringDetails("provided.by.missing.env.var"),
-      client.getStringDetails("a.broken.secret.config"),
+      client.getStringDetails("qf1.secret.key.not.held"),
     ]) {
       expect(details.value).toBeUndefined();
       expect(details.reason).toBe("ERROR");

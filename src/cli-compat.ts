@@ -166,6 +166,10 @@ export interface ConfigValue {
   json?: { json: string };
   provided?: { source: string; lookup: string };
   confidential?: boolean;
+  /**
+   * @deprecated The old secrets format, which the SDK no longer reads. Secrets
+   * are qf1 values in `secrets/`.
+   */
   decryptWith?: string;
 }
 
