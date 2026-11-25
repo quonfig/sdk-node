@@ -1,7 +1,7 @@
-import type { ConfigResponse, Contexts, GetValue, Value, ValueType } from "./types";
+import type { ConfigTypeString, Contexts, GetValue, Value, ValueType } from "./types";
 import type { ConfigStore } from "./store";
 import type { Evaluator } from "./evaluator";
-import { decrypt } from "./encryption";
+import { KeysetCache, Qf1Error, decryptQf1 } from "./qf1";
 import { InvalidDurationError, parseDurationMillis } from "./duration";
 import { createHash } from "crypto";
 
@@ -21,15 +21,70 @@ function makeConfidential(secret: string): string {
   return `${CONFIDENTIAL_PREFIX}${md5.slice(0, 5)}`;
 }
 
+/** Parsed keysets, shared by every client in the process (spec 6.2, decision 33). */
+const KEYSETS = new KeysetCache();
+
+/**
+ * Decrypted secrets, per stored value object. Stored values are replaced, never
+ * mutated, on each install, so an entry dies with its config; it is reused
+ * only while the keyset env var still holds the value it was decrypted with.
+ */
+const DECRYPTED = new WeakMap<
+  Value,
+  { keyset: string; raw: string | undefined; resolved: Value }
+>();
+
+/**
+ * A value of a secret: a qf1 string, decrypted with the keyset its header
+ * names (spec 8). Any failure is a Qf1Error for this value only; the stored
+ * string is never returned. Telemetry gets a redaction over the STORED
+ * string, never over the plaintext (spec 13.5).
+ */
+function resolveSecret(
+  val: Value,
+  configKey: string
+): { resolved: Value; reportableValue: GetValue } {
+  if (val.type !== "string") {
+    throw new Qf1Error(
+      "malformed",
+      `a secret value has type "string", this one has type "${String(val.type)}" (config "${configKey}")`
+    );
+  }
+  const stored = String(val.value);
+  const reportableValue = makeConfidential(stored);
+
+  const cached = DECRYPTED.get(val);
+  if (cached !== undefined && process.env[cached.keyset] === cached.raw) {
+    return { resolved: cached.resolved, reportableValue };
+  }
+
+  let keyset: string | undefined;
+  let raw: string | undefined;
+  const plaintext = decryptQf1(
+    val.value,
+    (name) => {
+      keyset = name;
+      raw = process.env[name];
+      return raw;
+    },
+    { configKey, cache: KEYSETS }
+  );
+  const resolved: Value = { type: "string", value: plaintext, confidential: true };
+  DECRYPTED.set(val, { keyset: keyset!, raw, resolved });
+  return { resolved, reportableValue };
+}
+
 /**
  * Resolver handles post-evaluation value resolution:
  * - ENV_VAR provided values
- * - Decryption of confidential values
+ * - Decryption of secrets (qf1)
  * - Type coercion
  * - Duration parsing
  * - JSON parsing
  */
 export class Resolver {
+  // Unused since the decryptWith key lookup was removed (qfg-8seuf.8); kept so
+  // the exported constructor's signature does not change.
   private store: ConfigStore;
   private evaluator: Evaluator;
 
@@ -40,33 +95,31 @@ export class Resolver {
 
   /**
    * Resolve a matched value. Handles:
+   * - values of a secret (`configType` "secret"): decrypted as qf1
    * - provided values (ENV_VAR lookup)
-   * - decryption of confidential values
+   * - redaction of confidential values for telemetry
+   *
+   * A value that still carries `decryptWith` (the old secrets format) is an
+   * error: this SDK no longer reads it (spec 13.3 R1).
    */
   resolveValue(
     val: Value,
     configKey: string,
     valueType: ValueType,
     envID: string,
-    contexts: Contexts
-  ): { resolved: Value; reportableValue?: GetValue } {
-    return this.resolveValueOnPath(val, configKey, valueType, envID, contexts, []);
-  }
-
-  /**
-   * resolveValue plus keyPath: the config keys already being resolved above
-   * this one through decryptWith. A decryptWith pointing back onto the path is
-   * a cycle and fails like any other decryption error instead of recursing
-   * until a RangeError, matching sdk-go.
-   */
-  private resolveValueOnPath(
-    val: Value,
-    configKey: string,
-    valueType: ValueType,
-    envID: string,
     contexts: Contexts,
-    keyPath: readonly string[]
+    configType?: ConfigTypeString
   ): { resolved: Value; reportableValue?: GetValue } {
+    if (typeof val.decryptWith === "string" && val.decryptWith !== "") {
+      throw new Error(
+        `config "${configKey}" has a value that carries decryptWith, the old secrets format, which this SDK no longer reads; store it as a qf1 secret in secrets/`
+      );
+    }
+
+    if (configType === "secret") {
+      return resolveSecret(val, configKey);
+    }
+
     // Handle provided values (ENV_VAR)
     if (val.type === "provided") {
       const provided = val.value;
@@ -94,52 +147,7 @@ export class Resolver {
       return { resolved: val };
     }
 
-    // Handle decryption
-    if (val.confidential && val.decryptWith) {
-      const path = [...keyPath, configKey];
-      if (path.includes(val.decryptWith)) {
-        throw new Error(
-          `Decryption key config "${val.decryptWith}" is part of a decryptWith cycle`
-        );
-      }
-
-      const keyCfg = this.store.get(val.decryptWith);
-      if (keyCfg === undefined) {
-        throw new Error(`Decryption key config "${val.decryptWith}" not found`);
-      }
-
-      const keyMatch = this.evaluator.evaluateConfig(keyCfg, envID, contexts);
-      if (!keyMatch.isMatch || keyMatch.value === undefined) {
-        throw new Error(`Decryption key config "${val.decryptWith}" did not match`);
-      }
-
-      // Resolve the key value recursively (it could itself be a provided ENV_VAR)
-      const { resolved: resolvedKey } = this.resolveValueOnPath(
-        keyMatch.value,
-        keyCfg.key,
-        keyCfg.valueType,
-        envID,
-        contexts,
-        path
-      );
-
-      const secretKey = String(resolvedKey.value);
-      if (!secretKey) {
-        throw new Error(`Decryption key from "${val.decryptWith}" is empty`);
-      }
-
-      const decrypted = decrypt(String(val.value), secretKey);
-      return {
-        resolved: {
-          type: "string",
-          value: decrypted,
-          confidential: true,
-        },
-        reportableValue: makeConfidential(String(val.value)),
-      };
-    }
-
-    // Check if value is confidential (but not encrypted)
+    // A confidential value is returned as stored and redacted in telemetry.
     if (val.confidential) {
       return {
         resolved: val,

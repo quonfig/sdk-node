@@ -39,7 +39,8 @@ export type ValueType =
 
 // ---- Config Types ----
 
-export type ConfigTypeString = "feature_flag" | "config" | "segment" | "log_level" | "schema";
+export type ConfigTypeString =
+  "feature_flag" | "config" | "segment" | "log_level" | "schema" | "secret";
 
 // ---- Provided Data ----
 
@@ -73,6 +74,11 @@ export interface Value {
   type: ValueType;
   value: any;
   confidential?: boolean;
+  /**
+   * @deprecated The old secrets format. This SDK no longer reads it: a value
+   * that carries `decryptWith` fails to resolve. Secrets are qf1 values in
+   * `secrets/` (type `"secret"`).
+   */
   decryptWith?: string;
 }
 
@@ -643,6 +649,7 @@ export const ConfigType = {
   Segment: "segment" as ConfigTypeString,
   LogLevel: "log_level" as ConfigTypeString,
   Schema: "schema" as ConfigTypeString,
+  Secret: "secret" as ConfigTypeString,
 } as const;
 
 export const ProvidedSource = {

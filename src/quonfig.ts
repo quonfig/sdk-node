@@ -1621,7 +1621,8 @@ export class Quonfig {
         config.key,
         config.valueType,
         this.environmentId,
-        mergedContexts
+        mergedContexts,
+        config.type
       ));
     } catch (error) {
       return { kind: "error", error };

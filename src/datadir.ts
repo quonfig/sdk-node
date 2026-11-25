@@ -10,7 +10,10 @@ import type {
 
 // `schemas/` is intentionally excluded — it holds raw JSON Schema documents
 // (no key/type/valueType), not Quonfig configs. See qfg-uzsl / qfg-2inx.
-const CONFIG_SUBDIRS = ["configs", "feature-flags", "segments", "log-levels"] as const;
+//
+// `secrets/` MUST stay last (qf1 spec 13.7): the store is a map by key and
+// the last write wins, so a secret shadows a same-key document in `configs/`.
+const CONFIG_SUBDIRS = ["configs", "feature-flags", "segments", "log-levels", "secrets"] as const;
 
 export function loadEnvelopeFromDatadir(datadir: string, environment: string): ConfigEnvelope {
   const environmentId = resolveEnvironment(join(datadir, "quonfig.json"), environment);
@@ -40,6 +43,11 @@ export function loadEnvelopeFromDatadir(datadir: string, environment: string): C
         throw new Error(
           `[quonfig] ${join(subdir, filename)} has empty key — file is not a Quonfig Config`
         );
+      }
+      // The directory, not the document, makes a secret (qf1 spec 10.2, 13.7).
+      if (subdir === "secrets") {
+        raw.type = "secret";
+        raw.sendToClientSdk = false;
       }
       configs.push(toConfigResponse(raw, environmentId));
     }

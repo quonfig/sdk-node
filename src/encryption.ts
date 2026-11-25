@@ -8,6 +8,9 @@ const AUTH_TAG_LENGTH = 16; // 128-bit GCM tag
 
 /**
  * Generate a new random hex-encoded 32-byte key for AES-256-GCM encryption.
+ *
+ * @deprecated The old secrets format (`decryptWith`), which this SDK no longer
+ * reads. Secrets are qf1 values in `secrets/`, written with the `qfg` CLI.
  */
 export function generateNewHexKey(): string {
   return randomBytes(KEY_LENGTH).toString("hex");
@@ -17,6 +20,9 @@ export function generateNewHexKey(): string {
  * Encrypt a string using AES-256-GCM.
  *
  * Returns a string in format: "DATA--IV--AUTH_TAG" where each part is hex-encoded.
+ *
+ * @deprecated The old secrets format (`decryptWith`), which this SDK no longer
+ * reads. Secrets are qf1 values in `secrets/`, written with the `qfg` CLI.
  */
 export function encrypt(clearText: string, keyStringHex: string): string {
   if (keyStringHex.length !== KEY_LENGTH * 2) {
@@ -38,6 +44,9 @@ export function encrypt(clearText: string, keyStringHex: string): string {
  * Decrypt an AES-256-GCM encrypted value.
  *
  * The encrypted string must be in format: "DATA--IV--AUTH_TAG" where each part is hex-encoded.
+ *
+ * @deprecated The old secrets format (`decryptWith`), which this SDK no longer
+ * reads. Secrets are qf1 values in `secrets/`, written with the `qfg` CLI.
  */
 export function decrypt(encryptedString: string, keyStringHex: string): string {
   if (keyStringHex.length !== 64) {
