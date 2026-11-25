@@ -440,6 +440,62 @@ describe("datadir: secrets/ is loaded last", () => {
     });
   }
 
+  it("R1 beats the secret path: a secrets/ value carrying decryptWith fails, not decrypts", async () => {
+    setEnv(V.positiveEnv);
+    write(
+      "secrets",
+      doc("both", "secret", {
+        type: "string",
+        value: SHORT.ciphertext,
+        confidential: true,
+        decryptWith: "old.key",
+      })
+    );
+    const client = await datadirClient();
+    const err = errorOf(() => client.getString("both"));
+    expect(err.message).toMatch(/\bdecryptWith\b/);
+    expect((err as any).code).toBe("decrypt_with_not_supported");
+    expect(client.getString("both", undefined, "D")).toBe("D");
+    await client.close();
+  });
+
+  it("junk in secrets/ is skipped with one warning per file naming the path, never the content", async () => {
+    setEnv(V.positiveEnv);
+    write("secrets", secret("good", SHORT.ciphertext));
+    writeFileSync(join(dir, "secrets", "notes.txt"), "JUNK-SENTINEL-txt");
+    writeFileSync(join(dir, "secrets", "bad.json"), "JUNK-SENTINEL-not-json {");
+    writeFileSync(
+      join(dir, "secrets", "nokey.json"),
+      JSON.stringify({ type: "secret", note: "JUNK-SENTINEL-nokey" })
+    );
+    mkdirSync(join(dir, "secrets", "nested"));
+    writeFileSync(join(dir, "secrets", "nested", "inner.json"), "JUNK-SENTINEL-inner");
+    mkdirSync(join(dir, "secrets", "dir.json"));
+    const logger = makeLogger();
+    const client = new Quonfig({
+      sdkKey: "test-unused",
+      datadir: dir,
+      environment: "Production",
+      enableSSE: false,
+      enablePolling: false,
+      enableQuonfigUserContext: false,
+      collectEvaluationSummaries: false,
+      contextUploadMode: "none",
+      logger,
+    });
+    await client.init();
+    expect(client.getString("good")).toBe("hello");
+    const lines = logger.warn.mock.calls.map((c) => c.map(String).join(" "));
+    const skipped = lines.filter((l) => l.includes("secrets/"));
+    expect(skipped.map((l) => l.match(/secrets\/[^ :]+/)![0]).sort()).toEqual([
+      "secrets/bad.json",
+      "secrets/dir.json",
+      "secrets/nokey.json",
+    ]);
+    for (const l of lines) expect(l).not.toContain("JUNK-SENTINEL");
+    await client.close();
+  });
+
   it("boots with no keyset and serves configs/ while a secret get fails", async () => {
     write("configs", PLAIN);
     write("secrets", secret("s", SHORT.ciphertext));
@@ -492,6 +548,24 @@ describe("telemetry redaction", () => {
     );
     expect(resolved.value).toBe("hello");
     expect(reportableValue).toBe(md5Redaction(SHORT.ciphertext));
+  });
+
+  it("the decrypted value keeps confidential: true wherever the SDK exposes a Value", async () => {
+    setEnv(V.positiveEnv);
+    const store = new ConfigStore();
+    const cfg = secret("s", SHORT.ciphertext);
+    store.update({ meta: { version: "t", environment: "" }, configs: [cfg] });
+    const resolver = new Resolver(store, new Evaluator(store));
+    const stored = cfg.default.rules[0]!.value;
+    const first = resolver.resolveValue({ ...stored }, "s", "string", "", {}, "secret", stored);
+    const cached = resolver.resolveValue({ ...stored }, "s", "string", "", {}, "secret", stored);
+    for (const r of [first, cached]) {
+      expect(r.resolved).toEqual({ type: "string", value: "hello", confidential: true });
+    }
+    const client = await wireClient([cfg]);
+    expect(client.getRawMatch("s")?.config.confidential).toBe(true);
+    expect(client.getStringDetails("s").flagMetadata).toMatchObject({ configType: "SECRET" });
+    await client.close();
   });
 
   it("the evaluation is reported with type secret", async () => {
@@ -572,6 +646,46 @@ describe("error text never carries key material, ciphertext payload or plaintext
       await client.close();
     });
   }
+});
+
+describe("an authentication failure leaks no derived secret", () => {
+  it("tampered tag: no shared secret, PRK, OKM, AES key or nonce in hex or base64", async () => {
+    const n = V.negative.find((x: any) => x.name === "tampered-tag-byte");
+    // tampered-tag-byte is the short-ascii seal with one tag byte flipped: same E,
+    // same recipient, so the derived values are short-ascii's intermediates.
+    expect(n.ciphertext.split(":")[3].slice(0, 43)).toBe(
+      SHORT.ciphertext.split(":")[3].slice(0, 43)
+    );
+    const derived = [
+      SHORT.sharedSecretHex,
+      SHORT.prkHex,
+      SHORT.okmHex,
+      SHORT.aesKeyHex,
+      SHORT.nonceHex,
+    ];
+    const forms = derived.flatMap((h: string) => {
+      const b = Buffer.from(h, "hex");
+      return [h, h.toUpperCase(), b.toString("base64"), b.toString("base64url")].map((f) =>
+        f.replace(/=+$/, "").slice(0, 16)
+      );
+    });
+    setEnv(n.env);
+    const logger = makeLogger();
+    const client = await wireClient([secret("tag", n.ciphertext)], { logger });
+    const err = errorOf(() => client.getString("tag"));
+    expect(err.message).toMatch(/^qf1 decrypt_failed: authentication failed/);
+    const own: Record<string, unknown> = {};
+    for (const k of Object.keys(err)) own[k] = (err as any)[k];
+    const text = [
+      err.message,
+      String(err.stack),
+      inspect(err),
+      JSON.stringify(own),
+      ...logger.warn.mock.calls.map((c) => c.map(String).join(" ")),
+    ].join("\n");
+    for (const f of forms) expect(text).not.toContain(f);
+    await client.close();
+  });
 });
 
 // ---- deprecated old-format exports ------------------------------------------
