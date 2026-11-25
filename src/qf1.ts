@@ -22,6 +22,7 @@ import {
   createPrivateKey,
   createPublicKey,
   diffieHellman,
+  getFips,
 } from "crypto";
 
 // ---- Constants (spec 5.1, 6.1) ----------------------------------------------
@@ -151,17 +152,23 @@ function shown(keyset: string): string {
 
 const KEYSET_NAME_PATTERN_TEXT = "^QUONFIG_KEYSET(_[A-Z0-9]+)*$";
 
-/** A library failure we did not expect: named by its code or class only, never its text. */
-function unexpected(err: unknown): Qf1Error {
+/** A library error named by its code or class only, never its text. */
+function errorTag(err: unknown): string {
   const code = (err as { code?: unknown })?.code;
   const name = (err as { name?: unknown })?.name;
-  const tag =
-    typeof code === "string" && /^[A-Z0-9_]{1,64}$/.test(code)
-      ? code
-      : typeof name === "string" && /^[A-Za-z]{1,64}$/.test(name)
-        ? name
-        : "unknown";
-  return new Qf1Error("decrypt_failed", `unexpected error from the crypto library (${tag})`);
+  return typeof code === "string" && /^[A-Z0-9_]{1,64}$/.test(code)
+    ? code
+    : typeof name === "string" && /^[A-Za-z]{1,64}$/.test(name)
+      ? name
+      : "unknown";
+}
+
+/** A library failure we did not expect. */
+function unexpected(err: unknown): Qf1Error {
+  return new Qf1Error(
+    "decrypt_failed",
+    `unexpected error from the crypto library (${errorTag(err)})`
+  );
 }
 
 // ---- base64url (spec 3.4) ----------------------------------------------------
@@ -231,24 +238,41 @@ const BASE_POINT = Buffer.concat([Buffer.of(9), Buffer.alloc(31)]);
  * caller's all-zero check covers both behaviours; any other error propagates.
  */
 export function x25519(scalar: Uint8Array, u: Uint8Array): Buffer {
-  const privateKey = createPrivateKey({
-    key: Buffer.concat([PKCS8_X25519_PREFIX, scalar]),
-    format: "der",
-    type: "pkcs8",
-  });
-  const publicKey = createPublicKey({
-    key: Buffer.concat([SPKI_X25519_PREFIX, u]),
-    format: "der",
-    type: "spki",
-  });
   try {
+    const privateKey = createPrivateKey({
+      key: Buffer.concat([PKCS8_X25519_PREFIX, scalar]),
+      format: "der",
+      type: "pkcs8",
+    });
+    const publicKey = createPublicKey({
+      key: Buffer.concat([SPKI_X25519_PREFIX, u]),
+      format: "der",
+      type: "spki",
+    });
     return diffieHellman({ privateKey, publicKey });
   } catch (err) {
     if ((err as { code?: unknown })?.code === "ERR_OSSL_FAILED_DURING_DERIVATION") {
       return Buffer.alloc(32);
     }
-    throw err;
+    // Any other refusal is the runtime's, not the key's: a FIPS-restricted
+    // OpenSSL, for example, has no X25519. Never report it as a bad entry.
+    throw x25519Refused(err);
   }
+}
+
+function x25519Refused(err: unknown): Qf1Error {
+  let fips = false;
+  try {
+    fips = getFips() === 1;
+  } catch {
+    // getFips itself unavailable: say nothing about FIPS.
+  }
+  return new Qf1Error(
+    "decrypt_failed",
+    `this runtime's crypto library refused X25519 (${errorTag(err)})${
+      fips ? "; FIPS mode is on, and qf1 secrets need X25519" : ""
+    }`
+  );
 }
 
 export function publicKeyFromPrivate(privateKey: Uint8Array): Buffer {
@@ -373,7 +397,9 @@ export class KeysetCache {
       try {
         entry = { raw, held: parseKeysetEnv(keyset, raw) };
       } catch (err) {
-        if (!(err instanceof Qf1Error)) throw err;
+        // Cache only what the env value itself decides; a runtime refusal
+        // (decrypt_failed) is retried on the next read.
+        if (!(err instanceof Qf1Error) || err.code !== "keyset_invalid") throw err;
         entry = { raw, error: err };
       }
       this.entries.delete(keyset);

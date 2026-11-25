@@ -14,6 +14,8 @@ const hooks = vi.hoisted(() => ({
   dhCalls: 0,
   dh: undefined as undefined | ((options: any, real: (o: any) => Buffer) => Buffer),
   decipher: undefined as undefined | ((real: (...a: any[]) => any, ...args: any[]) => any),
+  privateKey: undefined as undefined | ((real: (...a: any[]) => any, ...args: any[]) => any),
+  fips: undefined as undefined | number,
 }));
 
 vi.mock("crypto", async (importOriginal) => {
@@ -26,12 +28,13 @@ vi.mock("crypto", async (importOriginal) => {
     hooks.decipher
       ? hooks.decipher(real.createDecipheriv, ...args)
       : (real.createDecipheriv as any)(...args);
-  return {
-    ...real,
-    default: { ...real, diffieHellman, createDecipheriv },
-    diffieHellman,
-    createDecipheriv,
-  };
+  const createPrivateKey = (...args: any[]) =>
+    hooks.privateKey
+      ? hooks.privateKey(real.createPrivateKey, ...args)
+      : (real.createPrivateKey as any)(...args);
+  const getFips = () => (hooks.fips !== undefined ? hooks.fips : real.getFips());
+  const patched = { diffieHellman, createDecipheriv, createPrivateKey, getFips };
+  return { ...real, default: { ...real, ...patched }, ...patched };
 });
 
 import { Quonfig } from "../src/quonfig";
@@ -63,6 +66,8 @@ beforeEach(() => {
   }
   hooks.dh = undefined;
   hooks.decipher = undefined;
+  hooks.privateKey = undefined;
+  hooks.fips = undefined;
 });
 
 afterEach(() => {
@@ -72,6 +77,8 @@ afterEach(() => {
   }
   hooks.dh = undefined;
   hooks.decipher = undefined;
+  hooks.privateKey = undefined;
+  hooks.fips = undefined;
 });
 
 function secret(key: string, ciphertext: string): ConfigResponse {
@@ -180,8 +187,11 @@ describe("library failure mapping", () => {
     };
     const err = failure(() => decryptQf1(SHORT.ciphertext, lookup(V.positiveEnv)));
     expect(err.code).toBe("decrypt_failed");
-    expect(err.message).toMatch(/^qf1 decrypt_failed: unexpected error from the crypto library/);
+    expect(err.message).toMatch(
+      /^qf1 decrypt_failed: this runtime's crypto library refused X25519/
+    );
     expect(err.message).toContain("ERR_SOMETHING_ELSE");
+    expect(err.message).not.toMatch(/entry|private key/);
     expect(err.message).not.toContain("SENTINEL");
   });
 
@@ -207,5 +217,55 @@ describe("library failure mapping", () => {
     expect(err.code).toBe("decrypt_failed");
     expect(err.message).toMatch(/unexpected error from the crypto library \(TypeError\)/);
     expect(err.message).not.toContain("SENTINEL");
+  });
+});
+
+describe("a runtime that refuses X25519 (FIPS)", () => {
+  function fipsRefusal(): never {
+    const e = new Error("SENTINEL-fips-text") as Error & { code: string };
+    e.code = "ERR_OSSL_EVP_UNSUPPORTED";
+    throw e;
+  }
+
+  it("fails each secret read with a message naming the restriction, not a bad key entry", async () => {
+    process.env.QUONFIG_KEYSET_TEST = V.positiveEnv.QUONFIG_KEYSET_TEST;
+    hooks.fips = 1;
+    hooks.privateKey = (real, ...args) => {
+      const k = args[0];
+      if (k && typeof k === "object" && Buffer.isBuffer(k.key) && k.format === "der") fipsRefusal();
+      return real(...args);
+    };
+    const plain = {
+      id: "p",
+      key: "plain",
+      type: "config",
+      valueType: "string",
+      sendToClientSdk: false,
+      default: {
+        rules: [
+          { criteria: [{ operator: "ALWAYS_TRUE" }], value: { type: "string", value: "ok" } },
+        ],
+      },
+    } as ConfigResponse;
+    const q = await client([plain, secret("fips.s", SHORT.ciphertext)]);
+    expect(q.getString("plain")).toBe("ok");
+    let err: any;
+    try {
+      q.getString("fips.s");
+    } catch (e) {
+      err = e;
+    }
+    expect(err?.name).toBe("QuonfigDecryptionError");
+    expect(err.code).toBe("decrypt_failed");
+    expect(err.message).toMatch(/refused X25519 \(ERR_OSSL_EVP_UNSUPPORTED\)/);
+    expect(err.message).toContain("FIPS mode is on");
+    expect(err.message).not.toMatch(/entry|not a qf1 private key|keyset_invalid/);
+    expect(err.message).not.toContain("SENTINEL");
+    expect(q.getString("fips.s", undefined, "D")).toBe("D");
+    // Not cached as a bad keyset: once the runtime allows X25519 the value reads.
+    hooks.privateKey = undefined;
+    hooks.fips = undefined;
+    expect(q.getString("fips.s")).toBe("hello");
+    await q.close();
   });
 });
