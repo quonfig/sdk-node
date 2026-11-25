@@ -1,0 +1,515 @@
+/**
+ * qf1 secrets: the READ side (decrypt, private key entries, keyset env vars).
+ *
+ * Normative spec: project/plans/secrets-qf1-spec.md (approved 2026-11-24).
+ *
+ *   qf1:<KEYSET>:<FINGERPRINT>:<base64url-no-pad(E || C || T)>
+ *
+ * X25519 (RFC 7748) + HKDF-SHA256 (RFC 5869, written out from HMAC) +
+ * AES-256-GCM, with the header `qf1:<KEYSET>:<FINGERPRINT>:` as AAD. The
+ * private key is found by (keyset name, fingerprint), never by trying keys.
+ * `node:crypto` only. The SDK never encrypts qf1; writers live in the CLI.
+ *
+ * Error text (spec 9.2): every message is `qf1 <class>: ...` and names
+ * keysets, fingerprints and entry positions only, never a key entry, any part
+ * of an env var value, the payload, the plaintext or any derived secret.
+ */
+
+import {
+  createDecipheriv,
+  createHash,
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  diffieHellman,
+} from "crypto";
+
+// ---- Constants (spec 5.1, 6.1) ----------------------------------------------
+
+const HKDF_INFO = Buffer.from("quonfig.com/qf1/X25519", "ascii");
+const OKM_LENGTH = 44;
+const TAG_LENGTH = 16;
+const MIN_PAYLOAD = 32 + TAG_LENGTH;
+const PRIVATE_KEY_PREFIX = "qf1-priv-";
+const ENTRY_BODY_CHARS = 43;
+
+/** Spec 2, a full-string match (JS `$` without the m flag is end of input). */
+export const KEYSET_NAME_RE = /^QUONFIG_KEYSET(?:_[A-Z0-9]+)*$/;
+const FINGERPRINT_RE = /^[0-9a-f]{8}$/;
+const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+const OTHER_VERSION_RE = /^qf[1-9][0-9]*:/;
+
+// ---- Errors (spec 9) ---------------------------------------------------------
+
+export type Qf1ErrorCode =
+  | "malformed"
+  | "unsupported_version"
+  | "invalid_keyset_name"
+  | "keyset_missing"
+  | "keyset_invalid"
+  | "key_not_held"
+  | "invalid_ephemeral_key"
+  | "decrypt_failed"
+  | "invalid_key_entry";
+
+/** Public facts an error may carry (spec 9.2): names, fingerprints, positions. */
+export interface Qf1ErrorFields {
+  keyset?: string;
+  fingerprint?: string;
+  held?: string[];
+  entry?: number;
+}
+
+/**
+ * A qf1 reader failure. This is sdk-node's unable-to-decrypt error for
+ * secrets: the message is `qf1 <code>: <detail>`.
+ */
+export class Qf1Error extends Error {
+  readonly code: Qf1ErrorCode;
+  readonly keyset?: string;
+  readonly fingerprint?: string;
+  readonly held?: string[];
+  readonly entry?: number;
+  /** The message after `qf1 <code>: `, kept so a cached failure can be rethrown with a config key. */
+  readonly detail: string;
+
+  constructor(code: Qf1ErrorCode, detail: string, fields: Qf1ErrorFields = {}) {
+    super(`qf1 ${code}: ${detail}`);
+    this.name = "Qf1Error";
+    this.code = code;
+    this.detail = detail;
+    if (fields.keyset !== undefined) this.keyset = fields.keyset;
+    if (fields.fingerprint !== undefined) this.fingerprint = fields.fingerprint;
+    if (fields.held !== undefined) this.held = fields.held;
+    if (fields.entry !== undefined) this.entry = fields.entry;
+  }
+
+  /** The same failure with ` (config "<key>")` appended. */
+  forConfig(configKey: string): Qf1Error {
+    return new Qf1Error(this.code, `${this.detail} (config "${configKey}")`, {
+      keyset: this.keyset,
+      fingerprint: this.fingerprint,
+      held: this.held,
+      entry: this.entry,
+    });
+  }
+}
+
+function fail(code: Qf1ErrorCode, detail: string, fields?: Qf1ErrorFields): never {
+  throw new Qf1Error(code, detail, fields);
+}
+
+/**
+ * Quote a writer-controlled name for an error (spec 9.2): at most 64
+ * characters, anything outside printable ASCII escaped.
+ */
+function quoteName(name: string): string {
+  const cut = name.length > 64 ? name.slice(0, 64) : name;
+  let out = "";
+  for (const ch of cut) {
+    const c = ch.codePointAt(0)!;
+    if (ch === '"' || ch === "\\") out += `\\${ch}`;
+    else if (c >= 0x20 && c < 0x7f) out += ch;
+    else out += `\\u{${c.toString(16)}}`;
+  }
+  return `"${out}"${name.length > 64 ? "..." : ""}`;
+}
+
+// ---- base64url (spec 3.4) ----------------------------------------------------
+
+/** Strict canonical unpadded base64url, or undefined. */
+function decodeBase64Url(text: string): Buffer | undefined {
+  if (text.length === 0 || text.length % 4 === 1 || !BASE64URL_RE.test(text)) return undefined;
+  const bytes = Buffer.from(text, "base64url");
+  // Canonical: the unused trailing bits are zero, so re-encoding gives the input.
+  if (bytes.toString("base64url") !== text) return undefined;
+  return bytes;
+}
+
+// ---- HKDF-SHA256 from HMAC (RFC 5869; spec 5.3) -----------------------------
+
+function hmacSha256(key: Uint8Array, data: Uint8Array): Buffer {
+  return createHmac("sha256", key).update(data).digest();
+}
+
+/** RFC 5869 2.2: PRK = HMAC-SHA256(salt, IKM). */
+export function hkdfExtract(salt: Uint8Array, ikm: Uint8Array): Buffer {
+  return hmacSha256(salt, ikm);
+}
+
+/** RFC 5869 2.3: T(i) = HMAC(PRK, T(i-1) || info || i); OKM = first `length` bytes. */
+export function hkdfExpand(prk: Uint8Array, info: Uint8Array, length: number): Buffer {
+  const blocks: Buffer[] = [];
+  let t: Buffer = Buffer.alloc(0);
+  for (let i = 1, filled = 0; filled < length; i++) {
+    t = hmacSha256(prk, Buffer.concat([t, info, Buffer.of(i)]));
+    blocks.push(t);
+    filled += t.length;
+  }
+  return Buffer.concat(blocks).subarray(0, length);
+}
+
+export interface DerivedKey {
+  salt: Buffer;
+  prk: Buffer;
+  okm: Buffer;
+  key: Buffer;
+  nonce: Buffer;
+}
+
+/** salt = E || pub_r (E as transmitted); K = OKM[0:32], N = OKM[32:44]. */
+export function deriveKeyAndNonce(
+  sharedSecret: Uint8Array,
+  ephemeralPublicKey: Uint8Array,
+  recipientPublicKey: Uint8Array
+): DerivedKey {
+  const salt = Buffer.concat([ephemeralPublicKey, recipientPublicKey]);
+  const prk = hkdfExtract(salt, sharedSecret);
+  const okm = hkdfExpand(prk, HKDF_INFO, OKM_LENGTH);
+  return { salt, prk, okm, key: okm.subarray(0, 32), nonce: okm.subarray(32, 44) };
+}
+
+// ---- X25519 (RFC 7748; spec 5.2) --------------------------------------------
+
+const PKCS8_X25519_PREFIX = Buffer.from("302e020100300506032b656e04220420", "hex");
+const SPKI_X25519_PREFIX = Buffer.from("302a300506032b656e032100", "hex");
+const BASE_POINT = Buffer.concat([Buffer.of(9), Buffer.alloc(31)]);
+
+/**
+ * X25519(scalar, u): OpenSSL clamps the scalar, masks the top bit of u and
+ * reduces a non-canonical u. Its refusal of an all-zero result
+ * (ERR_OSSL_FAILED_DURING_DERIVATION) is returned as 32 zero bytes, so the
+ * caller's all-zero check covers both behaviours; any other error propagates.
+ */
+export function x25519(scalar: Uint8Array, u: Uint8Array): Buffer {
+  const privateKey = createPrivateKey({
+    key: Buffer.concat([PKCS8_X25519_PREFIX, scalar]),
+    format: "der",
+    type: "pkcs8",
+  });
+  const publicKey = createPublicKey({
+    key: Buffer.concat([SPKI_X25519_PREFIX, u]),
+    format: "der",
+    type: "spki",
+  });
+  try {
+    return diffieHellman({ privateKey, publicKey });
+  } catch (err) {
+    if ((err as { code?: unknown })?.code === "ERR_OSSL_FAILED_DURING_DERIVATION") {
+      return Buffer.alloc(32);
+    }
+    throw err;
+  }
+}
+
+export function publicKeyFromPrivate(privateKey: Uint8Array): Buffer {
+  return x25519(privateKey, BASE_POINT);
+}
+
+function isAllZero(b: Uint8Array): boolean {
+  for (const x of b) if (x !== 0) return false;
+  return true;
+}
+
+// ---- Fingerprint and key entries (spec 4, 6.1) ------------------------------
+
+/** lowercase-hex(SHA-256(pub)[0:4]) over the raw 32-byte public key. */
+export function fingerprint(publicKey: Uint8Array): string {
+  return createHash("sha256").update(publicKey).digest("hex").slice(0, 8);
+}
+
+/** `qf1-priv-` + exactly 43 canonical base64url characters (32 raw bytes, unclamped). */
+export function parsePrivateKeyEntry(entry: string): Buffer {
+  const body = entry.startsWith(PRIVATE_KEY_PREFIX)
+    ? entry.slice(PRIVATE_KEY_PREFIX.length)
+    : undefined;
+  const bytes =
+    body !== undefined && body.length === ENTRY_BODY_CHARS ? decodeBase64Url(body) : undefined;
+  if (bytes === undefined || bytes.length !== 32) {
+    return fail(
+      "invalid_key_entry",
+      `a private key entry is "${PRIVATE_KEY_PREFIX}" followed by ${ENTRY_BODY_CHARS} canonical base64url characters`
+    );
+  }
+  return bytes;
+}
+
+// ---- The keyset env var (spec 6.2) ------------------------------------------
+
+export interface HeldKey {
+  privateKey: Buffer;
+  publicKey: Buffer;
+}
+
+/** ONLY space, tab, CR and LF; never the platform trim (it also strips VT, FF, NBSP, U+2028...). */
+const ENV_STRIP_RE = /^[ \t\r\n]+|[ \t\r\n]+$/g;
+
+/**
+ * Parse a keyset env var value (`undefined` = unset) into fingerprint -> key.
+ * Entries with the same public key collapse; two different public keys with
+ * one fingerprint make the whole keyset invalid.
+ */
+export function parseKeysetEnv(keyset: string, raw: string | undefined): Map<string, HeldKey> {
+  if (raw === undefined) {
+    return fail("keyset_missing", `this runtime has no ${keyset}`, { keyset });
+  }
+  const entries = raw
+    .split(",")
+    .map((piece) => piece.replace(ENV_STRIP_RE, ""))
+    .filter((piece) => piece.length > 0);
+  if (entries.length === 0) {
+    return fail("keyset_missing", `${keyset} is set but holds no keys`, { keyset });
+  }
+
+  const held = new Map<string, HeldKey>();
+  entries.forEach((entry, index) => {
+    let privateKey: Buffer;
+    try {
+      privateKey = parsePrivateKeyEntry(entry);
+    } catch (err) {
+      if (!(err instanceof Qf1Error)) throw err;
+      return fail("keyset_invalid", `${keyset} entry ${index + 1} is not a qf1 private key`, {
+        keyset,
+        entry: index + 1,
+      });
+    }
+    const publicKey = publicKeyFromPrivate(privateKey);
+    const fp = fingerprint(publicKey);
+    const existing = held.get(fp);
+    if (existing !== undefined) {
+      if (existing.publicKey.equals(publicKey)) return; // one key, written twice or clamp-equivalent
+      return fail("keyset_invalid", `${keyset} holds two different keys with fingerprint ${fp}`, {
+        keyset,
+        fingerprint: fp,
+      });
+    }
+    held.set(fp, { privateKey, publicKey });
+  });
+  return held;
+}
+
+/**
+ * Process-wide cache of parsed keysets (spec 6.2, decision 33), keyed by the
+ * env var's name and current value: a keyset is parsed (one X25519 per key)
+ * once per distinct value, and a changed value is re-parsed. A failure is
+ * cached the same way and rethrown fresh.
+ */
+export class KeysetCache {
+  private entries = new Map<
+    string,
+    { raw: string | undefined; held?: Map<string, HeldKey>; error?: Qf1Error }
+  >();
+
+  get(keyset: string, raw: string | undefined): Map<string, HeldKey> {
+    let entry = this.entries.get(keyset);
+    if (entry === undefined || entry.raw !== raw) {
+      try {
+        entry = { raw, held: parseKeysetEnv(keyset, raw) };
+      } catch (err) {
+        if (!(err instanceof Qf1Error)) throw err;
+        entry = { raw, error: err };
+      }
+      this.entries.set(keyset, entry);
+    }
+    if (entry.error !== undefined) {
+      const e = entry.error;
+      throw new Qf1Error(e.code, e.detail, {
+        keyset: e.keyset,
+        fingerprint: e.fingerprint,
+        held: e.held,
+        entry: e.entry,
+      });
+    }
+    return entry.held!;
+  }
+}
+
+// ---- The ciphertext string (spec 3) -----------------------------------------
+
+export interface Qf1Parsed {
+  keyset: string;
+  fingerprint: string;
+  ephemeralPublicKey: Buffer;
+  ciphertextAndTag: Buffer;
+  aad: Buffer;
+}
+
+/** AAD = ASCII `qf1:<KEYSET>:<FINGERPRINT>:` (spec 5.4). */
+export function aadFor(keyset: string, fp: string): Buffer {
+  return Buffer.from(`qf1:${keyset}:${fp}:`, "latin1");
+}
+
+/** Spec 3.5, in order; the first failing step decides the class. */
+export function parseQf1(value: unknown): Qf1Parsed {
+  if (typeof value !== "string") {
+    return fail("malformed", "the stored value is not a string");
+  }
+  if (!value.startsWith("qf1:")) {
+    const version = OTHER_VERSION_RE.exec(value);
+    if (version !== null) {
+      return fail(
+        "unsupported_version",
+        `the value uses format ${quoteName(version[0].slice(0, -1))}; this SDK reads qf1`
+      );
+    }
+    return fail("malformed", 'the value does not start with "qf1:"');
+  }
+
+  const fields = value.split(":");
+  if (fields.length !== 4) {
+    return fail(
+      "malformed",
+      `a qf1 value has 4 colon-separated fields, this one has ${fields.length}`
+    );
+  }
+  const [, keyset, fp, payloadText] = fields as [string, string, string, string];
+
+  if (!KEYSET_NAME_RE.test(keyset)) {
+    return fail(
+      "invalid_keyset_name",
+      `keyset name ${quoteName(keyset)} does not match ${KEYSET_NAME_RE.source}`
+    );
+  }
+  if (!FINGERPRINT_RE.test(fp)) {
+    return fail(
+      "malformed",
+      `the fingerprint field is not 8 lowercase hex characters (keyset ${keyset})`
+    );
+  }
+  const payload = decodeBase64Url(payloadText);
+  if (payload === undefined) {
+    return fail(
+      "malformed",
+      `the payload is not canonical unpadded base64url (keyset ${keyset} fingerprint ${fp})`
+    );
+  }
+  if (payload.length < MIN_PAYLOAD) {
+    return fail(
+      "malformed",
+      `the payload is ${payload.length} bytes, below the ${MIN_PAYLOAD}-byte minimum (keyset ${keyset} fingerprint ${fp})`
+    );
+  }
+  const ephemeralPublicKey = payload.subarray(0, 32);
+  if ((ephemeralPublicKey[31]! & 0x80) !== 0) {
+    return fail(
+      "malformed",
+      `the ephemeral key has its top bit set (keyset ${keyset} fingerprint ${fp})`
+    );
+  }
+  return {
+    keyset,
+    fingerprint: fp,
+    ephemeralPublicKey,
+    ciphertextAndTag: payload.subarray(32),
+    aad: aadFor(keyset, fp),
+  };
+}
+
+// ---- Decrypt (spec 8) ---------------------------------------------------------
+
+const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+export interface DecryptOptions {
+  /** Appended to every error as ` (config "<key>")`. */
+  configKey?: string;
+  /** Reuse parsed keysets; without one each call parses its keyset afresh. */
+  cache?: KeysetCache;
+}
+
+/**
+ * Decrypt a stored qf1 value. `lookupEnv` is asked for exactly one name, the
+ * keyset in the header, and only after that name passed spec 2.
+ */
+export function decryptQf1(
+  value: unknown,
+  lookupEnv: (name: string) => string | undefined,
+  options: DecryptOptions = {}
+): string {
+  try {
+    return decryptInner(value, lookupEnv, options.cache);
+  } catch (err) {
+    if (err instanceof Qf1Error && options.configKey !== undefined) {
+      throw err.forConfig(options.configKey);
+    }
+    throw err;
+  }
+}
+
+function decryptInner(
+  value: unknown,
+  lookupEnv: (name: string) => string | undefined,
+  cache: KeysetCache | undefined
+): string {
+  const parsed = parseQf1(value);
+  const { keyset, fingerprint: fp } = parsed;
+
+  const raw = lookupEnv(keyset);
+  let held: Map<string, HeldKey>;
+  try {
+    held = cache !== undefined ? cache.get(keyset, raw) : parseKeysetEnv(keyset, raw);
+  } catch (err) {
+    if (err instanceof Qf1Error && err.code === "keyset_missing") {
+      throw new Qf1Error(
+        "keyset_missing",
+        `value is encrypted to ${keyset} fingerprint ${fp}; ${err.detail}`,
+        { keyset, fingerprint: fp }
+      );
+    }
+    throw err;
+  }
+
+  const key = held.get(fp);
+  if (key === undefined) {
+    const heldFps = [...held.keys()].sort();
+    return fail(
+      "key_not_held",
+      `value is encrypted to ${keyset} fingerprint ${fp}; this runtime holds ${keyset} fingerprints [${heldFps.join(", ")}]`,
+      { keyset, fingerprint: fp, held: heldFps }
+    );
+  }
+
+  const shared = x25519(key.privateKey, parsed.ephemeralPublicKey);
+  if (isAllZero(shared)) {
+    return fail(
+      "invalid_ephemeral_key",
+      `the value's ephemeral key gives an all-zero shared secret (${keyset} fingerprint ${fp})`,
+      { keyset, fingerprint: fp }
+    );
+  }
+
+  const { key: aesKey, nonce } = deriveKeyAndNonce(
+    shared,
+    parsed.ephemeralPublicKey,
+    key.publicKey
+  );
+  const body = parsed.ciphertextAndTag;
+  let plaintext: Buffer;
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", aesKey, nonce, { authTagLength: TAG_LENGTH });
+    decipher.setAAD(parsed.aad);
+    decipher.setAuthTag(body.subarray(body.length - TAG_LENGTH));
+    // Nothing is released until final() has verified the tag.
+    plaintext = Buffer.concat([
+      decipher.update(body.subarray(0, body.length - TAG_LENGTH)),
+      decipher.final(),
+    ]);
+  } catch {
+    return fail(
+      "decrypt_failed",
+      `authentication failed for a value encrypted to ${keyset} fingerprint ${fp}`,
+      { keyset, fingerprint: fp }
+    );
+  }
+
+  try {
+    return STRICT_UTF8.decode(plaintext);
+  } catch {
+    return fail(
+      "decrypt_failed",
+      `the decrypted value is not valid UTF-8 (${keyset} fingerprint ${fp})`,
+      { keyset, fingerprint: fp }
+    );
+  } finally {
+    plaintext.fill(0);
+  }
+}
