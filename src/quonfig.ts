@@ -2302,7 +2302,9 @@ export class Quonfig {
     if (this.closed) return;
     if (!this.datadir) return;
     try {
-      const envelope = loadEnvelopeFromDatadir(this.datadir, this.requestedEnvironment);
+      const envelope = loadEnvelopeFromDatadir(this.datadir, this.requestedEnvironment, (m) =>
+        this.logger.warn(m)
+      );
       this.installEnvelope(envelope);
     } catch (err) {
       this.logger.warn("[quonfig] datadir reload failed; keeping previous envelope:", err);
@@ -2517,7 +2519,9 @@ export class Quonfig {
 
   private loadLocalEnvelope(): ConfigEnvelope {
     if (this.datadir) {
-      return loadEnvelopeFromDatadir(this.datadir, this.requestedEnvironment);
+      return loadEnvelopeFromDatadir(this.datadir, this.requestedEnvironment, (m) =>
+        this.logger.warn(m)
+      );
     }
 
     if (typeof this.datafile === "string") {
