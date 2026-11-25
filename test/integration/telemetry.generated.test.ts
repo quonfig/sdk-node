@@ -4,7 +4,36 @@
 // Source: integration-test-data/generators/src/targets/node.ts
 
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
 import { collectTelemetry, telemetryPost, TELEMETRY_PROBE_KEY } from "./setup";
+
+async function withEnvResult<T>(vars: Record<string, string>, fn: () => Promise<T>): Promise<T> {
+  const prev: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(vars)) {
+    prev[k] = process.env[k];
+    process.env[k] = v;
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+function qf1TestKeyset(...labels: string[]): string {
+  return labels
+    .map(
+      (label) =>
+        "qf1-priv-" +
+        createHash("sha256")
+          .update("qf1 test vector private key: " + label, "utf8")
+          .digest("base64url")
+    )
+    .join(",");
+}
 
 describe("telemetry", () => {
   it("reason is STATIC for config with no targeting rules", async () => {
@@ -407,20 +436,32 @@ describe("telemetry", () => {
     ]);
   });
 
-  it("confidential encrypted string is redacted using ciphertext hash", async () => {
+  it("qf1 secret is redacted using the ciphertext hash and reported as a secret", async () => {
     const observed = new Map<string, unknown>();
-    const posted = await collectTelemetry({}, (client) => {
-      observed.set("a.secret.config", client.get("a.secret.config"));
-    });
+    const posted = await withEnvResult(
+      {
+        QUONFIG_KEYSET: qf1TestKeyset("QUONFIG_KEYSET/1"),
+        QUONFIG_KEYSETX: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST: qf1TestKeyset("QUONFIG_KEYSET_TEST/1"),
+        QUONFIG_KEYSET_TEST_PROD: qf1TestKeyset(
+          "QUONFIG_KEYSET_TEST_PROD/new",
+          "QUONFIG_KEYSET_TEST_PROD/old"
+        ),
+      },
+      () =>
+        collectTelemetry({}, (client) => {
+          observed.set("qf1.secret.short", client.get("qf1.secret.short"));
+        })
+    );
     expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
       {
-        key: "a.secret.config",
-        type: "CONFIG",
-        value: "hello.world",
+        key: "qf1.secret.short",
+        type: "SECRET",
+        value: "hello",
         value_type: "string",
         count: 1,
         reason: 1,
-        selected_value: { string: "*****936c9" },
+        selected_value: { string: "*****73985" },
         summary: { config_row_index: 0, conditional_value_index: 0 },
       },
     ]);
@@ -480,6 +521,26 @@ describe("telemetry", () => {
         reason: 1,
         selected_value: { int: 1234 },
         summary: { config_row_index: 0, conditional_value_index: 0 },
+      },
+    ]);
+  });
+
+  it("weighted ENV_VAR variant is reported as its resolved value with reason SPLIT", async () => {
+    const observed = new Map<string, unknown>();
+    const posted = await collectTelemetry({}, (client) => {
+      const scope = client.withContext({ user: { tracking_id: "92a202f2" } });
+      observed.set("weighted.variant.provided.int", scope.get("weighted.variant.provided.int"));
+    });
+    expect(telemetryPost(posted, "evaluation_summary", observed)).toEqual([
+      {
+        key: "weighted.variant.provided.int",
+        type: "CONFIG",
+        value: 1234,
+        value_type: "int",
+        count: 1,
+        reason: 3,
+        selected_value: { int: 1234 },
+        summary: { config_row_index: 0, conditional_value_index: 0, weighted_value_index: 0 },
       },
     ]);
   });
