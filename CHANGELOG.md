@@ -12,8 +12,10 @@ Secrets in the `qf1` format (qfg-8seuf.8). Version number not decided yet.
   fingerprint. Parsed keysets and decrypted values are cached, and re-derived when the keyset
   variable's value or the stored ciphertext changes. See the README "Secrets" section.
 - Datadir mode loads `secrets/` after `configs/`, `feature-flags/`, `segments/` and `log-levels/`,
-  so a secret replaces a same-key document in `configs/`. Over the wire, `type: "secret"` entries
-  behave like configs for every getter.
+  so a secret replaces a same-key document in `configs/`. A file in `secrets/` that is not a secret
+  document is skipped with one warning naming its path (startup does not fail, since earlier
+  releases never opened `secrets/`); `configs/` and the other directories are unchanged. Over the
+  wire, `type: "secret"` entries behave like configs for every getter.
 - A value that cannot be decrypted fails only that read (your default, else `onNoDefault`), never
   startup. Its error message starts with `qf1 <class>:` and names keysets and fingerprints, never
   key material, the payload or the plaintext. The encrypted string is never returned as the value.

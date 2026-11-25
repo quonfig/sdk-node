@@ -139,13 +139,14 @@ QUONFIG_KEYSET_PROD="qf1-priv-...,qf1-priv-..." # during a rotation: old and new
   the variable's value changes.
 
 **When a value cannot be decrypted** (the keyset variable is not set, it holds no key with the
-value's fingerprint, it is malformed, or the value is corrupt), only that read fails. Startup does
-not fail, and other configs and secrets on other keysets still work. The read behaves like any other
-unresolvable value: your default is returned, else `onNoDefault` applies, and the `*Details` getters
-report `reason: "ERROR"` with `errorCode: "GENERAL"`. The encrypted string is never returned as the
-value. The error message starts with `qf1 <class>:` (`keyset_missing`, `key_not_held`,
-`keyset_invalid`, `malformed`, `decrypt_failed`, ...) and names the keyset and the fingerprints
-needed and held. It never contains a key, the encrypted payload or the plaintext.
+value's fingerprint, it is malformed, the value is corrupt, or the runtime's crypto library refuses
+X25519, as a FIPS-restricted OpenSSL does), only that read fails. Startup does not fail, and other
+configs and secrets on other keysets still work. The read behaves like any other unresolvable value:
+your default is returned, else `onNoDefault` applies, and the `*Details` getters report
+`reason: "ERROR"` with `errorCode: "GENERAL"`. The encrypted string is never returned as the value.
+The error message starts with `qf1 <class>:` (`keyset_missing`, `key_not_held`, `keyset_invalid`,
+`malformed`, `decrypt_failed`, ...) and names the keyset and the fingerprints needed and held. It
+never contains a key, the encrypted payload or the plaintext.
 
 **Telemetry** reports a secret evaluation with type `secret` and a redacted value (`*****` plus a
 short hash of the stored encrypted string), never the plaintext.
@@ -154,7 +155,9 @@ short hash of the stored encrypted string), never the plaintext.
 format, a `configs/` value decrypted with a key held in another config) now fails to resolve with an
 error that mentions `decryptWith`. Move such values to `secrets/` with the CLI. In datadir mode a
 document in `secrets/` replaces a document with the same key in `configs/`, so a workspace can carry
-both copies while it migrates.
+both copies while it migrates. A file in `secrets/` that is not a secret document (invalid JSON, no
+`key`, a directory named `*.json`) is skipped with one warning that names its path; other files and
+subdirectories are ignored.
 
 **Detecting the error.** Every secret read failure has `err.name === "QuonfigDecryptionError"` and
 an `err.code`: the qf1 class (`keyset_missing`, `key_not_held`, ...) or
