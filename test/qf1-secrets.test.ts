@@ -17,6 +17,7 @@ import { ConfigStore } from "../src/store";
 import { Evaluator } from "../src/evaluator";
 import { Resolver } from "../src/resolver";
 import type { ConfigResponse, QuonfigOptions, Value } from "../src/types";
+import { spyOnSendTelemetry } from "./helpers/telemetrySpy";
 
 const VECTORS_PATH = resolve(
   __dirname,
@@ -40,17 +41,29 @@ function keysetVarNames(): string[] {
   return Object.keys(process.env).filter((k) => k.startsWith("QUONFIG_KEYSET"));
 }
 
+/** Every env name any vector sets (HOME, a lowercase name, one with a newline...). */
+const VECTOR_ENV_NAMES: string[] = [
+  ...new Set<string>([
+    ...Object.keys(V.positiveEnv),
+    ...[...V.negative, ...V.decryptOnly].flatMap((c: any) => Object.keys(c.env ?? {})),
+  ]),
+];
+const ORIGINAL_ENV: Record<string, string | undefined> = Object.fromEntries(
+  VECTOR_ENV_NAMES.map((k) => [k, process.env[k]])
+);
+
 beforeEach(() => {
   saved = {};
-  for (const k of keysetVarNames()) {
-    saved[k] = process.env[k];
-    delete process.env[k];
-  }
+  for (const k of new Set([...keysetVarNames(), ...VECTOR_ENV_NAMES])) saved[k] = process.env[k];
+  for (const k of keysetVarNames()) delete process.env[k];
 });
 
 afterEach(() => {
-  for (const k of keysetVarNames()) delete process.env[k];
-  for (const [k, v] of Object.entries(saved)) if (v !== undefined) process.env[k] = v;
+  for (const k of keysetVarNames()) if (!(k in saved)) delete process.env[k];
+  for (const [k, v] of Object.entries(saved)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
 });
 
 function setEnv(env: Record<string, string>): void {
@@ -262,6 +275,51 @@ describe("decryptWith values are no longer read (R1)", () => {
     });
   }
 
+  const NON_STRING_SHAPES: Array<[string, unknown]> = [
+    ["a number", 7],
+    ["an array", ["old.key"]],
+    ["an object", { k: 1 }],
+    ["true", true],
+    ["a non-empty string", "old.key"],
+  ];
+
+  for (const [label, shape] of NON_STRING_SHAPES) {
+    it(`decryptWith as ${label} fails over the wire without reading the key config`, async () => {
+      const value = { type: "string", value: "stored", decryptWith: shape } as unknown as Value;
+      const client = await wireClient([keyConfig, doc("dw", "config", value)]);
+      const get = vi.spyOn((client as any).store, "get");
+      const err = errorOf(() => client.getString("dw"));
+      expect(err.message).toMatch(/\bdecryptWith\b/);
+      expect(get.mock.calls.map((c) => c[0])).not.toContain("old.key");
+      expect(client.getString("dw", undefined, "D")).toBe("D");
+      await client.close();
+    });
+  }
+
+  for (const [label, shape] of [
+    ["undefined", undefined],
+    ["null", null],
+    ["the empty string", ""],
+  ] as Array<[string, unknown]>) {
+    it(`decryptWith as ${label} is no decryptWith at all`, async () => {
+      const value = { type: "string", value: "plain", decryptWith: shape } as unknown as Value;
+      const client = await wireClient([doc("dw", "config", value)]);
+      expect(client.getString("dw")).toBe("plain");
+      await client.close();
+    });
+  }
+
+  it("the refusal has name QuonfigDecryptionError and code decrypt_with_not_supported", async () => {
+    const client = await wireClient([
+      doc("dw", "config", { type: "string", value: "x", decryptWith: "old.key" }),
+    ]);
+    const err = errorOf(() => client.getString("dw")) as Error & { code?: string };
+    expect(err.name).toBe("QuonfigDecryptionError");
+    expect(err.code).toBe("decrypt_with_not_supported");
+    expect(Object.keys(err)).toEqual(["code"]);
+    await client.close();
+  });
+
   it("never looks up the decryptWith key config", async () => {
     const store = new ConfigStore();
     const value: Value = {
@@ -364,6 +422,24 @@ describe("datadir: secrets/ is loaded last", () => {
     await client.close();
   });
 
+  for (const shape of [7, ["k"], { k: 1 }, true, "k"] as unknown[]) {
+    it(`a configs/ value with decryptWith ${JSON.stringify(shape)} fails`, async () => {
+      write("configs", doc("k", "config", { type: "string", value: "the-key" }));
+      write(
+        "configs",
+        doc("dw", "config", {
+          type: "string",
+          value: "stored",
+          decryptWith: shape,
+        } as unknown as Value)
+      );
+      const client = await datadirClient();
+      expect(() => client.getString("dw")).toThrow(/\bdecryptWith\b/);
+      expect(client.getString("dw", undefined, "D")).toBe("D");
+      await client.close();
+    });
+  }
+
   it("boots with no keyset and serves configs/ while a secret get fails", async () => {
     write("configs", PLAIN);
     write("secrets", secret("s", SHORT.ciphertext));
@@ -420,6 +496,7 @@ describe("telemetry redaction", () => {
 
   it("the evaluation is reported with type secret", async () => {
     setEnv(V.positiveEnv);
+    const { payloads } = spyOnSendTelemetry();
     const client = await wireClient([secret("s", SHORT.ciphertext)], {
       collectEvaluationSummaries: true,
     });
@@ -435,6 +512,12 @@ describe("telemetry redaction", () => {
     expect(pushed[0].configType).toBe("secret");
     expect(pushed[0].reportableValue).toBe(md5Redaction(SHORT.ciphertext));
     await client.close();
+    const summaries = payloads().flatMap((p: any) =>
+      p.events.flatMap((e: any) => e.summaries?.summaries ?? [])
+    );
+    expect(summaries.map((x: any) => [x.key, x.type])).toEqual([["s", "secret"]]);
+    expect(JSON.stringify(payloads())).not.toContain("hello");
+    vi.restoreAllMocks();
   });
 });
 
@@ -503,5 +586,14 @@ describe("deprecated old-format exports still work", () => {
   it("the encryption namespace still encrypts", () => {
     const key = sdk.encryption.generateNewHexKey();
     expect(sdk.decrypt(sdk.encryption.encrypt("ns", key), key)).toBe("ns");
+  });
+});
+
+// Must stay last in this file: every env name a vector set is back as it was.
+describe("env hygiene", () => {
+  it("restores every env name the vectors set", () => {
+    expect(VECTOR_ENV_NAMES).toContain("HOME");
+    for (const k of VECTOR_ENV_NAMES)
+      expect(process.env[k], JSON.stringify(k)).toBe(ORIGINAL_ENV[k]);
   });
 });

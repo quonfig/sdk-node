@@ -1,7 +1,7 @@
 import type { ConfigTypeString, Contexts, GetValue, Value, ValueType } from "./types";
 import type { ConfigStore } from "./store";
 import type { Evaluator } from "./evaluator";
-import { KeysetCache, Qf1Error, decryptQf1 } from "./qf1";
+import { KeysetCache, Qf1Error, QuonfigDecryptionError, decryptQf1 } from "./qf1";
 import { InvalidDurationError, parseDurationMillis } from "./duration";
 import { createHash } from "crypto";
 
@@ -25,13 +25,15 @@ function makeConfidential(secret: string): string {
 const KEYSETS = new KeysetCache();
 
 /**
- * Decrypted secrets, per stored value object. Stored values are replaced, never
- * mutated, on each install, so an entry dies with its config; it is reused
- * only while the keyset env var still holds the value it was decrypted with.
+ * Decrypted secrets, keyed by the STORED value object (`EvalMatch.storedValue`:
+ * the evaluator hands the resolver a copy, so the copy is no key). An entry is
+ * reused only while the stored ciphertext and the keyset env var's value are
+ * both what it was decrypted from; installs replace stored values, so entries
+ * die with their config.
  */
 const DECRYPTED = new WeakMap<
-  Value,
-  { keyset: string; raw: string | undefined; resolved: Value }
+  object,
+  { ciphertext: string; keyset: string; raw: string | undefined; resolved: Value }
 >();
 
 /**
@@ -42,26 +44,31 @@ const DECRYPTED = new WeakMap<
  */
 function resolveSecret(
   val: Value,
-  configKey: string
+  configKey: string,
+  cacheKey: object
 ): { resolved: Value; reportableValue: GetValue } {
-  if (val.type !== "string") {
+  if (val.type !== "string" || typeof val.value !== "string") {
     throw new Qf1Error(
       "malformed",
-      `a secret value has type "string", this one has type "${String(val.type)}" (config "${configKey}")`
+      `a secret value is a string, this one has type "${String(val.type)}" (config "${configKey}")`
     );
   }
-  const stored = String(val.value);
-  const reportableValue = makeConfidential(stored);
+  const ciphertext = val.value;
+  const reportableValue = makeConfidential(ciphertext);
 
-  const cached = DECRYPTED.get(val);
-  if (cached !== undefined && process.env[cached.keyset] === cached.raw) {
+  const cached = DECRYPTED.get(cacheKey);
+  if (
+    cached !== undefined &&
+    cached.ciphertext === ciphertext &&
+    process.env[cached.keyset] === cached.raw
+  ) {
     return { resolved: cached.resolved, reportableValue };
   }
 
   let keyset: string | undefined;
   let raw: string | undefined;
   const plaintext = decryptQf1(
-    val.value,
+    ciphertext,
     (name) => {
       keyset = name;
       raw = process.env[name];
@@ -70,7 +77,7 @@ function resolveSecret(
     { configKey, cache: KEYSETS }
   );
   const resolved: Value = { type: "string", value: plaintext, confidential: true };
-  DECRYPTED.set(val, { keyset: keyset!, raw, resolved });
+  DECRYPTED.set(cacheKey, { ciphertext, keyset: keyset!, raw, resolved });
   return { resolved, reportableValue };
 }
 
@@ -101,6 +108,9 @@ export class Resolver {
    *
    * A value that still carries `decryptWith` (the old secrets format) is an
    * error: this SDK no longer reads it (spec 13.3 R1).
+   *
+   * `storedValue` is the installed value object `val` was copied from; it keys
+   * the decrypted-secret cache (without it, `val` itself is the key).
    */
   resolveValue(
     val: Value,
@@ -108,16 +118,21 @@ export class Resolver {
     valueType: ValueType,
     envID: string,
     contexts: Contexts,
-    configType?: ConfigTypeString
+    configType?: ConfigTypeString,
+    storedValue?: object
   ): { resolved: Value; reportableValue?: GetValue } {
-    if (typeof val.decryptWith === "string" && val.decryptWith !== "") {
-      throw new Error(
+    // Any decryptWith other than undefined, null or "" is the old format,
+    // whatever its JSON type (spec 13.3 R1). No key config is read.
+    const decryptWith: unknown = val.decryptWith;
+    if (decryptWith !== undefined && decryptWith !== null && decryptWith !== "") {
+      throw new QuonfigDecryptionError(
+        "decrypt_with_not_supported",
         `config "${configKey}" has a value that carries decryptWith, the old secrets format, which this SDK no longer reads; store it as a qf1 secret in secrets/`
       );
     }
 
     if (configType === "secret") {
-      return resolveSecret(val, configKey);
+      return resolveSecret(val, configKey, storedValue ?? val);
     }
 
     // Handle provided values (ENV_VAR)
